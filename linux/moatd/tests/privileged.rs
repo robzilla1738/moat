@@ -15,7 +15,8 @@ use moatd::launch::{spawn, BrokerIsolation, LaunchSpec};
 const NOBODY: u32 = 65534;
 
 fn enabled() -> bool {
-    let on = std::env::var("MOAT_PRIV_TESTS").is_ok() && nix::unistd::getuid().is_root() && moatd::cgroup::is_cgroup2("/sys/fs/cgroup".as_ref());
+    let on =
+        std::env::var("MOAT_PRIV_TESTS").is_ok() && nix::unistd::getuid().is_root() && moatd::cgroup::is_cgroup2("/sys/fs/cgroup".as_ref());
     if !on {
         eprintln!("skipping: set MOAT_PRIV_TESTS=1 and run as root on a cgroup v2 host");
     }
@@ -66,7 +67,13 @@ fn placed_in_cgroup_before_exec_and_children_inherit() {
         return;
     }
     let c = cg("inherit");
-    let (out, code) = run_in_session(&c, "s1", &["/bin/sh", "-c", "cat /proc/self/cgroup; sh -c 'cat /proc/self/cgroup'"], BrokerIsolation::default(), BTreeMap::new());
+    let (out, code) = run_in_session(
+        &c,
+        "s1",
+        &["/bin/sh", "-c", "cat /proc/self/cgroup; sh -c 'cat /proc/self/cgroup'"],
+        BrokerIsolation::default(),
+        BTreeMap::new(),
+    );
     assert_eq!(code, 0, "{out}");
     let lines: Vec<&str> = out.lines().collect();
     assert_eq!(lines.len(), 2, "{out}");
@@ -99,7 +106,13 @@ fn no_new_privs_and_uid_drop() {
         return;
     }
     let c = cg("nnp");
-    let (out, _) = run_in_session(&c, "n1", &["/bin/sh", "-c", "grep -E '^(NoNewPrivs|Uid|Groups):' /proc/self/status"], BrokerIsolation::default(), BTreeMap::new());
+    let (out, _) = run_in_session(
+        &c,
+        "n1",
+        &["/bin/sh", "-c", "grep -E '^(NoNewPrivs|Uid|Groups):' /proc/self/status"],
+        BrokerIsolation::default(),
+        BTreeMap::new(),
+    );
     assert!(out.contains("NoNewPrivs:\t1"), "{out}");
     assert!(out.lines().any(|l| l.starts_with("Uid:") && l.split_whitespace().skip(1).all(|u| u == "65534")), "{out}");
     assert!(out.lines().any(|l| l.trim() == "Groups:"), "supplementary groups dropped: {out}");

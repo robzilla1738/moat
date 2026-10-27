@@ -139,7 +139,8 @@ fn launch<B: NftBackend + Send + 'static>(
                     cgroup: cg.rel.clone(),
                     started_at: Utc::now(),
                 };
-                let _ = send(&s, &Reply::Started { session_id: id.clone(), pid, cgroup: cg.rel.clone(), boundary: "linux_cgroup".into() }, &[]);
+                let _ =
+                    send(&s, &Reply::Started { session_id: id.clone(), pid, cgroup: cg.rel.clone(), boundary: "linux_cgroup".into() }, &[]);
                 e.register_session(info, cg);
                 (id, child)
             }

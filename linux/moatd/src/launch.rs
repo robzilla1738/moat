@@ -41,10 +41,12 @@ impl BrokerIsolation {
     }
 }
 
-pub const CONTAINER_SOCKETS: [&str; 4] = ["/run/docker.sock", "/var/run/docker.sock", "/run/podman/podman.sock", "/run/containerd/containerd.sock"];
+pub const CONTAINER_SOCKETS: [&str; 4] =
+    ["/run/docker.sock", "/var/run/docker.sock", "/run/podman/podman.sock", "/run/containerd/containerd.sock"];
 
 /// Environment variables never passed into a protected session.
-pub const STRIPPED_ENV: [&str; 6] = ["DBUS_SESSION_BUS_ADDRESS", "SSH_AUTH_SOCK", "DOCKER_HOST", "LD_PRELOAD", "LD_LIBRARY_PATH", "MOAT_SESSION_TOKEN"];
+pub const STRIPPED_ENV: [&str; 6] =
+    ["DBUS_SESSION_BUS_ADDRESS", "SSH_AUTH_SOCK", "DOCKER_HOST", "LD_PRELOAD", "LD_LIBRARY_PATH", "MOAT_SESSION_TOKEN"];
 
 #[derive(Debug)]
 pub struct LaunchSpec {
@@ -148,7 +150,14 @@ pub fn spawn(spec: LaunchSpec) -> std::io::Result<Child> {
                 let tmpfs = c"tmpfs";
                 let opts = c"mode=000,size=4k";
                 for d in &hide_dirs {
-                    if libc::mount(tmpfs.as_ptr(), d.as_ptr(), tmpfs.as_ptr(), libc::MS_RDONLY | libc::MS_NOSUID | libc::MS_NODEV | libc::MS_NOEXEC, opts.as_ptr().cast()) != 0 {
+                    if libc::mount(
+                        tmpfs.as_ptr(),
+                        d.as_ptr(),
+                        tmpfs.as_ptr(),
+                        libc::MS_RDONLY | libc::MS_NOSUID | libc::MS_NODEV | libc::MS_NOEXEC,
+                        opts.as_ptr().cast(),
+                    ) != 0
+                    {
                         return Err(errno("hide broker directory"));
                     }
                 }

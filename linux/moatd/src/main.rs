@@ -134,27 +134,31 @@ fn run(cli: Cli) -> Result<(), String> {
             Ok(())
         }
         Cmd::Status => {
-            let s = std::os::unix::net::UnixStream::connect(&cli.socket).map_err(|e| format!("daemon not reachable at {}: {e}", cli.socket.display()))?;
+            let s = std::os::unix::net::UnixStream::connect(&cli.socket)
+                .map_err(|e| format!("daemon not reachable at {}: {e}", cli.socket.display()))?;
             send(&s, &Request::Status, &[]).map_err(|e| e.to_string())?;
-            for r in replies(&s) {
-                if let Reply::Status { status } = r {
-                    println!("{}", serde_json::to_string_pretty(&status).unwrap());
-                }
-                break;
+            if let Some(Reply::Status { status }) = replies(&s).next() {
+                println!("{}", serde_json::to_string_pretty(&status).unwrap());
             }
             Ok(())
         }
         Cmd::Capabilities { cgroup_mount } => {
+            if nix::unistd::getuid().is_root() {
+                let _ = Cgroups { mount: cgroup_mount.clone(), root_name: "moat.slice".into() }.ensure_profiles(&[]);
+            }
             let facts = moatd::probe::gather(&cgroup_mount, "moat.slice", "nft");
             let adv = moatd::probe::advertise(&facts);
             println!("{}", serde_json::to_string_pretty(&serde_json::json!({"host": facts, "advertisement": adv})).unwrap());
             Ok(())
         }
         Cmd::Render { signed, device_id } => {
-            let s: moat_core::signing::SignedSnapshot = serde_json::from_str(&fs::read_to_string(&signed).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+            let s: moat_core::signing::SignedSnapshot =
+                serde_json::from_str(&fs::read_to_string(&signed).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
             let trust = moatd::endpoint::load_trust(&cli.state.join("trusted"));
-            let snap = moat_core::signing::verify_snapshot(&s, &trust, moat_core::Platform::Linux, None, chrono::Utc::now()).map_err(|e| e.to_string())?;
-            let (rules, rep) = nft::render(&snap, &device_id, &nft::CgroupLayout::default(), &moatd::endpoint::lookup_uid).map_err(|e| e.0)?;
+            let snap = moat_core::signing::verify_snapshot(&s, &trust, moat_core::Platform::Linux, None, chrono::Utc::now())
+                .map_err(|e| e.to_string())?;
+            let (rules, rep) =
+                nft::render(&snap, &device_id, &nft::CgroupLayout::default(), &moatd::endpoint::lookup_uid).map_err(|e| e.0)?;
             print!("{rules}");
             eprintln!("{}", serde_json::to_string_pretty(&rep).unwrap());
             Ok(())
@@ -203,7 +207,10 @@ fn recover(state: &std::path::Path, r: Recover) -> Result<(), String> {
             rec.isolation = moatd::recovery::Isolation { active: true, keep: keep.clone(), since: Some(chrono::Utc::now()) };
             rec.save(state).map_err(|e| e.to_string())?;
             nft.apply(&nft::render_local_emergency(&keep))?;
-            println!("Device isolated. Kept: loopback{}. Only `moatd recover clear-isolation` reopens.", keep.iter().map(|k| format!(", {k}")).collect::<String>());
+            println!(
+                "Device isolated. Kept: loopback{}. Only `moatd recover clear-isolation` reopens.",
+                keep.iter().map(|k| format!(", {k}")).collect::<String>()
+            );
         }
         Recover::ClearIsolation => {
             rec.isolation.active = false;

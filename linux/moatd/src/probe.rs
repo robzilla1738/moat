@@ -26,21 +26,26 @@ pub fn gather(cgroup_mount: &Path, moat_root: &str, nft: &str) -> HostFacts {
     let ok = |args: &[&str]| Command::new(nft).args(args).output().map(|o| o.status.success()).unwrap_or(false);
     let nft_binary = ok(&["--version"]);
     let netfilter_usable = nft_binary && ok(&["list", "tables"]);
-    let socket_cgroupv2 = netfilter_usable && cgroup_mount.join(moat_root).exists() && {
-        let test = format!(
+    let socket_cgroupv2 = netfilter_usable
+        && cgroup_mount.join(moat_root).exists()
+        && {
+            let test = format!(
             "table inet moat_probe {{ chain c {{ type filter hook output priority 0; socket cgroupv2 level 1 \"{moat_root}\" accept; }} }}\n"
         );
-        let mut c = Command::new(nft);
-        c.args(["-c", "-f", "-"]).stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
-        match c.spawn() {
-            Ok(mut ch) => {
-                use std::io::Write;
-                let _ = ch.stdin.take().unwrap().write_all(test.as_bytes());
-                ch.wait().map(|s| s.success()).unwrap_or(false)
+            let mut c = Command::new(nft);
+            c.args(["-c", "-f", "-"])
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null());
+            match c.spawn() {
+                Ok(mut ch) => {
+                    use std::io::Write;
+                    let _ = ch.stdin.take().unwrap().write_all(test.as_bytes());
+                    ch.wait().map(|s| s.success()).unwrap_or(false)
+                }
+                Err(_) => false,
             }
-            Err(_) => false,
-        }
-    };
+        };
     HostFacts {
         kernel: kernel_release(),
         cgroup2: crate::cgroup::is_cgroup2(cgroup_mount),
@@ -59,8 +64,19 @@ fn downgrade(adv: &mut CapabilityAdvertisement, c: Capability, note: &str) {
 pub fn advertise(facts: &HostFacts) -> CapabilityAdvertisement {
     let mut adv = CapabilityAdvertisement::linux_nftables_cgroup();
     if !facts.nft_binary || !facts.netfilter_usable {
-        let why = if !facts.nft_binary { "nft binary not found" } else { "netfilter (nf_tables) not usable on this kernel or without privileges" };
-        for c in [Capability::SessionEnforcement, Capability::UserEnforcement, Capability::Ipv6Enforcement, Capability::UdpEnforcement, Capability::ByteCounters, Capability::ExistingFlowRevocation] {
+        let why = if !facts.nft_binary {
+            "nft binary not found"
+        } else {
+            "netfilter (nf_tables) not usable on this kernel or without privileges"
+        };
+        for c in [
+            Capability::SessionEnforcement,
+            Capability::UserEnforcement,
+            Capability::Ipv6Enforcement,
+            Capability::UdpEnforcement,
+            Capability::ByteCounters,
+            Capability::ExistingFlowRevocation,
+        ] {
             downgrade(&mut adv, c, why);
         }
     } else if !facts.cgroup2 {
@@ -78,10 +94,21 @@ mod tests {
 
     #[test]
     fn healthy_host_keeps_contract() {
-        let f = HostFacts { kernel: "6.12".into(), cgroup2: true, nft_binary: true, netfilter_usable: true, socket_cgroupv2: true, cgroup_kill: true };
+        let f = HostFacts {
+            kernel: "6.12".into(),
+            cgroup2: true,
+            nft_binary: true,
+            netfilter_usable: true,
+            socket_cgroupv2: true,
+            cgroup_kill: true,
+        };
         let a = advertise(&f);
         assert_eq!(a.support(Capability::SessionEnforcement), Support::Supported);
-        assert_eq!(a, { let mut b = CapabilityAdvertisement::linux_nftables_cgroup(); b.advertised_at = a.advertised_at; b });
+        assert_eq!(a, {
+            let mut b = CapabilityAdvertisement::linux_nftables_cgroup();
+            b.advertised_at = a.advertised_at;
+            b
+        });
     }
 
     #[test]
@@ -96,7 +123,14 @@ mod tests {
 
     #[test]
     fn no_socket_match_downgrades_sessions_only() {
-        let f = HostFacts { kernel: "5.4".into(), cgroup2: true, nft_binary: true, netfilter_usable: true, socket_cgroupv2: false, cgroup_kill: false };
+        let f = HostFacts {
+            kernel: "5.4".into(),
+            cgroup2: true,
+            nft_binary: true,
+            netfilter_usable: true,
+            socket_cgroupv2: false,
+            cgroup_kill: false,
+        };
         let a = advertise(&f);
         assert_eq!(a.support(Capability::SessionEnforcement), Support::Unsupported);
         assert_eq!(a.support(Capability::UserEnforcement), Support::Supported);

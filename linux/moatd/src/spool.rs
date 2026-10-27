@@ -16,21 +16,72 @@ use serde::{Deserialize, Serialize};
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Event {
     /// Spool opened. `clean_shutdown` is false after a crash or power loss.
-    Restart { boot_id: String, previous_seq: Option<u64>, clean_shutdown: bool, version: String },
+    Restart {
+        boot_id: String,
+        previous_seq: Option<u64>,
+        clean_shutdown: bool,
+        version: String,
+    },
     /// Events `from..=to` were lost. The UI must show this; completeness is never inferred.
-    Gap { from: u64, to: u64, reason: String },
-    CapabilityAdvertised { advertisement: serde_json::Value },
-    PolicyApplied { revision: u64, rollback_of: Option<u64>, policy_digest: String, skipped_allows: Vec<String> },
-    PolicyRejected { reason: String, kept_revision: Option<u64> },
+    Gap {
+        from: u64,
+        to: u64,
+        reason: String,
+    },
+    CapabilityAdvertised {
+        advertisement: serde_json::Value,
+    },
+    PolicyApplied {
+        revision: u64,
+        rollback_of: Option<u64>,
+        policy_digest: String,
+        skipped_allows: Vec<String>,
+    },
+    PolicyRejected {
+        reason: String,
+        kept_revision: Option<u64>,
+    },
     /// Rule-scoped counter delta. `scope` is always `rule`: nftables counters are not per flow.
-    RuleCounter { rule: String, packets: u64, bytes: u64, scope: String },
-    SessionStarted { session_id: String, profile: String, cgroup: String, uid: u32, root_pid: u32, root_start: u64, boundary: String },
-    SessionLaunchRefused { profile: String, uid: u32, reason: String },
-    SessionEnded { session_id: String, exit_code: Option<i32>, signal: Option<i32> },
-    CoverageChanged { level: String, detail: String },
-    EnforcementDisabledLocally { by_uid: u32, reason: String },
-    EnforcementResumed { by_uid: u32 },
-    LocalIsolation { active: bool, by_uid: u32 },
+    RuleCounter {
+        rule: String,
+        packets: u64,
+        bytes: u64,
+        scope: String,
+    },
+    SessionStarted {
+        session_id: String,
+        profile: String,
+        cgroup: String,
+        uid: u32,
+        root_pid: u32,
+        root_start: u64,
+        boundary: String,
+    },
+    SessionLaunchRefused {
+        profile: String,
+        uid: u32,
+        reason: String,
+    },
+    SessionEnded {
+        session_id: String,
+        exit_code: Option<i32>,
+        signal: Option<i32>,
+    },
+    CoverageChanged {
+        level: String,
+        detail: String,
+    },
+    EnforcementDisabledLocally {
+        by_uid: u32,
+        reason: String,
+    },
+    EnforcementResumed {
+        by_uid: u32,
+    },
+    LocalIsolation {
+        active: bool,
+        by_uid: u32,
+    },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]

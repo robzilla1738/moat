@@ -36,7 +36,9 @@ trap cleanup EXIT
 
 ok()   { echo "PASS  $1"; PASS=$((PASS+1)); }
 bad()  { echo "FAIL  $1"; FAIL=$((FAIL+1)); }
-A()    { ip netns exec moat-a "$@"; }
+# nsenter switches only the network namespace. (`ip netns exec` also remounts /sys, which hides the cgroup v2
+# mount that moatd and nftables' cgroupv2 path lookup need.)
+A()    { nsenter --net=/run/netns/moat-a "$@"; }
 as_nobody() { A runuser -u nobody -- env -i PATH=/usr/bin:/bin bash -c "cd / && $1"; }
 mk() { # name, script body → script file readable by nobody
   mkdir -p "$WORK/s"; printf '%s\n' "$2" > "$WORK/s/$1.sh"; chmod 755 "$WORK/s" "$WORK/s/$1.sh"
@@ -47,8 +49,10 @@ launch() { # profile, script name → exit code of moat-launch
 plain() { # script name → exit code, run as nobody without a session
   as_nobody "bash $WORK/s/$1.sh" >/dev/null 2>&1 && echo 0 || echo 1
 }
-expect() { # name, want(0|nonzero|126), got
-  if [[ "$2" == "0" && "$3" == "0" ]] || [[ "$2" == "nonzero" && "$3" != "0" ]] || [[ "$2" == "$3" ]]; then ok "$1"; else bad "$1 (want $2, got $3)"; fi
+expect() { # name, want(0|blocked|126), got.  "blocked" = the session ran (not refused: 125/126) and failed.
+  if [[ "$2" == "blocked" ]]; then
+    if [[ "$3" != "0" && "$3" != "125" && "$3" != "126" ]]; then ok "$1"; else bad "$1 (want blocked, got $3)"; fi
+  elif [[ "$2" == "$3" ]]; then ok "$1"; else bad "$1 (want $2, got $3)"; fi
 }
 tcp() { echo "timeout 3 bash -c 'echo hi > /dev/tcp/$1/$2'"; }
 
@@ -100,18 +104,18 @@ A nft list table inet moat > "$WORK/ruleset.txt" 2>&1 || true
 expect "ordinary app (observed) reaches 10.77.0.2:8080" 0 "$(plain tcp4_8080)"
 expect "lab-allow session reaches LAN 8080" 0 "$(launch lab-allow tcp4_8080)"
 expect "lab-allow session reaches IPv6 ULA 8080" 0 "$(launch lab-allow tcp6_8080)"
-expect "safety rule beats LAN allow (9090 blocked)" nonzero "$(launch lab-allow tcp4_9090)"
-expect "lab-deny session blocked" nonzero "$(launch lab-deny tcp4_8080)"
+expect "safety rule beats LAN allow (9090 blocked)" blocked "$(launch lab-allow tcp4_9090)"
+expect "lab-deny session blocked" blocked "$(launch lab-deny tcp4_8080)"
 expect "lab-allow grandchild still allowed (inheritance)" 0 "$(launch lab-allow grandchild)"
-expect "lab-deny grandchild blocked (inheritance)" nonzero "$(launch lab-deny grandchild)"
-expect "escape attempt fails and stays blocked" nonzero "$(launch lab-deny escape)"
+expect "lab-deny grandchild blocked (inheritance)" blocked "$(launch lab-deny grandchild)"
+expect "escape attempt fails and stays blocked" blocked "$(launch lab-deny escape)"
 expect "unknown profile refused" 126 "$(launch no-such-profile noop)"
 
-launch lab-allow udp_session >/dev/null || true
+expect "lab-allow UDP send blocked (tcp-only allow)" blocked "$(launch lab-allow udp_session)"
 plain udp_plain >/dev/null || true
 sleep 0.5
 grep -q ordinary-udp "$UDPLOG" && ok "ordinary UDP delivered (observed)" || bad "ordinary UDP delivered"
-grep -q session-udp "$UDPLOG" && bad "session UDP should be blocked (tcp-only allow)" || ok "session UDP blocked (unconnected send)"
+grep -q session-udp "$UDPLOG" && bad "session UDP datagram must not arrive" || ok "session UDP datagram did not arrive"
 
 # --- replay and malformed policy --------------------------------------------------------------------------------
 "$BIN/moatd" --state "$S" apply "$WORK/signed1.json" >/dev/null
@@ -124,15 +128,15 @@ wait_for '.enforcement_disabled_locally' && ok "local disable recorded" || bad "
 expect "protected launch refused while disabled" 126 "$(launch lab-allow tcp4_8080)"
 A "$BIN/moatd" --state "$S" recover resume >/dev/null
 wait_for '.enforcement_active and (.enforcement_disabled_locally|not)' && ok "resume re-enforces last policy" || bad "resume"
-expect "lab-deny blocked again after resume" nonzero "$(launch lab-deny tcp4_8080)"
+expect "lab-deny blocked again after resume" blocked "$(launch lab-deny tcp4_8080)"
 
 A "$BIN/moatd" --state "$S" recover isolate >/dev/null
-expect "isolation blocks ordinary traffic" nonzero "$(plain tcp4_8080)"
+expect "isolation blocks ordinary traffic" blocked "$(plain tcp4_8080)"
 "$BIN/moatctl" compile "$HERE/lab.toml" --adapter linux --revision 2 -o "$WORK/snap2.json"
 "$BIN/moatctl" sign "$WORK/snap2.json" --key "$WORK/signer.key" -o "$WORK/signed2.json"
 "$BIN/moatd" --state "$S" apply "$WORK/signed2.json" >/dev/null
 wait_for '.revision == 2' && ok "new revision accepted during isolation" || bad "revision 2"
-expect "isolation survives a new policy" nonzero "$(plain tcp4_8080)"
+expect "isolation survives a new policy" blocked "$(plain tcp4_8080)"
 A "$BIN/moatd" --state "$S" recover clear-isolation >/dev/null
 wait_for '.isolation_active | not' || true
 expect "clear-isolation reopens ordinary traffic" 0 "$(plain tcp4_8080)"
@@ -141,7 +145,7 @@ expect "clear-isolation reopens ordinary traffic" 0 "$(plain tcp4_8080)"
 kill "$DAEMON_PID"; wait "$DAEMON_PID" 2>/dev/null || true
 start_daemon
 wait_for '.revision == 2 and .enforcement_active' && ok "restart restores last valid policy offline" || bad "restart restore"
-expect "lab-deny still blocked after restart" nonzero "$(launch lab-deny tcp4_8080)"
+expect "lab-deny still blocked after restart" blocked "$(launch lab-deny tcp4_8080)"
 
 # --- spool ------------------------------------------------------------------------------------------------------
 SP=$(cat "$S"/spool/seg-*.jsonl)

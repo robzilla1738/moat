@@ -180,7 +180,10 @@ impl<B: NftBackend> Endpoint<B> {
             let present = self.backend.list_json(nft::LOCAL_EMERGENCY_TABLE).is_ok();
             if self.isolation_installed.as_ref() != Some(&want) || !present {
                 if self.isolation_installed.is_some() && !present {
-                    self.spool.append(Event::CoverageChanged { level: "emergency-isolation".into(), detail: "isolation table was removed outside Moat; restored".into() });
+                    self.spool.append(Event::CoverageChanged {
+                        level: "emergency-isolation".into(),
+                        detail: "isolation table was removed outside Moat; restored".into(),
+                    });
                 }
                 if self.backend.apply(&nft::render_local_emergency(&want)).is_ok() {
                     self.isolation_installed = Some(want);
@@ -207,7 +210,10 @@ impl<B: NftBackend> Endpoint<B> {
             if self.backend.list_json(nft::TABLE).is_ok() {
                 return;
             }
-            self.spool.append(Event::CoverageChanged { level: "degraded".into(), detail: "Moat table was removed outside Moat; restoring".into() });
+            self.spool.append(Event::CoverageChanged {
+                level: "degraded".into(),
+                detail: "Moat table was removed outside Moat; restoring".into(),
+            });
         }
         match self.install(&snap) {
             Ok(_) => self.set_enforcement(true, "policy enforced"),
@@ -277,11 +283,19 @@ impl<B: NftBackend> Endpoint<B> {
     /// Process every file in `<state>/inbox`, oldest name first.
     pub fn drain_inbox(&mut self) -> Vec<Result<u64, String>> {
         let inbox = self.state_dir.join("inbox");
-        let mut files: Vec<PathBuf> = fs::read_dir(&inbox).into_iter().flatten().flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x == "json")).collect();
+        let mut files: Vec<PathBuf> = fs::read_dir(&inbox)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|x| x == "json"))
+            .collect();
         files.sort();
         let mut out = Vec::new();
         for f in files {
-            let r = fs::read_to_string(&f).map_err(|e| e.to_string()).and_then(|t| serde_json::from_str::<SignedSnapshot>(&t).map_err(|e| format!("malformed snapshot: {e}")));
+            let r = fs::read_to_string(&f)
+                .map_err(|e| e.to_string())
+                .and_then(|t| serde_json::from_str::<SignedSnapshot>(&t).map_err(|e| format!("malformed snapshot: {e}")));
             out.push(match r {
                 Ok(s) => self.offer(s),
                 Err(e) => {
@@ -297,7 +311,10 @@ impl<B: NftBackend> Endpoint<B> {
     /// Why a protected session for `profile` cannot start right now, if it cannot.
     pub fn launch_refusal(&self, profile: &str, uid: u32) -> Option<String> {
         if self.adv.support(Capability::SessionEnforcement) == Support::Unsupported {
-            return Some(format!("this device cannot enforce protected sessions: {}", self.adv.capabilities.get(&Capability::SessionEnforcement).and_then(|s| s.note.clone()).unwrap_or_default()));
+            return Some(format!(
+                "this device cannot enforce protected sessions: {}",
+                self.adv.capabilities.get(&Capability::SessionEnforcement).and_then(|s| s.note.clone()).unwrap_or_default()
+            ));
         }
         if self.recovery.enforcement_disabled {
             return Some("enforcement is disabled locally (moatd recover resume to re-enable)".into());
@@ -306,7 +323,11 @@ impl<B: NftBackend> Endpoint<B> {
             return Some("no valid policy is installed on this device; protected sessions are refused until one is".into());
         };
         if !self.enforcement_active {
-            return Some(format!("policy revision {} is not currently enforced: {}", snap.revision, self.last_rejection.clone().unwrap_or_default()));
+            return Some(format!(
+                "policy revision {} is not currently enforced: {}",
+                snap.revision,
+                self.last_rejection.clone().unwrap_or_default()
+            ));
         }
         if snap.report.unavailable_session_profiles.iter().any(|p| p == profile) {
             return Some(format!("profile {profile} is not available on this platform"));
@@ -471,14 +492,33 @@ pub(crate) mod tests {
     }
 
     fn make(dir: &Path) -> Endpoint<FakeNft> {
-        let spool = Spool::open(SpoolConfig { dir: dir.join("spool"), device_id: "omarchy".into(), boot_id: "b".into(), max_bytes: 1 << 20, segment_bytes: 1 << 16 }).unwrap();
-        Endpoint::new(dir.into(), "omarchy".into(), FakeNft::default(), Cgroups { mount: dir.join("cg"), root_name: "moat.slice".into() }, spool, CapabilityAdvertisement::linux_nftables_cgroup())
-            .with_uid_resolver(uid)
+        let spool = Spool::open(SpoolConfig {
+            dir: dir.join("spool"),
+            device_id: "omarchy".into(),
+            boot_id: "b".into(),
+            max_bytes: 1 << 20,
+            segment_bytes: 1 << 16,
+        })
+        .unwrap();
+        Endpoint::new(
+            dir.into(),
+            "omarchy".into(),
+            FakeNft::default(),
+            Cgroups { mount: dir.join("cg"), root_name: "moat.slice".into() },
+            spool,
+            CapabilityAdvertisement::linux_nftables_cgroup(),
+        )
+        .with_uid_resolver(uid)
     }
 
     pub fn signed(key: &ed25519_dalek::SigningKey, rev: u64) -> SignedSnapshot {
         let p = Policy::parse(include_str!("../../../conformance/policies/home.toml")).unwrap();
-        let s = compile(&p, &CapabilityAdvertisement::linux_nftables_cgroup(), &CompileOptions { revision: rev, rollback_of: None, issued_at: Utc::now() - Duration::seconds(5), not_after: None }).unwrap();
+        let s = compile(
+            &p,
+            &CapabilityAdvertisement::linux_nftables_cgroup(),
+            &CompileOptions { revision: rev, rollback_of: None, issued_at: Utc::now() - Duration::seconds(5), not_after: None },
+        )
+        .unwrap();
         sign_snapshot(&s, key)
     }
 
@@ -602,7 +642,12 @@ pub(crate) mod tests {
     #[test]
     fn unsupported_sessions_refuse_launch() {
         let (f, mut ep) = fixture();
-        ep.adv = crate::probe::advertise(&crate::probe::HostFacts { nft_binary: true, netfilter_usable: true, cgroup2: false, ..Default::default() });
+        ep.adv = crate::probe::advertise(&crate::probe::HostFacts {
+            nft_binary: true,
+            netfilter_usable: true,
+            cgroup2: false,
+            ..Default::default()
+        });
         ep.startup();
         ep.offer(signed(&f.key, 1)).unwrap();
         assert!(ep.launch_refusal("coding-session", 1000).unwrap().contains("cannot enforce protected sessions"));

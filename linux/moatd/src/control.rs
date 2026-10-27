@@ -132,7 +132,13 @@ mod tests {
     fn request_roundtrip_with_fds() {
         let (a, b) = UnixStream::pair().unwrap();
         let (r, mut w) = UnixStream::pair().unwrap();
-        let req = Request::Launch { profile: "coding-session".into(), argv: vec!["claude".into()], cwd: "/tmp".into(), env: BTreeMap::new(), isolate_brokers: true };
+        let req = Request::Launch {
+            profile: "coding-session".into(),
+            argv: vec!["claude".into()],
+            cwd: "/tmp".into(),
+            env: BTreeMap::new(),
+            isolate_brokers: true,
+        };
         send(&a, &req, &[w.as_raw_fd()]).unwrap();
         let (got, fds) = recv_request(&b).unwrap();
         assert_eq!(got, req);
