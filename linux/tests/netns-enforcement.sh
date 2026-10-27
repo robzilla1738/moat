@@ -71,7 +71,7 @@ openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=allowed.lab -addext 
   -keyout "$WORK/lab.key" -out "$WORK/lab.crt" >/dev/null 2>&1
 cp /etc/hosts "$WORK/hosts.orig"
 printf '10.77.0.2 allowed.lab denied.lab\n' >> /etc/hosts
-ip netns exec moat-b python3 "$HERE/lab_server.py" "$UDPLOG" "$WORK/lab.crt" "$WORK/lab.key" > "$WORK/server.out" 2>&1 &
+ip netns exec moat-b python3 "$HERE/lab_server.py" "$UDPLOG" "$WORK/lab.crt" "$WORK/lab.key" "$WORK" > "$WORK/server.out" 2>&1 &
 SERVER_PID=$!
 for _ in $(seq 50); do grep -q ready "$WORK/server.out" 2>/dev/null && break; sleep 0.1; done
 
@@ -81,9 +81,17 @@ for _ in $(seq 50); do grep -q ready "$WORK/server.out" 2>/dev/null && break; sl
 "$BIN/moatctl" compile "$HERE/lab.toml" --adapter linux --revision 1 -o "$WORK/snap1.json"
 "$BIN/moatctl" sign "$WORK/snap1.json" --key "$WORK/signer.key" -o "$WORK/signed1.json"
 
+# moatd resolves names with the lab resolver (10.77.0.2:53, which logs every query) in a private mount namespace, so
+# the W05 checks can observe exactly which names the proxy looked up. Workloads keep the host's resolver config.
+grep -v '^hosts:' /etc/nsswitch.conf > "$WORK/nsswitch.conf" || true
+echo 'hosts: files dns' >> "$WORK/nsswitch.conf"
+printf 'nameserver 10.77.0.2\noptions timeout:1 attempts:2\n' > "$WORK/resolv.conf"
 start_daemon() {
   # Not via the A() function: a backgrounded function is a subshell, and killing it would leave moatd running.
-  nsenter --net=/run/netns/moat-a "$BIN/moatd" --state "$S" --socket "$SOCK" run --device-id lab --tick-secs 1 >> "$WORK/moatd.log" 2>&1 &
+  # nsenter, unshare and sh all exec, so $! is moatd itself.
+  nsenter --net=/run/netns/moat-a unshare --mount --propagation private -- sh -c \
+    "mount --bind '$WORK/resolv.conf' /etc/resolv.conf && mount --bind '$WORK/nsswitch.conf' /etc/nsswitch.conf && exec '$BIN/moatd' --state '$S' --socket '$SOCK' run --device-id lab --tick-secs 1" \
+    >> "$WORK/moatd.log" 2>&1 &
   DAEMON_PID=$!
   for _ in $(seq 50); do [[ -S "$SOCK" ]] && break; sleep 0.1; done
 }
@@ -220,7 +228,7 @@ mk http_allowed "curl -s --max-time 5 --noproxy '*' -f http://allowed.lab:8081/ 
 mk http_denied "curl -s --max-time 5 --noproxy '*' -o $WORK/o/http_denied -w '%{http_code}' http://denied.lab:8081/ | grep -q 403"
 mk ip_no_sni "$C --noproxy '*' https://10.77.0.2:8443/"
 mk hold "sleep 6"
-wait_for '.proxied_profiles == ["lab-hosts"]' && ok "lab-hosts is the only proxied profile" || bad "proxied profiles"
+wait_for '.proxied_profiles == ["lab-hosts", "lab-mirror"]' && ok "lab-hosts and lab-mirror are the proxied profiles" || bad "proxied profiles"
 expect "proxy: TLS SNI allowed.lab reaches the real host (transparent redirect)" 0 "$(launch lab-hosts sni_allowed)"
 expect "proxy: TLS SNI denied.lab blocked" blocked "$(launch lab-hosts sni_denied)"
 as_nobody "MOAT_QUIET=1 $BIN/moat-launch --socket $SOCK --profile lab-hosts -- bash $WORK/s/sni_spoof.sh" > "$WORK/spoof.out" 2>/dev/null || true
@@ -240,11 +248,155 @@ mk fence "$(tcp 127.0.0.1 "$PPORT")"
 wait "$HOLD" 2>/dev/null || true
 A nft list table inet moat > "$WORK/ruleset-proxy.txt" 2>&1 || true
 
+# --- W05: authorization before DNS, direct/proxied agreement, active streams ----------------------------------------
+DNSLOG="$WORK/dns.log"; STREAMLOG="$WORK/stream.log"; RECVLOG="$WORK/recv.log"; CLIENTLOG="$WORK/o/client.log"
+: > "$DNSLOG"; touch "$STREAMLOG" "$RECVLOG" "$CLIENTLOG"; chmod 666 "$CLIENTLOG"
+now() { date +%s.%N; }
+info() { echo "INFO  $1"; }
+le() { python3 -c "import sys; sys.exit(0 if float('$1') <= float('$2') else 1)"; }
+sub() { python3 -c "print(f'{float(\"$1\") - float(\"$2\"):.2f}')"; }
+mk dns_forbidden_connect "$C -f https://forbidden.dnslab:8443/"
+mk dns_forbidden_sni "$C --noproxy '*' --resolve forbidden.dnslab:8443:10.77.0.2 https://forbidden.dnslab:8443/"
+mk dns_forbidden_http "curl -s --max-time 5 --noproxy '*' --resolve forbidden.dnslab:8081:10.77.0.2 -o /dev/null -w '%{http_code}' http://forbidden.dnslab:8081/ | grep -q 403"
+mk dns_named_sni "$C --noproxy '*' --resolve named.dnslab:8443:10.77.0.2 -o $WORK/o/named https://named.dnslab:8443/ && grep -q lab-tls-real $WORK/o/named"
+expect "W05: CONNECT to a name no rule allows is refused" blocked "$(launch lab-hosts dns_forbidden_connect)"
+expect "W05: TLS SNI with a name no rule allows is refused" blocked "$(launch lab-hosts dns_forbidden_sni)"
+expect "W05: plain HTTP Host with a name no rule allows is answered 403" 0 "$(launch lab-hosts dns_forbidden_http)"
+expect "W05: an allowed name only DNS can resolve reaches the real host" 0 "$(launch lab-hosts dns_named_sni)"
+sleep 0.5
+grep -q '^q named.dnslab ' "$DNSLOG" \
+  && ok "W05: positive control: the lab resolver saw the proxy look up the allowed name" || bad "W05: resolver positive control ($(cat "$DNSLOG"))"
+grep -q 'forbidden.dnslab' "$DNSLOG" \
+  && bad "W05: a forbidden name was looked up ($(grep forbidden "$DNSLOG" | head -3))" || ok "W05: no DNS query left the host for a forbidden name (CONNECT, SNI, Host)"
+
+# Direct (nftables, lab-allow) and proxied (lab-mirror: same address rules, hostname-less traffic decided on the
+# address by the proxy) enforcement must agree, judged by what the receiver actually got.
+for row in "10.77.0.2 8080 allow" "fd00:77::2 8080 allow" "10.77.0.2 9090 deny" "fd00:77::2 9090 deny" "10.77.0.2 7070 deny" "fd00:77::2 7070 deny"; do
+  read -r ip port want <<< "$row"
+  got=""
+  for prof in lab-allow lab-mirror; do
+    tag="m-$prof-$port-$(echo "$ip" | tr -d ':.')"
+    mk "$tag" "timeout 3 bash -c 'echo $tag > /dev/tcp/$ip/$port'; sleep 1"
+    launch "$prof" "$tag" >/dev/null
+    sleep 0.3
+    grep -q "^recv $port $tag\$" "$RECVLOG" && got="$got allow" || got="$got deny"
+  done
+  [[ "$got" == " $want $want" ]] && ok "W05: direct and proxied agree on [$ip]:$port ($want)" || bad "W05: direct/proxied [$ip]:$port want $want, got$got"
+done
+
+cat > "$WORK/s/stream_client.py" <<PY
+import socket, ssl, sys, time
+tag, limit = sys.argv[1], float(sys.argv[2]) if len(sys.argv) > 2 else 60
+ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT); ctx.check_hostname = False; ctx.verify_mode = ssl.CERT_NONE
+t = ctx.wrap_socket(socket.create_connection(("10.77.0.2", 8444), timeout=5), server_hostname="stream.dnslab")
+t.sendall((tag + "\n").encode()); t.settimeout(1)
+n, end = 0, time.time() + limit
+log = open("$CLIENTLOG", "a", buffering=1)
+log.write(f"open {tag} {time.time():.3f}\n")
+while time.time() < end:
+    try:
+        d = t.recv(4096)
+    except socket.timeout:
+        continue
+    except OSError:
+        break
+    if not d:
+        break
+    n += d.count(b"\n")
+log.write(f"closed {tag} {time.time():.3f} {n}\n")
+sys.exit(0 if time.time() >= end else 3)
+PY
+chmod 644 "$WORK/s/stream_client.py"
+stream_bg() { # tag [limit]: a lab-hosts session holding one long-lived TLS stream, in the background
+  mk "stream_$1" "python3 $WORK/s/stream_client.py $1 ${2:-60}"
+  as_nobody "MOAT_QUIET=1 $BIN/moat-launch --socket $SOCK --profile lab-hosts -- bash $WORK/s/stream_$1.sh" >/dev/null 2>&1 &
+}
+stream_started() { for _ in $(seq 40); do grep -q "^start $1 " "$STREAMLOG" && return 0; sleep 0.25; done; return 1; }
+# end time of a stream as the receiver saw it ($STREAMLOG) or the client saw it ($CLIENTLOG), waiting up to $3 s
+ended_at() { for _ in $(seq $(( $3 * 4 ))); do l=$(grep -E "^(end|closed) $2 " "$1" | head -1); [[ -n "$l" ]] && { echo "$l" | awk '{print $3}'; return 0; }; sleep 0.25; done; echo ""; }
+policy_with_stream() { # revision [expires_at]: lab.toml plus an allow for stream.dnslab:8444, compiled and signed
+  { cat "$HERE/lab.toml"
+    printf '\n[[rules]]\nid = "lab-stream"\naction = "allow"\nselector = { session = { profiles = ["lab-hosts"] } }\n'
+    printf 'destinations = { hosts = ["stream.dnslab"] }\ntransport = "tcp"\nports = [8444]\n'
+    if [[ -n "${2:-}" ]]; then printf 'expires_at = "%s"\n' "$2"; fi
+    printf 'provenance = { kind = "git", reference = "lab" }\n'; } > "$WORK/lab$1.toml"
+  "$BIN/moatctl" compile "$WORK/lab$1.toml" --adapter linux --revision "$1" -o "$WORK/snap$1.json"
+  "$BIN/moatctl" sign "$WORK/snap$1.json" --key "$WORK/signer.key" -o "$WORK/signed$1.json"
+}
+
+# Expiry: a stream admitted under an expiring permission is ended at the deadline, not renewed.
+DEADLINE=$(( $(date +%s) + 15 ))
+policy_with_stream 5 "$(date -u -d "@$DEADLINE" +%Y-%m-%dT%H:%M:%SZ)"
+"$BIN/moatd" --state "$S" apply "$WORK/signed5.json" >/dev/null
+wait_for '.revision == 5' && ok "W05: revision 5 (stream allow expiring in ~15 s) applied" || bad "W05: revision 5"
+stream_bg exp1
+stream_started exp1 && ok "W05: long-lived stream admitted under the expiring allow" || bad "W05: stream exp1 admitted"
+while (( $(date +%s) < DEADLINE - 2 )); do sleep 0.25; done
+grep -q "^end exp1 " "$STREAMLOG" && bad "W05: stream ended before its deadline" || ok "W05: stream stays open before the deadline"
+E=$(ended_at "$STREAMLOG" exp1 20)
+if [[ -n "$E" ]]; then
+  D=$(sub "$E" "$DEADLINE"); info "expiry: receiver saw the stream end ${D}s after the deadline"
+  le -0.5 "$D" && le "$D" 3 && ok "W05: stream ended at expiry (receiver: ${D}s after the deadline)" || bad "W05: expiry stop delay ${D}s"
+else bad "W05: stream not ended after its deadline"; fi
+mk stream_exp2 "python3 $WORK/s/stream_client.py exp2 2"
+expect "W05: after expiry a new stream is refused (retry does not renew)" blocked "$(launch lab-hosts stream_exp2)"
+grep -q "^start exp2 " "$STREAMLOG" && bad "W05: post-expiry stream reached the receiver" || ok "W05: post-expiry stream never reached the receiver"
+
+# Deny: a new revision without the allow ends the open stream.
+policy_with_stream 6
+"$BIN/moatd" --state "$S" apply "$WORK/signed6.json" >/dev/null
+wait_for '.revision == 6' || bad "W05: revision 6"
+stream_bg deny1
+stream_started deny1 && ok "W05: stream admitted under revision 6" || bad "W05: stream deny1 admitted"
+"$BIN/moatctl" compile "$HERE/lab.toml" --adapter linux --revision 7 -o "$WORK/snap7.json"
+"$BIN/moatctl" sign "$WORK/snap7.json" --key "$WORK/signer.key" -o "$WORK/signed7.json"
+T0=$(now); "$BIN/moatd" --state "$S" apply "$WORK/signed7.json" >/dev/null
+E=$(ended_at "$STREAMLOG" deny1 8)
+if [[ -n "$E" ]]; then
+  D=$(sub "$E" "$T0"); info "deny: receiver saw the stream end ${D}s after the apply request (tick 1 s)"
+  le "$D" 4 && ok "W05: a revision that no longer allows it ends the open stream (${D}s)" || bad "W05: deny stop delay ${D}s"
+else bad "W05: stream survived a revision that no longer allows it"; fi
+
+# Task close: the session's root process exits while a background child holds a stream.
+policy_with_stream 8
+"$BIN/moatd" --state "$S" apply "$WORK/signed8.json" >/dev/null
+wait_for '.revision == 8' && ok "W05: revision 8 (permanent stream allow) applied" || bad "W05: revision 8"
+mk task_close "python3 $WORK/s/stream_client.py close1 60 & sleep 3"
+launch lab-hosts task_close >/dev/null; T0=$(now)
+grep -q "^start close1 " "$STREAMLOG" && ok "W05: background stream was open while the task ran" || bad "W05: close1 stream admitted"
+E=$(ended_at "$STREAMLOG" close1 6)
+if [[ -n "$E" ]]; then
+  D=$(sub "$E" "$T0"); info "task close: receiver saw the stream end ${D}s after the session ended"
+  le "$D" 1.5 && ok "W05: closing the task ends its streams (${D}s)" || bad "W05: task-close stop delay ${D}s"
+else bad "W05: a stream outlived its task"; fi
+
+# Isolation ends every proxied stream. The isolation table drops non-loopback packets, so the receiver cannot see
+# the close; the client-side EOF (over loopback, from the proxy) is the evidence.
+stream_bg iso1
+stream_started iso1 && ok "W05: stream admitted before isolation" || bad "W05: iso1 admitted"
+A "$BIN/moatd" --state "$S" recover isolate >/dev/null; T0=$(now)
+E=$(ended_at "$CLIENTLOG" iso1 6)
+if [[ -n "$E" ]]; then
+  D=$(sub "$E" "$T0"); info "isolation: client saw EOF ${D}s after isolate (tick 1 s)"
+  le "$D" 3 && ok "W05: isolation ends open proxied streams (${D}s)" || bad "W05: isolation stop delay ${D}s"
+else bad "W05: stream survived isolation"; fi
+A "$BIN/moatd" --state "$S" recover clear-isolation >/dev/null
+wait_for '.isolation_active | not' || bad "W05: clear isolation"
+
 # --- restart: controller-free operation -------------------------------------------------------------------------
-kill "$DAEMON_PID"; wait "$DAEMON_PID" 2>/dev/null || true
+stream_bg rst1
+stream_started rst1 && ok "W05: stream open before the daemon stops" || bad "W05: rst1 admitted"
+kill "$DAEMON_PID"; T0=$(now); wait "$DAEMON_PID" 2>/dev/null || true
+E=$(ended_at "$STREAMLOG" rst1 6)
+if [[ -n "$E" ]]; then
+  D=$(sub "$E" "$T0"); info "restart: receiver saw the stream end ${D}s after SIGTERM"
+  ok "W05: proxied streams end when moatd stops; none is left open unsupervised (${D}s)"
+else bad "W05: a proxied stream survived moatd stopping"; fi
 if pgrep -f "moatd --state $S" >/dev/null; then bad "daemon stopped before restart"; pkill -f "moatd --state $S"; sleep 0.5; fi
 start_daemon
-wait_for '.revision == 4 and .enforcement_active' && ok "restart restores last valid policy offline" || bad "restart restore"
+wait_for '.revision == 8 and .enforcement_active' && ok "restart restores last valid policy offline" || bad "restart restore"
+stream_bg rst2 2
+stream_started rst2 && ok "W05: after restart a new session's stream is admitted again" || bad "W05: rst2 admitted after restart"
 expect "lab-deny still blocked after restart" blocked "$(launch lab-deny tcp4_8080)"
 
 # --- spool ------------------------------------------------------------------------------------------------------
@@ -255,6 +407,10 @@ echo "$SP" | jq -s -e 'map(.event.type) | (index("policy_trial_started") != null
   && ok "spool records trial start, rollback and confirm" || bad "trial events in spool"
 echo "$SP" | jq -s -e '[.[] | select(.event.type == "flow") | .event] | (map(select(.attempt.hostname.source == "sni" and .decision.verdict == "allow")) | length > 0) and (map(select(.attempt.hostname.source == "connect_proxy")) | length > 0) and (map(select(.decision.verdict == "deny")) | length > 0) and (map(select(.attempt.client_dialed == "10.77.0.3:8443")) | length > 0)' >/dev/null \
   && ok "spool records proxy decisions with hostname source and the dialed address" || bad "proxy flow events in spool"
+echo "$SP" | jq -s -e '[.[] | select(.event.type == "flow") | .event.attempt.dns_lookup] | (index("refused_before_lookup") != null) and (index("allowed_name") != null)' >/dev/null \
+  && ok "W05: spool records which proxy decisions were refused before any lookup" || bad "W05: dns_lookup in spool"
+echo "$SP" | jq -s -e '[.[] | select(.event.type == "stream_terminated") | .event.reason] | (map(select(startswith("no longer allowed"))) | length >= 2) and (index("emergency isolation") != null) and (index("session closed") != null)' >/dev/null \
+  && ok "W05: spool records each stream Moat ended, with the reason" || bad "W05: stream_terminated in spool ($(echo "$SP" | jq -c 'select(.event.type == "stream_terminated") | .event.reason' | tr '\n' ' '))"
 echo "$SP" | jq -s -e '[.[].seq] as $s | ($s == ($s | sort)) and ($s | length) == ($s | unique | length)' >/dev/null \
   && ok "spool sequence monotonic and unique" || bad "spool sequence"
 echo "$SP" | jq -s -e '[.[] | select(.event.type == "restart")] | last | .event.clean_shutdown == true' >/dev/null \
@@ -264,6 +420,6 @@ echo "----"
 echo "netns enforcement: $PASS passed, $FAIL failed"
 if [[ $FAIL -gt 0 ]]; then
   echo "--- ruleset"; cat "$WORK/ruleset.txt"; echo "--- ruleset with a proxied session"; cat "$WORK/ruleset-proxy.txt" 2>/dev/null
-  echo "--- moatd log"; cat "$WORK/moatd.log"; echo "--- proxy flows"; cat "$S"/spool/seg-*.jsonl | jq -c 'select(.event.type == "flow") | .event | {h: .attempt.hostname, ip: .attempt.remote_ip, d: .decision.summary}' 2>/dev/null | tail -20
+  echo "--- moatd log"; cat "$WORK/moatd.log"; echo "--- dns"; cat "$DNSLOG" 2>/dev/null; echo "--- streams"; cat "$STREAMLOG" "$CLIENTLOG" 2>/dev/null; echo "--- recv"; cat "$RECVLOG" 2>/dev/null; echo "--- proxy flows"; cat "$S"/spool/seg-*.jsonl | jq -c 'select(.event.type == "flow") | .event | {h: .attempt.hostname, ip: .attempt.remote_ip, d: .decision.summary}' 2>/dev/null | tail -20
   exit 1
 fi

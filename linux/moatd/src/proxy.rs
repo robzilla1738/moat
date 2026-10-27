@@ -23,16 +23,16 @@ use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, Shutdown, SocketAddr, TcpListener, TcpStream, ToSocketAddrs};
 use std::os::fd::AsRawFd;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
 use chrono::Utc;
 use moat_core::enrichment::Enricher;
-use moat_core::eval::{evaluate, Decision, EvalContext, FlowAttempt, Verdict, Winner};
+use moat_core::eval::{evaluate, hostname_admission, Decision, EvalContext, FlowAttempt, HostnameAdmission, Verdict, Winner};
 use moat_core::identity::{AppIdentity, Boundary, SessionRef};
-use moat_core::net::{Confidence, HostnameEvidence, HostnameSource, Transport};
+use moat_core::net::{classify as scope_of, Confidence, HostnameEvidence, HostnameSource, NetScope, Transport};
 use moat_core::policy::Policy;
 
 use crate::spool::Event;
@@ -207,8 +207,47 @@ pub fn system_resolver(host: &str, port: u16) -> std::io::Result<Vec<IpAddr>> {
     Ok((host, port).to_socket_addrs()?.map(|a| a.ip()).collect())
 }
 
+/// Resource bounds. Exhaustion refuses new connections (with an event); it never lets one through unchecked.
+#[derive(Debug, Clone, Copy)]
+pub struct Limits {
+    pub max_connections: usize,
+    pub max_lookups: usize,
+}
+
+impl Default for Limits {
+    fn default() -> Self {
+        Limits { max_connections: 512, max_lookups: 16 }
+    }
+}
+
+/// One admitted, still-open proxied stream.
+pub struct StreamEntry {
+    pub session: SessionRef,
+    pub host: Option<HostnameEvidence>,
+    pub to: SocketAddr,
+    pub admitted_by: String,
+    pub admitted_at: chrono::DateTime<Utc>,
+    client: TcpStream,
+    upstream: TcpStream,
+}
+
+impl StreamEntry {
+    fn kill(&self) {
+        let _ = self.client.shutdown(Shutdown::Both);
+        let _ = self.upstream.shutdown(Shutdown::Both);
+    }
+}
+
 pub struct Shared {
     pub policy: RwLock<Option<Arc<ProxyPolicy>>>,
+    /// Emergency isolation: refuse every new connection and end every open stream.
+    pub isolated: AtomicBool,
+    pub limits: Limits,
+    active_connections: AtomicUsize,
+    active_lookups: AtomicUsize,
+    /// Open streams, re-evaluated on every policy change and daemon tick (stream contract in docs/platforms/linux.md).
+    pub streams: Mutex<BTreeMap<u64, StreamEntry>>,
+    next_stream: AtomicU64,
     pub resolver: Box<Resolver>,
     /// Events for the spool, drained by the daemon tick (no proxy thread ever takes the endpoint lock).
     pub events: Mutex<Vec<Event>>,
@@ -216,23 +255,133 @@ pub struct Shared {
     pub connect_timeout: Duration,
     /// Tests only: the address a transparently redirected connection was originally sent to.
     pub test_original_dst: Option<SocketAddr>,
+    /// Hostname rules may not reach local addresses by themselves (see `local_scope`). Always true in production;
+    /// in-process tests whose only upstream is on loopback turn it off.
+    pub guard_local: bool,
 }
 
 impl Shared {
     pub fn new(resolver: Box<Resolver>) -> Self {
         Shared {
             policy: RwLock::new(None),
+            isolated: AtomicBool::new(false),
+            limits: Limits::default(),
+            active_connections: AtomicUsize::new(0),
+            active_lookups: AtomicUsize::new(0),
+            streams: Mutex::new(BTreeMap::new()),
+            next_stream: AtomicU64::new(1),
             resolver,
             events: Mutex::new(Vec::new()),
             peek_timeout: Duration::from_millis(1500),
             connect_timeout: Duration::from_secs(10),
             test_original_dst: None,
+            guard_local: true,
         }
     }
 
     pub fn drain_events(&self) -> Vec<Event> {
         std::mem::take(&mut *self.events.lock().unwrap())
     }
+
+    pub fn active_connections(&self) -> usize {
+        self.active_connections.load(Ordering::SeqCst)
+    }
+
+    fn terminated(&self, id: u64, e: &StreamEntry, reason: &str) {
+        e.kill();
+        self.events.lock().unwrap().push(Event::StreamTerminated {
+            session_id: e.session.id.clone(),
+            stream: id,
+            destination: e.to.to_string(),
+            hostname: e.host.as_ref().map(|h| h.name.clone()),
+            admitted_by: e.admitted_by.clone(),
+            reason: reason.to_string(),
+        });
+    }
+
+    /// Re-evaluate every open stream against the current policy at `now`. A stream whose verdict is no longer
+    /// allow (rule or grant expired, policy changed to deny, no policy) or any stream during isolation is ended:
+    /// both sockets are shut down. Returns the ids ended.
+    pub fn revalidate(&self, now: chrono::DateTime<Utc>) -> Vec<u64> {
+        let pp = self.policy.read().unwrap().clone();
+        let isolated = self.isolated.load(Ordering::SeqCst);
+        let mut ended = Vec::new();
+        let enricher = Enricher::new();
+        let mut streams = self.streams.lock().unwrap();
+        let ids: Vec<u64> = streams.keys().copied().collect();
+        for id in ids {
+            let e = &streams[&id];
+            let why = if isolated {
+                Some("emergency isolation".to_string())
+            } else {
+                match pp.as_deref() {
+                    None => Some("no policy installed".to_string()),
+                    Some(p) => {
+                        let ctx = EvalContext::new(&p.policy, &enricher, &p.device_id);
+                        let mut a = attempt(&e.session, Some(p), e.to.ip(), e.to.port(), e.host.as_ref());
+                        a.at = now;
+                        let d = evaluate(&ctx, &a);
+                        (d.verdict != Verdict::Allow).then(|| format!("no longer allowed: {}", d.summary()))
+                    }
+                }
+            };
+            if let Some(why) = why {
+                let e = streams.remove(&id).unwrap();
+                self.terminated(id, &e, &why);
+                ended.push(id);
+            }
+        }
+        ended
+    }
+
+    /// End every open stream of one session (task closed).
+    pub fn terminate_session(&self, session_id: &str, reason: &str) -> usize {
+        let mut streams = self.streams.lock().unwrap();
+        let ids: Vec<u64> = streams.iter().filter(|(_, e)| e.session.id == session_id).map(|(id, _)| *id).collect();
+        for id in &ids {
+            let e = streams.remove(id).unwrap();
+            self.terminated(*id, &e, reason);
+        }
+        ids.len()
+    }
+
+    /// Enter or leave emergency isolation. Entering ends every open stream immediately.
+    pub fn set_isolated(&self, on: bool) {
+        self.isolated.store(on, Ordering::SeqCst);
+        if on {
+            self.revalidate(Utc::now());
+        }
+    }
+}
+
+/// Counts a resource while alive.
+struct Slot<'a>(&'a AtomicUsize);
+impl<'a> Slot<'a> {
+    fn take(c: &'a AtomicUsize, max: usize) -> Option<Slot<'a>> {
+        let mut cur = c.load(Ordering::SeqCst);
+        loop {
+            if cur >= max {
+                return None;
+            }
+            match c.compare_exchange(cur, cur + 1, Ordering::SeqCst, Ordering::SeqCst) {
+                Ok(_) => return Some(Slot(c)),
+                Err(v) => cur = v,
+            }
+        }
+    }
+}
+impl Drop for Slot<'_> {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+/// A resolved address a hostname rule must not reach on its own: the proxy runs in the host network namespace
+/// with a privileged mark, so a name that resolves to loopback, unspecified, link-local or multicast space could
+/// otherwise reach local services the session may not. Such an address is used only if an address rule (without
+/// the hostname) allows it.
+fn local_scope(ip: IpAddr) -> bool {
+    ip.is_unspecified() || matches!(scope_of(ip), NetScope::Loopback | NetScope::LinkLocal | NetScope::Multicast)
 }
 
 /// The verdict for one proxied connection.
@@ -265,6 +414,17 @@ fn attempt(sess: &SessionRef, pp: Option<&ProxyPolicy>, ip: IpAddr, port: u16, h
 /// Decide a connection: evaluate every candidate address (with the hostname evidence, if any) and pick the first
 /// one the policy allows. No policy installed means deny.
 pub fn decide(pp: Option<&ProxyPolicy>, sess: &SessionRef, host: Option<HostnameEvidence>, candidates: &[IpAddr], port: u16) -> Outcome {
+    decide_with(pp, sess, host, candidates, port, true)
+}
+
+pub fn decide_with(
+    pp: Option<&ProxyPolicy>,
+    sess: &SessionRef,
+    host: Option<HostnameEvidence>,
+    candidates: &[IpAddr],
+    port: u16,
+    guard_local: bool,
+) -> Outcome {
     let Some(p) = pp else {
         let ip = candidates.first().copied().unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED));
         return Outcome {
@@ -287,7 +447,14 @@ pub fn decide(pp: Option<&ProxyPolicy>, sess: &SessionRef, host: Option<Hostname
     let mut first: Option<(Decision, FlowAttempt)> = None;
     for ip in candidates {
         let a = attempt(sess, pp, *ip, port, host.as_ref());
-        let d = evaluate(&ctx, &a);
+        let mut d = evaluate(&ctx, &a);
+        if let Some(h) = host.as_ref().filter(|_| guard_local && d.verdict == Verdict::Allow && local_scope(*ip)) {
+            let by_address = evaluate(&ctx, &attempt(sess, pp, *ip, port, None));
+            if by_address.verdict != Verdict::Allow {
+                d = by_address;
+                d.notes.push(format!("{} resolved to local address {ip}; a hostname rule cannot reach local addresses", h.name));
+            }
+        }
         if d.verdict == Verdict::Allow {
             let reason = d.summary();
             return Outcome { connect_to: Some(SocketAddr::new(*ip, port)), decision: Some(d), reason, attempt: a };
@@ -472,6 +639,15 @@ fn deny_http(client: &mut TcpStream, why: &str) {
 /// Handle one connection from a proxied session.
 pub fn handle_connection(shared: &Shared, sess: &SessionRef, mut client: TcpStream) {
     let orig = shared.test_original_dst.or_else(|| original_dst(&client));
+    let Some(_conn) = Slot::take(&shared.active_connections, shared.limits.max_connections) else {
+        shared.events.lock().unwrap().push(Event::ProxyLimit {
+            session_id: sess.id.clone(),
+            resource: "connections".into(),
+            limit: shared.limits.max_connections as u64,
+        });
+        let _ = client.shutdown(Shutdown::Both);
+        return;
+    };
     let _ = client.set_read_timeout(Some(shared.peek_timeout));
     let mut buf = Vec::with_capacity(4096);
     let mut chunk = [0u8; 8192];
@@ -506,23 +682,52 @@ pub fn handle_connection(shared: &Shared, sess: &SessionRef, mut client: TcpStre
         Peeked::Opaque => (None, None, orig.map(|o| o.port()), buf.clone(), false),
     };
     let pp = shared.policy.read().unwrap().clone();
+    let refuse = |reason: String, port: u16| Outcome {
+        connect_to: None,
+        decision: None,
+        reason,
+        attempt: attempt(sess, pp.as_deref(), IpAddr::V4(Ipv4Addr::UNSPECIFIED), port, host.as_ref()),
+    };
+    // How the hostname was (or was not) looked up, for the record.
+    let mut lookup = "none";
     let outcome = match port {
-        None => Outcome {
-            connect_to: None,
-            decision: None,
-            reason: "no destination: not a redirected connection and not a CONNECT request".into(),
-            attempt: attempt(sess, pp.as_deref(), IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0, host.as_ref()),
+        None => refuse("no destination: not a redirected connection and not a CONNECT request".into(), 0),
+        Some(port) if shared.isolated.load(Ordering::SeqCst) => refuse("emergency isolation".into(), port),
+        Some(port) => match (&host, literal, pp.as_deref()) {
+            (Some(h), _, Some(p)) => {
+                // W05: authorize the name before any DNS lookup.
+                let enricher = Enricher::new();
+                let ctx = EvalContext::new(&p.policy, &enricher, &p.device_id);
+                let probe = attempt(sess, Some(p), IpAddr::V4(Ipv4Addr::UNSPECIFIED), port, Some(h));
+                match hostname_admission(&ctx, &probe) {
+                    HostnameAdmission::DenyWithoutLookup { reason } => {
+                        lookup = "refused_before_lookup";
+                        refuse(reason, port)
+                    }
+                    adm => match Slot::take(&shared.active_lookups, shared.limits.max_lookups) {
+                        None => {
+                            shared.events.lock().unwrap().push(Event::ProxyLimit {
+                                session_id: sess.id.clone(),
+                                resource: "dns_lookups".into(),
+                                limit: shared.limits.max_lookups as u64,
+                            });
+                            refuse("resolver capacity reached; refusing rather than skipping the check".into(), port)
+                        }
+                        Some(_slot) => {
+                            lookup = if adm == HostnameAdmission::ResolveAllowedName { "allowed_name" } else { "address_rules_exposure" };
+                            let candidates = (shared.resolver)(&h.name, port).unwrap_or_default();
+                            decide_with(Some(p), sess, host.clone(), &candidates, port, shared.guard_local)
+                        }
+                    },
+                }
+            }
+            (Some(_), _, None) => refuse("no policy installed".into(), port),
+            (None, Some(ip), _) => decide(pp.as_deref(), sess, None, &[ip], port),
+            (None, None, _) => decide(pp.as_deref(), sess, None, &orig.map(|o| vec![o.ip()]).unwrap_or_default(), port),
         },
-        Some(port) => {
-            let candidates: Vec<IpAddr> = match (&host, literal) {
-                (Some(h), _) => (shared.resolver)(&h.name, port).unwrap_or_default(),
-                (None, Some(ip)) => vec![ip],
-                (None, None) => orig.map(|o| vec![o.ip()]).unwrap_or_default(),
-            };
-            decide(pp.as_deref(), sess, host.clone(), &candidates, port)
-        }
     };
     let mut attempt_json = serde_json::to_value(&outcome.attempt).unwrap_or_default();
+    attempt_json["dns_lookup"] = serde_json::Value::String(lookup.into());
     if let (Some(o), Some(to)) = (orig, outcome.connect_to) {
         if o.ip() != to.ip() {
             attempt_json["client_dialed"] = serde_json::Value::String(o.to_string());
@@ -559,9 +764,31 @@ pub fn handle_connection(shared: &Shared, sess: &SessionRef, mut client: TcpStre
         return;
     }
     let (Ok(c2), Ok(u2)) = (client.try_clone(), up.try_clone()) else { return };
+    // Register the stream before any byte flows back, so revalidation can end it.
+    let id = shared.next_stream.fetch_add(1, Ordering::SeqCst);
+    let (Ok(cr), Ok(ur)) = (client.try_clone(), up.try_clone()) else { return };
+    let admitted_by = match outcome.decision.as_ref().map(|d| &d.winner) {
+        Some(Winner::Rule { id, .. }) => format!("rule:{id}"),
+        Some(Winner::ProfileDefault { profile, .. }) => format!("profile_default:{profile}"),
+        None => "unknown".into(),
+    };
+    shared.streams.lock().unwrap().insert(
+        id,
+        StreamEntry { session: sess.clone(), host: host.clone(), to, admitted_by, admitted_at: Utc::now(), client: cr, upstream: ur },
+    );
+    // A policy change or isolation between the decision and registration must not be missed.
+    let changed = match (&pp, &*shared.policy.read().unwrap()) {
+        (Some(a), Some(b)) => !Arc::ptr_eq(a, b),
+        (None, None) => false,
+        _ => true,
+    };
+    if changed || shared.isolated.load(Ordering::SeqCst) {
+        shared.revalidate(Utc::now());
+    }
     let t = std::thread::spawn(move || pump(c2, u2));
     pump(up, client);
     let _ = t.join();
+    shared.streams.lock().unwrap().remove(&id);
 }
 
 /// One session's listener (127.0.0.1 and ::1 on the same port).
@@ -641,10 +868,14 @@ impl ProxyManager {
         if let Some(p) = self.sessions.remove(session_id) {
             p.stop();
         }
+        // Task closed: its admitted streams end with it.
+        self.shared.terminate_session(session_id, "session closed");
     }
 
+    /// Install a new policy and immediately re-check every open stream against it.
     pub fn set_policy(&self, p: Option<ProxyPolicy>) {
         *self.shared.policy.write().unwrap() = p.map(Arc::new);
+        self.shared.revalidate(Utc::now());
     }
 }
 
@@ -776,8 +1007,14 @@ pub(crate) mod tests {
     }
 
     fn lab_policy(upstream_port: u16) -> ProxyPolicy {
+        lab_policy_with(upstream_port, None)
+    }
+
+    /// `expires`: an RFC 3339 deadline for the allow-lab rule (an expiring permission).
+    fn lab_policy_with(upstream_port: u16, expires: Option<&str>) -> ProxyPolicy {
+        let exp = expires.map(|e| format!("expires_at = \"{e}\"\n")).unwrap_or_default();
         let src = format!(
-            "{}\n[[rules]]\nid = \"allow-lab\"\naction = \"allow\"\ntransport = \"tcp\"\nports = [{upstream_port}]\nselector = {{ session = {{ profiles = [\"coding-session\"] }} }}\ndestinations = {{ hosts = [\"allowed.test\"] }}\nprovenance = {{ kind = \"git\", reference = \"t\" }}\n",
+            "{}\n[[rules]]\nid = \"allow-lab\"\naction = \"allow\"\ntransport = \"tcp\"\nports = [{upstream_port}]\nselector = {{ session = {{ profiles = [\"coding-session\"] }} }}\ndestinations = {{ hosts = [\"allowed.test\"] }}\n{exp}provenance = {{ kind = \"git\", reference = \"t\" }}\n",
             // without the loopback allow, so the upstream (on loopback) is reachable only through the hostname rule
             include_str!("../../../conformance/policies/home.toml").replace(
                 "id = \"coding-allow-loopback\"\naction = \"allow\"\nselector = { session = { profiles = [\"coding-session\"] } }",
@@ -796,11 +1033,18 @@ pub(crate) mod tests {
     }
 
     fn start(test_orig: Option<SocketAddr>, upstream_port: u16) -> (Arc<Shared>, SessionProxy) {
-        let mut sh = Shared::new(Box::new(resolver));
+        start_with(test_orig, lab_policy(upstream_port), Box::new(resolver), Limits::default())
+    }
+
+    fn start_with(test_orig: Option<SocketAddr>, policy: ProxyPolicy, res: Box<Resolver>, limits: Limits) -> (Arc<Shared>, SessionProxy) {
+        let mut sh = Shared::new(res);
+        sh.limits = limits;
         sh.test_original_dst = test_orig;
         sh.peek_timeout = Duration::from_millis(300);
+        // the only upstream available in-process is on loopback; the local-address guard has its own test
+        sh.guard_local = false;
         let sh = Arc::new(sh);
-        *sh.policy.write().unwrap() = Some(Arc::new(lab_policy(upstream_port)));
+        *sh.policy.write().unwrap() = Some(Arc::new(policy));
         let l = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = l.local_addr().unwrap().port();
         drop(l);
@@ -887,6 +1131,164 @@ pub(crate) mod tests {
         let Event::Flow { attempt, decision, .. } = &evs[0] else { panic!() };
         assert!(attempt.get("hostname").is_none());
         assert_eq!(decision["verdict"], "deny");
+        p.stop();
+    }
+
+    /// Open a CONNECT tunnel to allowed.test through the proxy and prove bytes flow.
+    fn open_tunnel(p: &SessionProxy, upstream_port: u16) -> TcpStream {
+        let mut c = TcpStream::connect(("127.0.0.1", p.port)).unwrap();
+        write!(c, "CONNECT allowed.test:{upstream_port} HTTP/1.1\r\n\r\n").unwrap();
+        assert!(read_some(&mut c).starts_with("HTTP/1.1 200"));
+        c.write_all(b"ping").unwrap();
+        assert_eq!(read_some(&mut c), "ping");
+        c
+    }
+
+    fn wait_streams(sh: &Shared, n: usize) {
+        for _ in 0..100 {
+            if sh.streams.lock().unwrap().len() == n {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        panic!("expected {n} open streams, have {}", sh.streams.lock().unwrap().len());
+    }
+
+    /// After Moat ends a stream the client sees EOF (or a reset), never more echoed bytes.
+    fn assert_ended(c: &mut TcpStream) {
+        let _ = c.write_all(b"after");
+        c.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+        let mut b = [0u8; 64];
+        match c.read(&mut b) {
+            Ok(0) | Err(_) => {}
+            Ok(n) => panic!("stream still delivering after termination: {:?}", String::from_utf8_lossy(&b[..n])),
+        }
+    }
+
+    fn terminated_reasons(sh: &Shared) -> Vec<String> {
+        sh.drain_events()
+            .into_iter()
+            .filter_map(|e| match e {
+                Event::StreamTerminated { reason, .. } => Some(reason),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn an_admitted_stream_ends_when_its_permission_expires() {
+        let up = echo_server();
+        let deadline = Utc::now() + chrono::Duration::seconds(30);
+        let (sh, p) = start_with(None, lab_policy_with(up.port(), Some(&deadline.to_rfc3339())), Box::new(resolver), Limits::default());
+        let mut c = open_tunnel(&p, up.port());
+        wait_streams(&sh, 1);
+        // before the deadline the stream stays open
+        assert!(sh.revalidate(deadline - chrono::Duration::seconds(1)).is_empty());
+        c.write_all(b"still").unwrap();
+        assert_eq!(read_some(&mut c), "still");
+        // at the deadline it is ended, not renewed
+        assert_eq!(sh.revalidate(deadline).len(), 1);
+        assert_ended(&mut c);
+        let r = terminated_reasons(&sh);
+        assert!(r.len() == 1 && r[0].starts_with("no longer allowed"), "{r:?}");
+        p.stop();
+    }
+
+    #[test]
+    fn a_policy_change_to_deny_ends_open_streams() {
+        let up = echo_server();
+        let (sh, p) = start(None, up.port());
+        let mut c = open_tunnel(&p, up.port());
+        wait_streams(&sh, 1);
+        let mgr = ProxyManager { shared: sh.clone(), ports: (0, 0), sessions: BTreeMap::new() };
+        // same policy again: nothing ends
+        mgr.set_policy(Some(lab_policy(up.port())));
+        assert_eq!(sh.streams.lock().unwrap().len(), 1);
+        // the allow removed (base home policy only): the open stream ends immediately
+        mgr.set_policy(Some(lab_policy(up.port() ^ 1)));
+        assert_ended(&mut c);
+        assert_eq!(terminated_reasons(&sh).len(), 1);
+        // and a new attempt is refused
+        let mut d = TcpStream::connect(("127.0.0.1", p.port)).unwrap();
+        write!(d, "CONNECT allowed.test:{} HTTP/1.1\r\n\r\n", up.port()).unwrap();
+        assert!(read_some(&mut d).starts_with("HTTP/1.1 403"));
+        p.stop();
+    }
+
+    #[test]
+    fn isolation_ends_open_streams_and_refuses_new_ones() {
+        let up = echo_server();
+        let (sh, p) = start(None, up.port());
+        let mut c = open_tunnel(&p, up.port());
+        wait_streams(&sh, 1);
+        sh.set_isolated(true);
+        assert_ended(&mut c);
+        assert_eq!(terminated_reasons(&sh), vec!["emergency isolation".to_string()]);
+        let mut d = TcpStream::connect(("127.0.0.1", p.port)).unwrap();
+        write!(d, "CONNECT allowed.test:{} HTTP/1.1\r\n\r\n", up.port()).unwrap();
+        assert!(read_some(&mut d).starts_with("HTTP/1.1 403"));
+        sh.set_isolated(false);
+        drop(open_tunnel(&p, up.port()));
+        p.stop();
+    }
+
+    #[test]
+    fn closing_a_task_ends_its_streams_only() {
+        let up = echo_server();
+        let (sh, p) = start(None, up.port());
+        let mut c = open_tunnel(&p, up.port());
+        wait_streams(&sh, 1);
+        assert_eq!(sh.terminate_session("some-other-session", "session closed"), 0);
+        c.write_all(b"x").unwrap();
+        assert_eq!(read_some(&mut c), "x");
+        assert_eq!(sh.terminate_session("s1", "session closed"), 1);
+        assert_ended(&mut c);
+        p.stop();
+    }
+
+    #[test]
+    fn a_name_the_policy_refuses_is_never_looked_up() {
+        use std::sync::atomic::AtomicUsize;
+        static LOOKUPS: AtomicUsize = AtomicUsize::new(0);
+        static LOOKED: Mutex<Vec<String>> = Mutex::new(Vec::new());
+        fn counting(h: &str, p: u16) -> std::io::Result<Vec<IpAddr>> {
+            LOOKUPS.fetch_add(1, Ordering::SeqCst);
+            LOOKED.lock().unwrap().push(h.to_string());
+            resolver(h, p)
+        }
+        let up = echo_server();
+        // lab policy with the loopback allow removed: coding-session has no address rule that could allow port 443/up
+        let (sh, p) = start_with(None, lab_policy(up.port()), Box::new(counting), Limits::default());
+        for name in ["forbidden.test", "denied.test"] {
+            let mut d = TcpStream::connect(("127.0.0.1", p.port)).unwrap();
+            write!(d, "CONNECT {name}:{} HTTP/1.1\r\n\r\n", up.port()).unwrap();
+            assert!(read_some(&mut d).starts_with("HTTP/1.1 403"));
+        }
+        std::thread::sleep(Duration::from_millis(50));
+        let looked = LOOKED.lock().unwrap().clone();
+        assert!(!looked.iter().any(|h| h == "forbidden.test" || h == "denied.test"), "refused names were resolved: {looked:?}");
+        let evs = sh.drain_events();
+        assert!(
+            evs.iter().all(|e| !matches!(e, Event::Flow { attempt, .. } if attempt["dns_lookup"] != "refused_before_lookup")),
+            "{evs:?}"
+        );
+        // positive control: the allowed name is resolved (so the counter does observe lookups)
+        drop(open_tunnel(&p, up.port()));
+        assert!(LOOKED.lock().unwrap().iter().any(|h| h == "allowed.test"));
+        p.stop();
+    }
+
+    #[test]
+    fn exhaustion_refuses_and_reports_rather_than_bypassing() {
+        let up = echo_server();
+        let (sh, p) = start_with(None, lab_policy(up.port()), Box::new(resolver), Limits { max_connections: 1, max_lookups: 16 });
+        let _held = open_tunnel(&p, up.port());
+        wait_streams(&sh, 1);
+        let mut d = TcpStream::connect(("127.0.0.1", p.port)).unwrap();
+        write!(d, "CONNECT allowed.test:{} HTTP/1.1\r\n\r\n", up.port()).unwrap();
+        assert_eq!(read_some(&mut d), "", "over the connection bound: closed, not tunnelled");
+        std::thread::sleep(Duration::from_millis(50));
+        assert!(sh.drain_events().iter().any(|e| matches!(e, Event::ProxyLimit { resource, limit: 1, .. } if resource == "connections")));
         p.stop();
     }
 }

@@ -369,6 +369,100 @@ pub fn evaluate(ctx: &EvalContext, f: &FlowAttempt) -> Decision {
     }
 }
 
+/// What the policy can decide about a hostname **before** any DNS lookup (W05).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum HostnameAdmission {
+    /// Denied whatever the name resolves to: no lookup may be made.
+    DenyWithoutLookup { reason: String },
+    /// A rule allows the name by name; resolve it, then re-check every resolved address.
+    ResolveAllowedName,
+    /// Only address-based rules could allow it, so the name must be resolved to know. This is a DNS exposure the
+    /// policy implies (the name is not permitted by name) and is reported as such.
+    ResolveForAddressRules,
+}
+
+fn dest_matches_name(ctx: &EvalContext, d: &Destinations, host: &str, depth: u8) -> bool {
+    if d.hosts.iter().any(|p| host_matches(p, host)) {
+        return true;
+    }
+    if d.providers.iter().any(|pm| {
+        pm.mode != ProviderMode::KnownIps
+            && match_endpoint(ctx.enricher.patterns(), host)
+                .is_some_and(|m| m.provider == pm.provider && (pm.regions.is_empty() || pm.regions.contains(&m.region)))
+    }) {
+        return true;
+    }
+    depth == 0
+        && d.sets.iter().any(|s| ctx.policy.destination_sets.get(s).is_some_and(|set| dest_matches_name(ctx, &set.destinations, host, 1)))
+}
+
+/// Could this destination match some address, independent of the name?
+fn dest_address_dependent(ctx: &EvalContext, d: &Destinations, depth: u8) -> bool {
+    d.any
+        || !d.cidrs.is_empty()
+        || !d.scopes.is_empty()
+        || d.providers.iter().any(|pm| pm.mode != ProviderMode::RegionEndpoints)
+        || (depth == 0
+            && d.sets
+                .iter()
+                .any(|s| ctx.policy.destination_sets.get(s).is_some_and(|set| dest_address_dependent(ctx, &set.destinations, 1))))
+}
+
+/// Decide what may happen to a hostname before resolving it. `f` carries the hostname evidence, port, transport,
+/// session and time; its address is ignored. Exact with respect to [`evaluate`]: `DenyWithoutLookup` is returned
+/// only when no resolved address could make any allow win.
+pub fn hostname_admission(ctx: &EvalContext, f: &FlowAttempt) -> HostnameAdmission {
+    let Some(h) = &f.hostname else { return HostnameAdmission::ResolveForAddressRules };
+    let mut notes = Vec::new();
+    let mut name_deny: Option<(u8, String)> = None;
+    let mut allow_rank: Option<u8> = None;
+    let mut name_allow = false;
+    for r in &ctx.policy.rules {
+        if r.expires_at.is_some_and(|e| e <= f.at) || !r.transport.matches(f.transport) {
+            continue;
+        }
+        if !r.ports.is_empty() && !r.ports.iter().any(|p| p.contains(f.remote_port)) {
+            continue;
+        }
+        if !selector_matches(ctx, &r.selector, f, &mut notes) {
+            continue;
+        }
+        let by_name = dest_matches_name(ctx, &r.destinations, &h.name, 0);
+        let by_addr = dest_address_dependent(ctx, &r.destinations, 0);
+        match r.action {
+            Action::Deny if by_name => {
+                if name_deny.as_ref().map_or(true, |(rank, _)| r.layer.rank() < *rank) {
+                    name_deny = Some((r.layer.rank(), r.id.clone()));
+                }
+            }
+            Action::Allow if by_name || by_addr => {
+                name_allow |= by_name;
+                allow_rank = Some(allow_rank.map_or(r.layer.rank(), |a| a.min(r.layer.rank())));
+            }
+            _ => {}
+        }
+    }
+    let profile_id = profile_for(ctx, f, &mut notes).to_string();
+    let default = ctx.policy.profile(&profile_id).map(|p| p.default).unwrap_or(DefaultAction::Deny);
+    if let Some((rank, id)) = &name_deny {
+        // a deny wins against allows in lower layers and (deny beats allow) in its own layer
+        if allow_rank.map_or(true, |a| a >= *rank) {
+            return HostnameAdmission::DenyWithoutLookup { reason: format!("{} is denied by rule {id} whatever it resolves to", h.name) };
+        }
+    }
+    if allow_rank.is_none() && default == DefaultAction::Deny {
+        return HostnameAdmission::DenyWithoutLookup {
+            reason: format!("no rule can allow {} and the {profile_id} profile denies by default", h.name),
+        };
+    }
+    if name_allow {
+        HostnameAdmission::ResolveAllowedName
+    } else {
+        HostnameAdmission::ResolveForAddressRules
+    }
+}
+
 /// Convenience: a scope check used by UI copy.
 pub fn scope_of(f: &FlowAttempt) -> NetScope {
     classify(f.remote_ip)

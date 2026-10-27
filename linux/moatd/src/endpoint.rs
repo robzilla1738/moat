@@ -271,6 +271,14 @@ impl<B: NftBackend> Endpoint<B> {
             self.spool.append(Event::LocalIsolation { active: rec.isolation.active, by_uid: rec.changed_by_uid.unwrap_or(0) });
         }
         self.recovery = rec;
+        // W05 stream contract: isolation ends every proxied stream and refuses new ones; on every tick each open
+        // stream is re-checked at the current time, so an expired rule or grant ends it within one tick.
+        if let Some(m) = &self.proxy {
+            if m.shared.isolated.load(std::sync::atomic::Ordering::SeqCst) != self.recovery.isolation.active {
+                m.shared.set_isolated(self.recovery.isolation.active);
+            }
+            m.shared.revalidate(Utc::now());
+        }
         self.drain_proxy_events();
         self.tick_trial(Utc::now());
         // Isolation first: it is independent of policy and of the disable switch.

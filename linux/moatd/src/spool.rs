@@ -106,6 +106,22 @@ pub enum Event {
         revision: u64,
         reason: String,
     },
+    /// A proxied stream was ended by Moat (policy or grant no longer allows it, isolation, session closed).
+    StreamTerminated {
+        session_id: String,
+        stream: u64,
+        destination: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        hostname: Option<String>,
+        admitted_by: String,
+        reason: String,
+    },
+    /// The session proxy refused a connection because a resource bound was reached (never a silent bypass).
+    ProxyLimit {
+        session_id: String,
+        resource: String,
+        limit: u64,
+    },
     /// One connection decided by the session egress proxy (TCP inside a protected session). `attempt` is a
     /// moat-core FlowAttempt whose hostname evidence names its source (sni / connect_proxy / http_host); `decision`
     /// carries verdict, winning rule and profile. No payload is inspected beyond the first TLS record or HTTP header.
