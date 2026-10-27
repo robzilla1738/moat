@@ -23,9 +23,17 @@
       "backend": "moat-core 0.1.0",
       "evidence_level": "semantic",
       "disposition": "implemented_unproven",
-      "tests": ["core/moat-core/src/policy.rs::tests", "conformance/cases/policy"],
+      "tests": [
+        "core/moat-core/src/policy.rs::tests",
+        "conformance/cases/policy"
+      ],
       "environment": "unit",
-      "last_result": { "result": "pass", "run": "rust 40493342610", "commit": "d5270bd", "date": "2026-10-27" },
+      "last_result": {
+        "result": "pass",
+        "run": "rust 40493342610",
+        "commit": "d5270bd",
+        "date": "2026-10-27"
+      },
       "limits": "Pure semantics. Says nothing about any endpoint enforcing the policy.",
       "open_defects": []
     },
@@ -35,23 +43,40 @@
       "backend": "moat-core 0.1.0 evaluator",
       "evidence_level": "semantic",
       "disposition": "implemented_unproven",
-      "tests": ["core/moat-core/src/eval.rs::tests", "core/moat-core/tests/properties.rs", "conformance/cases/policy"],
+      "tests": [
+        "core/moat-core/src/eval.rs::tests",
+        "core/moat-core/tests/properties.rs",
+        "conformance/cases/policy"
+      ],
       "environment": "unit",
-      "last_result": { "result": "pass", "run": "rust 40493342610", "commit": "d5270bd", "date": "2026-10-27" },
-      "limits": "Profile selection is first match in list order; overlapping profiles are not rejected (see defect D-PROFILE-ORDER).",
-      "open_defects": ["D-PROFILE-ORDER"]
+      "last_result": {
+        "result": "pass",
+        "run": "rust 40493342610",
+        "commit": "d5270bd",
+        "date": "2026-10-27"
+      },
+      "limits": "First-match profile order is documented and reorders are classified as broadening; overlapping profiles are allowed.",
+      "open_defects": []
     },
     {
       "id": "core.diff.broadening",
       "capability": "policy diff classifies every change that can permit previously denied traffic as broadening",
       "backend": "moat-core 0.1.0 diff",
       "evidence_level": "semantic",
-      "disposition": "unknown_degraded",
-      "tests": ["core/moat-core/src/diff.rs::tests"],
+      "disposition": "implemented_unproven",
+      "tests": [
+        "core/moat-core/src/diff.rs::tests",
+        "core/moat-core/tests/broadening_differential.rs (2000 random policy edits per run, exhaustive flow universe)"
+      ],
       "environment": "unit",
-      "last_result": { "result": "pass", "run": "rust 40493342610", "commit": "d5270bd", "date": "2026-10-27" },
-      "limits": "Known misses: profile reorder/overlap, a shortened deny expiry, and fields the diff does not inspect. The signer relies on this classification, so its owner-key gate inherits these misses.",
-      "open_defects": ["D-DIFF-REORDER", "D-DIFF-SHORTENED-DENY", "D-DIFF-UNKNOWN-FIELDS"]
+      "last_result": {
+        "result": "pass",
+        "run": "local cargo test, branch w02-semantics",
+        "commit": "w02-semantics",
+        "date": "2026-10-27"
+      },
+      "limits": "Conservative: hostname wildcard subsumption and set-content reasoning are syntactic, so some safe edits are reported as broadening. The signer (Lane B) still parses the human 'new allow rule' strings; it should switch to the structured changes field.",
+      "open_defects": []
     },
     {
       "id": "core.compile.capability-gate",
@@ -59,11 +84,19 @@
       "backend": "moat-core 0.1.0 compiler",
       "evidence_level": "semantic",
       "disposition": "implemented_unproven",
-      "tests": ["core/moat-core/src/compile.rs::tests", "conformance/cases/compile"],
+      "tests": [
+        "core/moat-core/src/compile.rs::tests",
+        "conformance/cases/compile"
+      ],
       "environment": "unit",
-      "last_result": { "result": "pass", "run": "rust 40493342610", "commit": "d5270bd", "date": "2026-10-27" },
-      "limits": "Profiles are not capability-checked: an app-scoped default-deny profile on a backend without app enforcement silently falls back to the fallback profile.",
-      "open_defects": ["D-PROFILE-CAPABILITY"]
+      "last_result": {
+        "result": "pass",
+        "run": "local cargo test, branch w02-semantics",
+        "commit": "w02-semantics",
+        "date": "2026-10-27"
+      },
+      "limits": "Profiles are capability-checked: unsupported deny profiles fail compilation; other unsupported profiles are omitted only when the fallback is at least as strict. Linux backend id collisions are rejected.",
+      "open_defects": []
     },
     {
       "id": "core.signing.snapshot",
@@ -71,11 +104,20 @@
       "backend": "moat-core 0.1.0 signing",
       "evidence_level": "semantic",
       "disposition": "implemented_unproven",
-      "tests": ["core/moat-core/src/signing.rs::tests"],
+      "tests": [
+        "core/moat-core/src/signing.rs::tests"
+      ],
       "environment": "unit",
-      "last_result": { "result": "pass", "run": "rust 40493342610", "commit": "d5270bd", "date": "2026-10-27" },
+      "last_result": {
+        "result": "pass",
+        "run": "rust 40493342610",
+        "commit": "d5270bd",
+        "date": "2026-10-27"
+      },
       "limits": "Policy digest is serde_json of the source policy, not a specified canonical form, and excludes the grant overlay identity (W01/W03).",
-      "open_defects": ["D-DIGEST-CANONICAL"]
+      "open_defects": [
+        "D-DIGEST-CANONICAL"
+      ]
     },
     {
       "id": "core.grant.scope",
@@ -85,9 +127,17 @@
       "disposition": "unsupported_rejected",
       "tests": [],
       "environment": "ci-node-22",
-      "last_result": { "result": "fail", "run": "review of d5270bd", "commit": "d5270bd", "date": "2026-10-27" },
+      "last_result": {
+        "result": "fail",
+        "run": "review of d5270bd",
+        "commit": "d5270bd",
+        "date": "2026-10-27"
+      },
       "limits": "The policy schema has no device or process-instance selector; grantToml drops device_id and renders process_instance as an executable path, so an app grant applies on every device running that executable and survives process restart.",
-      "open_defects": ["D-GRANT-SCOPE-LOSS", "D-GRANT-IDEMPOTENCY"]
+      "open_defects": [
+        "D-GRANT-SCOPE-LOSS",
+        "D-GRANT-IDEMPOTENCY"
+      ]
     },
     {
       "id": "linux.session.direct-egress",
@@ -95,11 +145,22 @@
       "backend": "moatd-nftables 0.1.0",
       "evidence_level": "native_ci",
       "disposition": "implemented_unproven",
-      "tests": ["linux/tests/netns-enforcement.sh", "linux/moatd/tests/privileged.rs"],
+      "tests": [
+        "linux/tests/netns-enforcement.sh",
+        "linux/moatd/tests/privileged.rs"
+      ],
       "environment": "ci-ubuntu-26.04-x86_64",
-      "last_result": { "result": "pass", "run": "linux-endpoint 40493342431", "commit": "d5270bd", "date": "2026-10-27" },
+      "last_result": {
+        "result": "pass",
+        "run": "linux-endpoint 40493342431",
+        "commit": "d5270bd",
+        "date": "2026-10-27"
+      },
       "limits": "Run by the test script as root, not by the installed systemd service. Omarchy kernel untested. New packets of established flows hit the rule; no conntrack flush.",
-      "open_defects": ["D-LAUNCH-AUTHORITY", "D-SYSTEMD-WORKSPACE"]
+      "open_defects": [
+        "D-LAUNCH-AUTHORITY",
+        "D-SYSTEMD-WORKSPACE"
+      ]
     },
     {
       "id": "linux.session.launch-authority",
@@ -109,9 +170,16 @@
       "disposition": "unsupported_rejected",
       "tests": [],
       "environment": "ci-ubuntu-26.04-x86_64",
-      "last_result": { "result": "fail", "run": "review of d5270bd", "commit": "d5270bd", "date": "2026-10-27" },
+      "last_result": {
+        "result": "fail",
+        "run": "review of d5270bd",
+        "commit": "d5270bd",
+        "date": "2026-10-27"
+      },
       "limits": "The socket is 0666 and the launch handler never checks the caller's cgroup, so a workload inside a session can request any other profile.",
-      "open_defects": ["D-LAUNCH-AUTHORITY"]
+      "open_defects": [
+        "D-LAUNCH-AUTHORITY"
+      ]
     },
     {
       "id": "linux.session.hostname-proxy",
@@ -119,11 +187,22 @@
       "backend": "moatd egress proxy 0.1.0",
       "evidence_level": "native_ci",
       "disposition": "implemented_unproven",
-      "tests": ["linux/moatd/src/proxy.rs::tests", "linux/tests/netns-enforcement.sh (proxy checks)"],
+      "tests": [
+        "linux/moatd/src/proxy.rs::tests",
+        "linux/tests/netns-enforcement.sh (proxy checks)"
+      ],
       "environment": "ci-ubuntu-26.04-x86_64",
-      "last_result": { "result": "pass", "run": "linux-endpoint 40493342431", "commit": "d5270bd", "date": "2026-10-27" },
+      "last_result": {
+        "result": "pass",
+        "run": "linux-endpoint 40493342431",
+        "commit": "d5270bd",
+        "date": "2026-10-27"
+      },
       "limits": "Admission-only: open streams are not cancelled at grant expiry or deny. Name resolution happens before authorization for some paths. Domain fronting through an allowed host remains possible. UDP is IP-only.",
-      "open_defects": ["D-PROXY-DNS-BEFORE-AUTH", "D-PROXY-STREAM-LIFETIME"]
+      "open_defects": [
+        "D-PROXY-DNS-BEFORE-AUTH",
+        "D-PROXY-STREAM-LIFETIME"
+      ]
     },
     {
       "id": "linux.activation.trial-rollback",
@@ -131,11 +210,21 @@
       "backend": "moatd 0.1.0",
       "evidence_level": "native_ci",
       "disposition": "implemented_unproven",
-      "tests": ["linux/moatd/src/endpoint.rs::tests", "linux/tests/netns-enforcement.sh (trial checks)"],
+      "tests": [
+        "linux/moatd/src/endpoint.rs::tests",
+        "linux/tests/netns-enforcement.sh (trial checks)"
+      ],
       "environment": "ci-ubuntu-26.04-x86_64",
-      "last_result": { "result": "pass", "run": "linux-endpoint 40493342431", "commit": "d5270bd", "date": "2026-10-27" },
+      "last_result": {
+        "result": "pass",
+        "run": "linux-endpoint 40493342431",
+        "commit": "d5270bd",
+        "date": "2026-10-27"
+      },
       "limits": "No durable activation journal; disk-full, failed rename, corrupt file and crash-at-each-step are not fault-injected.",
-      "open_defects": ["D-ACTIVATION-JOURNAL"]
+      "open_defects": [
+        "D-ACTIVATION-JOURNAL"
+      ]
     },
     {
       "id": "linux.spool.gaps",
@@ -143,9 +232,16 @@
       "backend": "moatd spool 0.1.0",
       "evidence_level": "component",
       "disposition": "implemented_unproven",
-      "tests": ["linux/moatd/src/spool.rs::tests"],
+      "tests": [
+        "linux/moatd/src/spool.rs::tests"
+      ],
       "environment": "unit",
-      "last_result": { "result": "pass", "run": "rust 40493342610", "commit": "d5270bd", "date": "2026-10-27" },
+      "last_result": {
+        "result": "pass",
+        "run": "rust 40493342610",
+        "commit": "d5270bd",
+        "date": "2026-10-27"
+      },
       "limits": "Spool events do not yet carry the W01 event envelope (boot, clock uncertainty, producer authority).",
       "open_defects": []
     },
@@ -157,7 +253,12 @@
       "disposition": "unsupported_rejected",
       "tests": [],
       "environment": "unit",
-      "last_result": { "result": "not_run", "run": "", "commit": "d5270bd", "date": "2026-10-27" },
+      "last_result": {
+        "result": "not_run",
+        "run": "",
+        "commit": "d5270bd",
+        "date": "2026-10-27"
+      },
       "limits": "Not implemented. W09 experiment and W10 decide the collector.",
       "open_defects": []
     },
@@ -167,9 +268,16 @@
       "backend": "moatd-nftables 0.1.0",
       "evidence_level": "semantic",
       "disposition": "unsupported_rejected",
-      "tests": ["conformance/cases/compile"],
+      "tests": [
+        "conformance/cases/compile"
+      ],
       "environment": "unit",
-      "last_result": { "result": "pass", "run": "rust 40493342610", "commit": "d5270bd", "date": "2026-10-27" },
+      "last_result": {
+        "result": "pass",
+        "run": "rust 40493342610",
+        "commit": "d5270bd",
+        "date": "2026-10-27"
+      },
       "limits": "nftables cannot match executables; app rules are rejected at compile (allows that opt in are omitted with a report).",
       "open_defects": []
     },
@@ -181,9 +289,16 @@
       "disposition": "unknown_degraded",
       "tests": [],
       "environment": "omarchy-installed",
-      "last_result": { "result": "not_run", "run": "", "commit": "d5270bd", "date": "2026-10-27" },
+      "last_result": {
+        "result": "not_run",
+        "run": "",
+        "commit": "d5270bd",
+        "date": "2026-10-27"
+      },
       "limits": "Service sandboxing (ProtectHome/ProtectSystem and similar) is inherited by launched workloads and is expected to block project writes.",
-      "open_defects": ["D-SYSTEMD-WORKSPACE"]
+      "open_defects": [
+        "D-SYSTEMD-WORKSPACE"
+      ]
     },
     {
       "id": "macos.filter.app-rules",
@@ -191,11 +306,20 @@
       "backend": "moat-macos-ne 0.1.0",
       "evidence_level": "component",
       "disposition": "implemented_unproven",
-      "tests": ["macos/MoatKit/Tests"],
+      "tests": [
+        "macos/MoatKit/Tests"
+      ],
       "environment": "ci-macos-26",
-      "last_result": { "result": "pass", "run": "macos 40493342625", "commit": "d5270bd", "date": "2026-10-27" },
+      "last_result": {
+        "result": "pass",
+        "run": "macos 40493342625",
+        "commit": "d5270bd",
+        "date": "2026-10-27"
+      },
       "limits": "Never run as a signed, approved system extension. Owned by Lane B (macos/); listed here so the ledger is complete.",
-      "open_defects": ["D-MAC-CACHE-TRUST"]
+      "open_defects": [
+        "D-MAC-CACHE-TRUST"
+      ]
     },
     {
       "id": "fleet.web.live-actions",
@@ -203,11 +327,22 @@
       "backend": "web + controller",
       "evidence_level": "component",
       "disposition": "unknown_degraded",
-      "tests": ["web tests", "controller tests"],
+      "tests": [
+        "web tests",
+        "controller tests"
+      ],
       "environment": "ci-node-22",
-      "last_result": { "result": "fail", "run": "review of d5270bd", "commit": "d5270bd", "date": "2026-10-27" },
+      "last_result": {
+        "result": "fail",
+        "run": "review of d5270bd",
+        "commit": "d5270bd",
+        "date": "2026-10-27"
+      },
       "limits": "Owned by Lane B (W08). Live mode still reuses demo success behavior and incident references can open the wrong incident.",
-      "open_defects": ["D-WEB-DEMO-SUCCESS", "D-INCIDENT-ROUTING"]
+      "open_defects": [
+        "D-WEB-DEMO-SUCCESS",
+        "D-INCIDENT-ROUTING"
+      ]
     },
     {
       "id": "vpn.coexistence",
@@ -215,29 +350,141 @@
       "backend": "all",
       "evidence_level": "none",
       "disposition": "unknown_degraded",
-      "tests": ["docs/vpn-test-matrix.md (written, not run)"],
+      "tests": [
+        "docs/vpn-test-matrix.md (written, not run)"
+      ],
       "environment": "omarchy-installed",
-      "last_result": { "result": "not_run", "run": "", "commit": "d5270bd", "date": "2026-10-27" },
+      "last_result": {
+        "result": "not_run",
+        "run": "",
+        "commit": "d5270bd",
+        "date": "2026-10-27"
+      },
       "limits": "No VPN claim.",
       "open_defects": []
     }
   ],
   "defects": [
-    { "id": "D-PROFILE-ORDER", "summary": "Profile selection is implicit first match in list order; overlapping profiles are accepted.", "package": "W02", "status": "open" },
-    { "id": "D-DIFF-REORDER", "summary": "Reordering overlapping profiles changes which default applies but is not classified as broadening.", "package": "W02", "status": "open" },
-    { "id": "D-DIFF-SHORTENED-DENY", "summary": "Shortening a deny's expiry is classified as narrowing.", "package": "W02", "status": "open" },
-    { "id": "D-DIFF-UNKNOWN-FIELDS", "summary": "Changes to fields the diff does not inspect are not classified as broadening.", "package": "W02", "status": "open" },
-    { "id": "D-PROFILE-CAPABILITY", "summary": "Unsupported restrictive profiles compile and silently fall back.", "package": "W02", "status": "open" },
-    { "id": "D-DIGEST-CANONICAL", "summary": "Digests use implementation serialization, not a specified canonical form; the effective digest excludes overlays.", "package": "W01/W03", "status": "open" },
-    { "id": "D-GRANT-SCOPE-LOSS", "summary": "Generated grants lose device and process-generation scope.", "package": "W03", "status": "open" },
-    { "id": "D-GRANT-IDEMPOTENCY", "summary": "A retried grant request mints a fresh expiry instead of preserving the original.", "package": "W03", "status": "open" },
-    { "id": "D-LAUNCH-AUTHORITY", "summary": "A contained caller can request a looser session through the control socket.", "package": "W04", "status": "open" },
-    { "id": "D-PROXY-DNS-BEFORE-AUTH", "summary": "A denied hostname can be resolved before authorization.", "package": "W05", "status": "open" },
-    { "id": "D-PROXY-STREAM-LIFETIME", "summary": "No stream registry; admission and stream expiry are not distinguished.", "package": "W05", "status": "open" },
-    { "id": "D-ACTIVATION-JOURNAL", "summary": "Apply/rollback state is not journaled; storage failures are not fault-tested.", "package": "W06", "status": "open" },
-    { "id": "D-SYSTEMD-WORKSPACE", "summary": "Packaged systemd restrictions break launched coding workloads.", "package": "W11", "status": "open" },
-    { "id": "D-MAC-CACHE-TRUST", "summary": "Mac cache, trust reload, first canary and stale status gaps.", "package": "W06-W08 (Lane B)", "status": "open" },
-    { "id": "D-WEB-DEMO-SUCCESS", "summary": "Live web actions reuse demo success behavior.", "package": "W08 (Lane B)", "status": "open" },
-    { "id": "D-INCIDENT-ROUTING", "summary": "A notification reference can open the wrong incident.", "package": "W08/W13 (Lane B)", "status": "open" }
+    {
+      "id": "D-PROFILE-ORDER",
+      "summary": "Profile selection is implicit first match in list order; overlapping profiles are accepted.",
+      "package": "W02",
+      "status": "closed",
+      "closed_by": "W02 (core/moat-core/src/diff.rs, compile.rs, backend_ids.rs)",
+      "regression_tests": [
+        "diff::tests::reordering_selectable_profiles_with_different_defaults_is_broadening",
+        "docs/policy-semantics.md#profile-selection-is-first-match-and-order-is-authority"
+      ]
+    },
+    {
+      "id": "D-DIFF-REORDER",
+      "summary": "Reordering overlapping profiles changes which default applies but is not classified as broadening.",
+      "package": "W02",
+      "status": "closed",
+      "closed_by": "W02 (core/moat-core/src/diff.rs, compile.rs, backend_ids.rs)",
+      "regression_tests": [
+        "diff::tests::reordering_selectable_profiles_with_different_defaults_is_broadening",
+        "tests/broadening_differential.rs"
+      ]
+    },
+    {
+      "id": "D-DIFF-SHORTENED-DENY",
+      "summary": "Shortening a deny's expiry is classified as narrowing.",
+      "package": "W02",
+      "status": "closed",
+      "closed_by": "W02 (core/moat-core/src/diff.rs, compile.rs, backend_ids.rs)",
+      "regression_tests": [
+        "diff::tests::shortening_a_deny_is_broadening",
+        "tests/broadening_differential.rs"
+      ]
+    },
+    {
+      "id": "D-DIFF-UNKNOWN-FIELDS",
+      "summary": "Changes to fields the diff does not inspect are not classified as broadening.",
+      "package": "W02",
+      "status": "closed",
+      "closed_by": "W02 (core/moat-core/src/diff.rs, compile.rs, backend_ids.rs)",
+      "regression_tests": [
+        "diff::tests::previously_ignored_fields_are_classified",
+        "exhaustive destructuring in diff.rs"
+      ]
+    },
+    {
+      "id": "D-PROFILE-CAPABILITY",
+      "summary": "Unsupported restrictive profiles compile and silently fall back.",
+      "package": "W02",
+      "status": "closed",
+      "closed_by": "W02 (core/moat-core/src/diff.rs, compile.rs, backend_ids.rs)",
+      "regression_tests": [
+        "compile::tests::unsupported_restrictive_profile_fails_compilation",
+        "compile::tests::unsupported_permissive_profile_is_omitted_when_fallback_is_stricter"
+      ]
+    },
+    {
+      "id": "D-DIGEST-CANONICAL",
+      "summary": "Digests use implementation serialization, not a specified canonical form; the effective digest excludes overlays.",
+      "package": "W01/W03",
+      "status": "open"
+    },
+    {
+      "id": "D-GRANT-SCOPE-LOSS",
+      "summary": "Generated grants lose device and process-generation scope.",
+      "package": "W03",
+      "status": "open"
+    },
+    {
+      "id": "D-GRANT-IDEMPOTENCY",
+      "summary": "A retried grant request mints a fresh expiry instead of preserving the original.",
+      "package": "W03",
+      "status": "open"
+    },
+    {
+      "id": "D-LAUNCH-AUTHORITY",
+      "summary": "A contained caller can request a looser session through the control socket.",
+      "package": "W04",
+      "status": "open"
+    },
+    {
+      "id": "D-PROXY-DNS-BEFORE-AUTH",
+      "summary": "A denied hostname can be resolved before authorization.",
+      "package": "W05",
+      "status": "open"
+    },
+    {
+      "id": "D-PROXY-STREAM-LIFETIME",
+      "summary": "No stream registry; admission and stream expiry are not distinguished.",
+      "package": "W05",
+      "status": "open"
+    },
+    {
+      "id": "D-ACTIVATION-JOURNAL",
+      "summary": "Apply/rollback state is not journaled; storage failures are not fault-tested.",
+      "package": "W06",
+      "status": "open"
+    },
+    {
+      "id": "D-SYSTEMD-WORKSPACE",
+      "summary": "Packaged systemd restrictions break launched coding workloads.",
+      "package": "W11",
+      "status": "open"
+    },
+    {
+      "id": "D-MAC-CACHE-TRUST",
+      "summary": "Mac cache, trust reload, first canary and stale status gaps.",
+      "package": "W06-W08 (Lane B)",
+      "status": "open"
+    },
+    {
+      "id": "D-WEB-DEMO-SUCCESS",
+      "summary": "Live web actions reuse demo success behavior.",
+      "package": "W08 (Lane B)",
+      "status": "open"
+    },
+    {
+      "id": "D-INCIDENT-ROUTING",
+      "summary": "A notification reference can open the wrong incident.",
+      "package": "W08/W13 (Lane B)",
+      "status": "open"
+    }
   ]
 }

@@ -10,8 +10,9 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::capability::{Capability, CapabilityAdvertisement, Platform, Support};
+use crate::contracts::{Disposition, ItemDisposition, Omission};
 use crate::net::Transport;
-use crate::policy::{Action, OnUnsupported, Policy, PolicyError};
+use crate::policy::{Action, DefaultAction, OnUnsupported, Policy, PolicyError, Profile};
 
 pub const SNAPSHOT_SCHEMA: &str = "moat.snapshot.v1";
 
@@ -40,6 +41,10 @@ pub struct CompileReport {
     pub required_capabilities: BTreeSet<Capability>,
     /// Session profiles that cannot be launched on this platform (the launcher refuses them).
     pub unavailable_session_profiles: Vec<String>,
+    /// Per-profile and per-rule dispositions (contracts `moat.capability_dispositions.v1` items). Compiled items are
+    /// `implemented_unproven`: compilation alone never proves an installed capability.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub items: Vec<ItemDisposition>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -74,6 +79,98 @@ pub struct CompileOptions {
 pub fn policy_digest(p: &Policy) -> String {
     let bytes = serde_json::to_vec(p).expect("policy serializes");
     hex::encode(Sha256::digest(bytes))
+}
+
+fn capability_name(c: Capability) -> String {
+    serde_json::to_value(c).ok().and_then(|v| v.as_str().map(str::to_string)).unwrap_or_default()
+}
+
+fn restrictiveness(d: DefaultAction) -> u8 {
+    match d {
+        DefaultAction::Deny => 2,
+        DefaultAction::Observe => 1,
+        DefaultAction::Allow => 0,
+    }
+}
+
+/// Capabilities a profile's `applies_to` needs to select its flows.
+pub fn profile_capabilities(p: &Profile) -> BTreeSet<Capability> {
+    let mut caps = BTreeSet::new();
+    if !p.applies_to.apps.is_empty() {
+        caps.insert(Capability::AppEnforcement);
+    }
+    if !p.applies_to.ancestors.is_empty() {
+        caps.insert(Capability::AncestorAttribution);
+    }
+    if !p.applies_to.users.is_empty() {
+        caps.insert(Capability::UserEnforcement);
+    }
+    caps
+}
+
+/// Profiles are capability-checked like rules (W02, D-PROFILE-CAPABILITY). A profile whose selector the backend
+/// cannot evaluate would silently hand its flows to the fallback profile. That is accepted (and reported) only when
+/// the fallback is at least as restrictive; otherwise the policy is rejected for this platform.
+fn check_profiles(
+    policy: &Policy,
+    adv: &CapabilityAdvertisement,
+    sessions_supported: bool,
+    report: &mut CompileReport,
+    errors: &mut Vec<PolicyError>,
+) {
+    let fallback = policy.profile(&policy.fallback_profile).map(|p| p.default).unwrap_or(DefaultAction::Deny);
+    for (i, p) in policy.profiles.iter().enumerate() {
+        let session_only = p.applies_to.session.is_some();
+        let mut missing: Vec<Capability> =
+            profile_capabilities(p).into_iter().filter(|c| adv.support(*c) == Support::Unsupported).collect();
+        if session_only && !sessions_supported {
+            missing.push(Capability::SessionEnforcement);
+        }
+        let restrictive = p.default == DefaultAction::Deny;
+        if missing.is_empty() {
+            let unavailable = !sessions_supported && report.unavailable_session_profiles.contains(&p.id);
+            report.items.push(ItemDisposition {
+                item: format!("profile:{}", p.id),
+                restrictive,
+                disposition: if unavailable { Disposition::OmittedAccepted } else { Disposition::ImplementedUnproven },
+                omission: unavailable.then_some(Omission::SubjectUnavailable),
+                missing: vec![],
+                note: (!sessions_supported && report.unavailable_session_profiles.contains(&p.id))
+                    .then(|| "protected sessions are refused at launch on this platform".to_string()),
+            });
+            continue;
+        }
+        let mut names: Vec<String> = missing.iter().map(|c| capability_name(*c)).collect();
+        names.sort();
+        names.dedup();
+        if session_only || (!restrictive && restrictiveness(fallback) >= restrictiveness(p.default)) {
+            report.items.push(ItemDisposition {
+                item: format!("profile:{}", p.id),
+                restrictive,
+                disposition: Disposition::OmittedAccepted,
+                omission: Some(if session_only { Omission::SubjectUnavailable } else { Omission::Stricter }),
+                missing: names.clone(),
+                note: Some(format!(
+                    "{} cannot select this profile's flows; they fall to the fallback profile {}, which is at least as strict",
+                    adv.adapter, policy.fallback_profile
+                )),
+            });
+        } else {
+            let labels: Vec<&str> = missing.iter().map(|c| c.label()).collect();
+            errors.push(PolicyError {
+                path: format!("profiles[{i}]"),
+                message: format!(
+                    "profile {} needs {} which {} on {} does not support; its flows would silently fall back to the less \
+                     restrictive profile {} (refusing to compile)",
+                    p.id,
+                    labels.join(", "),
+                    adv.adapter,
+                    adv.platform.label(),
+                    policy.fallback_profile
+                ),
+            });
+        }
+    }
 }
 
 pub fn compile(policy: &Policy, adv: &CapabilityAdvertisement, opts: &CompileOptions) -> Result<Snapshot, Vec<PolicyError>> {
@@ -192,9 +289,42 @@ pub fn compile(policy: &Policy, adv: &CapabilityAdvertisement, opts: &CompileOpt
         report.required_capabilities.extend(caps);
         out.rules.push(r.clone());
     }
+    check_profiles(policy, adv, sessions_supported, &mut report, &mut errors);
+    if adv.platform == Platform::Linux {
+        errors.extend(crate::backend_ids::linux_collisions(policy));
+    }
     if !errors.is_empty() {
         return Err(errors);
     }
+    for r in &out.rules {
+        report.items.push(ItemDisposition {
+            item: format!("rule:{}", r.id),
+            restrictive: r.action == Action::Deny,
+            disposition: Disposition::ImplementedUnproven,
+            omission: None,
+            missing: vec![],
+            note: None,
+        });
+    }
+    for o in &report.omitted {
+        let mut missing: Vec<String> = o.missing.iter().map(|c| capability_name(*c)).collect();
+        missing.sort();
+        missing.dedup();
+        report.items.push(ItemDisposition {
+            item: format!("rule:{}", o.rule_id),
+            restrictive: o.action == Action::Deny,
+            disposition: Disposition::OmittedAccepted,
+            // Session rules on a platform without sessions can never match; any other omission is an allow.
+            omission: Some(if o.missing.contains(&Capability::SessionEnforcement) {
+                Omission::SubjectUnavailable
+            } else {
+                Omission::Stricter
+            }),
+            missing,
+            note: Some(o.reason.clone()),
+        });
+    }
+    report.items.sort_by(|a, b| a.item.cmp(&b.item));
     Ok(Snapshot {
         schema: SNAPSHOT_SCHEMA.into(),
         revision: opts.revision,
@@ -298,5 +428,75 @@ mod tests {
         let p = with_rule("[[rules]]\nid = \"allow-z\"\naction = \"allow\"\nselector = { session = { profiles = [\"coding-session\"] } }\ndestinations = { hosts = [\"z.example\"] }\nprovenance = { kind = \"git\", reference = \"t\" }\n");
         let s = compile(&p, &CapabilityAdvertisement::linux_nftables_cgroup(), &opts()).unwrap();
         assert!(s.report.warnings.iter().any(|w| w.rule_id == "allow-z" && w.note.as_deref().unwrap().contains("TCP only")));
+    }
+
+    // D-PROFILE-CAPABILITY
+    #[test]
+    fn unsupported_restrictive_profile_fails_compilation() {
+        let p =
+            with_rule("[[profiles]]\nid = \"browser-lockdown\"\ndefault = \"deny\"\napplies_to = { apps = [{ family = \"firefox\" }] }\n");
+        p.validate().unwrap();
+        // Linux cannot select apps; the fallback observes, so omitting this deny profile would weaken it
+        let e = compile(&p, &CapabilityAdvertisement::linux_nftables_cgroup(), &opts()).unwrap_err();
+        assert!(e.iter().any(|x| x.message.contains("browser-lockdown") && x.message.contains("silently fall back")), "{e:?}");
+        // macOS can (untested) select apps: compiles, disposition implemented_unproven
+        let s = compile(&p, &CapabilityAdvertisement::macos_network_extension(), &opts()).unwrap();
+        let it = s.report.items.iter().find(|i| i.item == "profile:browser-lockdown").unwrap();
+        assert_eq!(it.disposition, Disposition::ImplementedUnproven);
+    }
+
+    #[test]
+    fn unsupported_permissive_profile_is_omitted_when_fallback_is_stricter() {
+        let mut p =
+            with_rule("[[profiles]]\nid = \"browser-open\"\ndefault = \"allow\"\napplies_to = { apps = [{ family = \"firefox\" }] }\n");
+        p.profiles.iter_mut().find(|x| x.id == p.fallback_profile.clone()).unwrap().default = DefaultAction::Observe;
+        let s = compile(&p, &CapabilityAdvertisement::linux_nftables_cgroup(), &opts()).unwrap();
+        let it = s.report.items.iter().find(|i| i.item == "profile:browser-open").unwrap();
+        assert_eq!(it.disposition, Disposition::OmittedAccepted);
+        assert_eq!(it.missing, vec!["app_enforcement".to_string()]);
+        assert!(!it.restrictive);
+    }
+
+    #[test]
+    fn colliding_backend_ids_fail_linux_compilation() {
+        let p = with_rule("[[profiles]]\nid = \"coding.session\"\ndefault = \"allow\"\n");
+        let e = compile(&p, &CapabilityAdvertisement::linux_nftables_cgroup(), &opts()).unwrap_err();
+        assert!(e.iter().any(|x| x.message.contains("same cgroup directory")), "{e:?}");
+    }
+
+    #[test]
+    fn report_items_never_omit_restrictive_items_as_stricter() {
+        for adv in [
+            CapabilityAdvertisement::linux_nftables_cgroup(),
+            CapabilityAdvertisement::linux_nftables_cgroup_ip_only(),
+            CapabilityAdvertisement::macos_network_extension(),
+        ] {
+            if let Ok(s) = compile(&home(), &adv, &opts()) {
+                for it in &s.report.items {
+                    let bad = it.restrictive && it.omission == Some(Omission::Stricter);
+                    assert!(!bad, "{} omitted as stricter on {}", it.item, adv.adapter);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn report_items_satisfy_the_disposition_contract() {
+        use crate::contracts::{CapabilityDispositions, Contract};
+        for adv in [CapabilityAdvertisement::linux_nftables_cgroup(), CapabilityAdvertisement::macos_network_extension()] {
+            let s = compile(&home(), &adv, &opts()).unwrap();
+            let d = CapabilityDispositions {
+                schema: CapabilityDispositions::SCHEMA.into(),
+                device_id: "d1".into(),
+                backend: adv.adapter.clone(),
+                backend_version: adv.adapter_version.clone(),
+                capability_generation: 1,
+                cells: vec![],
+                policy_digest: Some(format!("sha256:{}", s.policy_digest)),
+                items: s.report.items.clone(),
+            };
+            d.validate().unwrap_or_else(|e| panic!("{}: {e:?}", adv.adapter));
+            assert!(!s.report.items.is_empty());
+        }
     }
 }

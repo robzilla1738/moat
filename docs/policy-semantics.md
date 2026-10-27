@@ -61,6 +61,28 @@ So a broad LAN allow cannot silently defeat a workload deny, and a temporary gra
 `observe` as a default **permits and records**. Decisions carry `permitted_by_observation = true` and every UI says
 *observed: permitted, not enforced*, never *allowed*.
 
+### Profile selection is first match, and order is authority
+
+For ordinary (non-session) traffic the profile is the **first** profile in list order whose `applies_to` matches
+the flow; profiles whose `applies_to` is empty or session-scoped never take part. Two profiles can match the same app,
+so list order decides which default applies. The diff therefore treats a reorder of selectable profiles with
+different defaults as **broadening** (`profile_order_changed`), and any change to a profile's `applies_to` as
+broadening, because it moves flows between profiles.
+
+### Broadening classification (W02)
+
+`moat_core::diff` returns structured `changes` (`item`, `kind`, `direction`, `fields`); the human strings are display
+only. A change is broadening when it could permit traffic the old policy denied at any time for any subject. It is
+narrowing only when the classifier can prove it: an allow that matches a subset of what it matched before (selector,
+destinations, transport, ports, lifetime) at the same or lower precedence and with no fewer capability requirements;
+or a deny that matches a superset for at least as long at the same or higher precedence. Shortening a deny's expiry,
+giving a permanent deny an expiry, narrowing a deny's scope, lowering its layer, raising an allow's layer, removing an
+allow's capability requirement, growing a set used by an allow, shrinking a set used by a deny, loosening or
+re-scoping a profile, reordering selectable profiles, removing a profile, changing device groups and loosening the
+fallback are all broadening. Every field of the policy model is destructured in the classifier, so a new field cannot
+be added without classifying it. `core/moat-core/tests/broadening_differential.rs` searches random policy edits for a
+denied→permitted counterexample to any non-broadening verdict.
+
 ## Selectors
 
 All present fields must match:
@@ -112,6 +134,20 @@ launcher refuses them. Nothing is ever compiled into a weaker rule (conformance:
 `linux-ip-only-rejects-strict-hostname-rules`, `linux-ip-only-compiles-with-report`,
 `linux-session-proxy-keeps-hostname-allows`, `linux-session-proxy-rejects-udp-hostname-deny`,
 `dns-resolver-cannot-enforce-sessions`).
+
+### Profiles are capability-checked too
+
+A profile whose `applies_to` needs a capability the platform lacks (apps, ancestors, users) would hand its flows to
+the fallback profile. A **deny** profile in that position fails compilation; a non-deny profile is omitted with a
+report (`omission: stricter`) only when the fallback is at least as restrictive. Session-scoped items on a platform
+without sessions are omitted as `subject_unavailable`: sessions are refused at launch there, so they can never match.
+`report.items` lists the disposition of every profile and rule (contracts `moat.capability_dispositions.v1`).
+
+### Backend identifiers
+
+On Linux, profile ids become cgroup directories and nftables chains and rule ids become counter comments. A policy
+whose ids collide after that mapping (`coding.session` vs `coding-session`), or whose rule id imitates a counter the
+backend reserves (`default:…`, `observe:…`, `proxy:…`, `session:…`), is rejected at compile time.
 
 ## Signing, revisions and rollback
 
