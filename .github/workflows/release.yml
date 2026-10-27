@@ -1,0 +1,215 @@
+name: release
+# W15 release pipeline (MASTER_ROADMAP §15.4, §17). Builds the release assets, CycloneDX SBOMs, the licence report,
+# the release manifest and SHA256SUMS on every PR and push. On pushes to main and on v* tags it also signs:
+#   * keyless Sigstore signature over SHA256SUMS (cosign, this workflow's GitHub Actions OIDC identity), and
+#   * a GitHub build-provenance attestation for every asset (actions/attest-build-provenance).
+# No long-lived release key exists. The owner policy key is a separate trust domain (§17.1): it never enters CI and
+# is not used for releases. There is no Apple Developer ID signing or notarization here (blocked on Robert, #2).
+# The recovery drill's CI-runnable part (release/recovery-drill.sh, docs/recovery-drill.md) runs on every PR/push.
+# A v* tag publishes a GitHub prerelease only if the tag is on main and every push-to-main workflow for that commit
+# passed.
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+env:
+  RUST_TARGET: x86_64-unknown-linux-gnu
+  CARGO_CYCLONEDX_VERSION: "0.5.9"
+  CARGO_CYCLONEDX_SHA256: "9bd3e599314f50810c9d98b8b68a617ff9d3cc20873968d90b29d121f6b226ff" # x86_64-unknown-linux-musl
+  CARGO_DENY_VERSION: "0.20.2"
+  CARGO_DENY_SHA256: "9f12ed4c49936e09b48bf862b595cde2fe64fcbd9d74dfacac6131ca824c8d5f" # x86_64-unknown-linux-musl
+jobs:
+  build:
+    name: assets, SBOMs, licence report, manifest, SHA256SUMS
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0 # the manifest checks claim ancestry
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: version label
+        id: version
+        run: |
+          base=$(sed -n 's/^version *= *"\(.*\)"/\1/p' Cargo.toml | head -1)
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            v=${GITHUB_REF#refs/tags/v}
+            [[ "$v" == "$base" || "$v" == "$base"-* ]] || { echo "tag v$v does not match workspace version $base"; exit 1; }
+          else
+            sha=${{ github.event.pull_request.head.sha || github.sha }}
+            v="$base-dev.${sha:0:7}"
+          fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)" >> "$GITHUB_ENV"
+          echo "Release label: $v"
+      - name: install cargo-cyclonedx and cargo-deny (release binaries, checksums verified)
+        run: |
+          f=cargo-cyclonedx-x86_64-unknown-linux-musl
+          curl -sSfL -o /tmp/cc.txz https://github.com/CycloneDX/cyclonedx-rust-cargo/releases/download/cargo-cyclonedx-$CARGO_CYCLONEDX_VERSION/$f.tar.xz
+          echo "$CARGO_CYCLONEDX_SHA256  /tmp/cc.txz" | sha256sum -c -
+          tar xJf /tmp/cc.txz -C /tmp && sudo install /tmp/$f/cargo-cyclonedx /usr/local/bin/cargo-cyclonedx
+          f=cargo-deny-$CARGO_DENY_VERSION-x86_64-unknown-linux-musl
+          curl -sSfL -o /tmp/cd.tgz https://github.com/EmbarkStudios/cargo-deny/releases/download/$CARGO_DENY_VERSION/$f.tar.gz
+          echo "$CARGO_DENY_SHA256  /tmp/cd.tgz" | sha256sum -c -
+          tar xzf /tmp/cd.tgz -C /tmp && sudo install /tmp/$f/cargo-deny /usr/local/bin/cargo-deny
+      - name: Linux binaries (moatd, moat-launch, moatctl)
+        run: cargo build --release --locked -p moatd -p moatctl --target "$RUST_TARGET"
+      - name: package assets
+        env:
+          V: ${{ steps.version.outputs.version }}
+        run: |
+          mkdir -p dist
+          tarit() { tar --sort=name --mtime="@$SOURCE_DATE_EPOCH" --owner=0 --group=0 --numeric-owner -C "$1" -cf - "$2" | gzip -n > "$3"; }
+          p=moat-linux-x86_64-$V; s=/tmp/pkg/$p; mkdir -p "$s/bin" "$s/systemd"
+          install -m 755 target/$RUST_TARGET/release/{moatd,moat-launch,moatctl} "$s/bin/"
+          install -m 644 linux/packaging/systemd/moatd.service "$s/systemd/"
+          install -m 644 LICENSE "$s/"
+          cat > "$s/README.txt" <<EOF
+          Moat $V, Linux x86_64 (glibc) binaries. EXPERIMENTAL PRERELEASE.
+          Not supported on real devices: nothing in this release has passed an installed real-device proof.
+          Read the release manifest (release-manifest.md) for what was tested where, docs/recovery-drill.md for local
+          recovery, and verify SHA256SUMS, its Sigstore bundle and the build-provenance attestations before use.
+          This archive is not a signed distribution package (no signed Arch package exists yet).
+          EOF
+          sed -i 's/^          //' "$s/README.txt"
+          tarit /tmp/pkg "$p" "dist/$p.tar.gz"
+          git archive --format=tar --prefix="moat-$V/" HEAD | gzip -n > "dist/moat-$V-source.tar.gz"
+          npm ci --no-audit --no-fund
+          npm run build -w web
+          rm -rf /tmp/pkg/web && mkdir -p /tmp/pkg/web && cp -a web/dist "/tmp/pkg/web/moat-web-$V"
+          tarit /tmp/pkg/web "moat-web-$V" "dist/moat-web-$V.tar.gz"
+      - name: CycloneDX SBOMs (Rust workspace crates, npm workspaces) and coverage gate
+        run: |
+          release/sbom.sh dist "$RUST_TARGET"
+          python3 release/sbom-check.py --dir dist --target "$RUST_TARGET"
+          python3 release/sbom-check.py --dir dist --target "$RUST_TARGET" --self-test
+      - name: licence report (cargo-deny + license-checker) and copyleft gate
+        run: |
+          cargo deny check licenses bans sources
+          cargo deny list -f json -l crate > dist/cargo-licenses.json
+          npx --yes license-checker@25.0.1 --json > dist/npm-licenses.json
+          python3 release/license-gate.py --cargo dist/cargo-licenses.json --npm dist/npm-licenses.json --npm-lock package-lock.json --out dist/license-report.md
+      - name: release manifest from the claim ledger
+        run: python3 release/manifest.py --commit "${{ github.event.pull_request.head.sha || github.sha }}" --label "${{ steps.version.outputs.version }}" --out-dir dist
+      - name: SHA256SUMS
+        run: |
+          cd dist
+          [[ -z "$(find . -mindepth 1 -type d)" ]] || { echo "dist must be flat"; exit 1; }
+          sha256sum -- * > /tmp/SHA256SUMS && mv /tmp/SHA256SUMS SHA256SUMS
+          cat SHA256SUMS
+          { echo '### Release assets'; echo '```'; cat SHA256SUMS; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      - name: "drill (integrity, unsigned build): checksums and negative control"
+        run: release/recovery-drill.sh integrity dist
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-dist
+          path: dist/
+          if-no-files-found: error
+
+  sign:
+    name: keyless Sigstore signature + build-provenance attestations, then verify
+    needs: build
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # GitHub OIDC token for Sigstore (keyless); no stored signing key
+      attestations: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release-dist
+          path: dist
+      - name: build-provenance attestation for every asset in SHA256SUMS
+        id: attest
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-checksums: dist/SHA256SUMS
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - name: keyless Sigstore signature over SHA256SUMS
+        run: |
+          cp "${{ steps.attest.outputs.bundle-path }}" dist/provenance.sigstore.json
+          cosign sign-blob --yes --bundle dist/SHA256SUMS.sigstore.json dist/SHA256SUMS
+      - name: "drill (integrity, signed build): checksums, signature, attestations, negative controls"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MOAT_DRILL_REQUIRE_SIGNATURES: "1"
+          MOAT_DRILL_EXPECT_REF: ${{ github.ref }}
+        run: release/recovery-drill.sh integrity dist
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-signed
+          path: dist/
+          if-no-files-found: error
+
+  recovery-drill:
+    name: local recovery drill (netns, real moatd, daemon running and stopped)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+      - name: Install nftables, iproute2, jq
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq nftables iproute2 jq python3
+      - name: Build
+        run: cargo build --locked -p moatd -p moatctl
+      - name: recovery drill (CI-runnable part)
+        run: sudo REQUIRE_NFT=1 release/recovery-drill.sh local target/debug
+
+  publish:
+    name: publish prerelease (v* tag on green main only)
+    needs: [build, sign, recovery-drill]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - name: the tag is on main and every push-to-main workflow for it passed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main || { echo "tag commit $GITHUB_SHA is not on main"; exit 1; }
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$GITHUB_SHA&event=push&branch=main&per_page=100" > /tmp/runs.json
+          bad=0
+          for wf in rust linux-endpoint contracts controller web macos release-engineering release; do
+            c=$(jq -r --arg n "$wf" '[.workflow_runs[] | select(.name == $n)] | sort_by(.run_number) | last | "\(.status)/\(.conclusion)"' /tmp/runs.json)
+            echo "$wf on main at ${GITHUB_SHA:0:7}: $c"
+            [[ "$c" == "completed/success" ]] || bad=1
+          done
+          [[ $bad -eq 0 ]] || { echo "main is not green at this commit; not publishing"; exit 1; }
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release-signed
+          path: dist
+      - name: create or update the GitHub prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          notes="release/notes/$TAG.md"
+          [[ -f "$notes" ]] || { echo "missing $notes"; exit 1; }
+          pre=""; [[ "$TAG" == *-* ]] && pre="--prerelease"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --clobber
+            gh release edit "$TAG" --notes-file "$notes" $pre
+          else
+            gh release create "$TAG" dist/* --verify-tag --title "Moat $TAG" --notes-file "$notes" $pre
+          fi
