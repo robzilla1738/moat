@@ -46,6 +46,19 @@ enum Cmd {
         /// Loopback port range for session egress-proxy listeners (keep it outside the ephemeral range).
         #[arg(long, default_value = "15000-15999")]
         egress_proxy_ports: String,
+        /// Observe-only inventory of ordinary (non-launcher) app connections, sampled every N milliseconds into the
+        /// spool (W10). Off unless set. Never enforces anything.
+        #[arg(long)]
+        ordinary_inventory_ms: Option<u64>,
+    },
+    /// Observe-only ordinary-app inventory in the foreground: JSON lines on stdout (W10). Never enforces anything.
+    Inventory {
+        /// Sampling interval in milliseconds.
+        #[arg(long, default_value_t = 200)]
+        interval_ms: u64,
+        /// Stop after this many seconds (default: run until killed).
+        #[arg(long)]
+        seconds: Option<u64>,
     },
     /// Queue a signed snapshot for the daemon (copied into <state>/inbox).
     Apply {
@@ -121,7 +134,7 @@ fn main() -> ExitCode {
 
 fn run(cli: Cli) -> Result<(), String> {
     match cli.cmd {
-        Cmd::Run { device_id, cgroup_mount, spool_mib, tick_secs, no_egress_proxy, egress_proxy_ports } => {
+        Cmd::Run { device_id, cgroup_mount, spool_mib, tick_secs, no_egress_proxy, egress_proxy_ports, ordinary_inventory_ms } => {
             let ports = egress_proxy_ports
                 .split_once('-')
                 .and_then(|(a, b)| Some((a.parse::<u16>().ok()?, b.parse::<u16>().ok()?)))
@@ -150,7 +163,29 @@ fn run(cli: Cli) -> Result<(), String> {
             }
             ep.startup();
             eprintln!("moatd: coverage {}", ep.coverage_label());
-            moatd::server::serve(ep, cli.socket, Duration::from_secs(tick_secs)).map_err(|e| e.to_string())
+            moatd::server::serve_with(ep, cli.socket, Duration::from_secs(tick_secs), ordinary_inventory_ms.map(Duration::from_millis))
+                .map_err(|e| e.to_string())
+        }
+        Cmd::Inventory { interval_ms, seconds } => {
+            use moatd::inventory::{Inventory, ProcFs};
+            let src = ProcFs::default();
+            let mut inv = Inventory::new();
+            let start = std::time::Instant::now();
+            println!(
+                "{}",
+                serde_json::json!({"type": "coverage", "coverage": moatd::inventory::COVERAGE, "note": Inventory::coverage_note()})
+            );
+            loop {
+                for ev in inv.tick(&src) {
+                    println!("{}", serde_json::to_string(&ev).unwrap());
+                }
+                use std::io::Write;
+                let _ = std::io::stdout().flush();
+                if seconds.is_some_and(|s| start.elapsed() >= Duration::from_secs(s)) {
+                    return Ok(());
+                }
+                std::thread::sleep(Duration::from_millis(interval_ms.max(10)));
+            }
         }
         Cmd::Apply { signed, trial_secs } => {
             let inbox = cli.state.join("inbox");

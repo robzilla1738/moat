@@ -40,6 +40,24 @@ the real `/tmp`, while egress, cgroup-escape and broader-nested-launch probes st
 `moat-launch` to pass its own mount namespace descriptor over the control socket (`SCM_RIGHTS`), validated as a mount
 namespace owned by the initial user namespace; see [the decision page](../decisions/W11-cap-sys-ptrace.md).
 
+## Ordinary-app inventory (W10, observe-only)
+
+`moatd inventory` (foreground, JSON lines) or `moatd run --ordinary-inventory-ms 250` (spool records) lists the
+connections of ordinary applications, the ones not started through `moat-launch`. It never enforces anything: every
+record says `observe_only`, and Moat's nftables ruleset is not touched.
+
+* Source: the kernel socket tables of moatd's network namespace (`/proc/net/{tcp,tcp6,udp,udp6}`), sampled; each new
+  connected socket is reported once and attributed via `/proc/<pid>/fd` to executable, process start generation
+  (PID reuse is a different process), uid, cgroup and, for interpreters, the script (low confidence).
+* Loss is counted, not hidden: the kernel's `Tcp: ActiveOpens` delta minus the outbound TCP sockets seen becomes an
+  `inventory_loss` record (`tcp_active_opens_not_observed`). UDP has no such counter: its completeness is unmeasured,
+  and unconnected UDP sends never appear.
+* A socket whose owner cannot be found is reported with `identity: null` and a reason, never guessed.
+* Other network namespaces (containers) are not observed.
+
+Why this path and not OpenSnitch: [W09 decision](../decisions/W09-linux-ordinary-apps.md). CI proof:
+`linux/tests/ordinary-inventory.sh` (client and receiver network namespaces; the receiver logs every accepted peer).
+
 ## Policy delivery
 
 `moatd` only installs **signed** snapshots from a trusted signer key (`/var/lib/moat/trusted/*.pub`). Delivery is a

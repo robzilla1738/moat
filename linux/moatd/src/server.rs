@@ -19,7 +19,43 @@ use crate::launch::{spawn, BrokerIsolation, LaunchSpec};
 use crate::nft::NftBackend;
 
 pub fn serve<B: NftBackend + Send + 'static>(ep: Endpoint<B>, socket: PathBuf, tick: Duration) -> std::io::Result<()> {
+    serve_with(ep, socket, tick, None)
+}
+
+/// `serve`, plus the observe-only ordinary-app inventory (W10) sampled every `inventory` interval when set. The
+/// inventory reads /proc outside the endpoint lock and only appends spool records; it never touches enforcement.
+pub fn serve_with<B: NftBackend + Send + 'static>(
+    ep: Endpoint<B>,
+    socket: PathBuf,
+    tick: Duration,
+    inventory: Option<Duration>,
+) -> std::io::Result<()> {
     let ep = Arc::new(Mutex::new(ep));
+    if let Some(every) = inventory {
+        let ep = ep.clone();
+        std::thread::spawn(move || {
+            let src = crate::inventory::ProcFs::default();
+            let mut inv = crate::inventory::Inventory::new();
+            {
+                let mut e = ep.lock().unwrap();
+                e.spool.append(crate::spool::Event::CoverageChanged {
+                    level: format!("ordinary_inventory:{}", crate::inventory::COVERAGE),
+                    detail: crate::inventory::Inventory::coverage_note().into(),
+                });
+            }
+            loop {
+                let events = inv.tick(&src);
+                if !events.is_empty() {
+                    let mut e = ep.lock().unwrap();
+                    for ev in events {
+                        let record = serde_json::to_value(&ev).unwrap_or(serde_json::Value::Null);
+                        e.spool.append(crate::spool::Event::Inventory { coverage: crate::inventory::COVERAGE.into(), record });
+                    }
+                }
+                std::thread::sleep(every);
+            }
+        });
+    }
     // SIGTERM/SIGINT: record a clean shutdown in the spool, then exit. Enforcement state stays in the kernel; the
     // next start re-verifies and reconciles it.
     {

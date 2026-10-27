@@ -247,19 +247,22 @@
     },
     {
       "id": "linux.ordinary-apps.inventory",
-      "capability": "inventory of ordinary (non-launcher) application traffic on Linux",
-      "backend": "none",
-      "evidence_level": "none",
-      "disposition": "unsupported_rejected",
-      "tests": [],
-      "environment": "unit",
+      "capability": "observe-only inventory of ordinary (non-launcher) application connections on Linux, with counted loss and visible unknown identity",
+      "backend": "moatd 0.1.0 inventory (procfs socket tables + /proc attribution)",
+      "evidence_level": "native_ci",
+      "disposition": "implemented_unproven",
+      "tests": [
+        "linux/moatd/src/inventory.rs::tests",
+        "linux/tests/ordinary-inventory.sh"
+      ],
+      "environment": "ci-ubuntu-26.04-x86_64",
       "last_result": {
-        "result": "not_run",
-        "run": "",
-        "commit": "d5270bd",
+        "result": "pass",
+        "run": "linux-endpoint 40547438730",
+        "commit": "3a54a66",
         "date": "2026-10-27"
       },
-      "limits": "Not implemented. W09 experiment and W10 decide the collector.",
+      "limits": "observe_only: nothing is enforced. Sampled: short-lived TCP connections are counted as loss (kernel ActiveOpens), not identified; UDP completeness is not measured and unconnected UDP sends are invisible; other network namespaces are not observed; interpreter identities are low confidence (script argument). The CI check runs `moatd inventory`; the daemon spool path (`moatd run --ordinary-inventory-ms`) shares the collector but has no native check yet. Not run on Omarchy or under the installed unit. W09 decision: docs/decisions/W09-linux-ordinary-apps.md.",
       "open_defects": []
     },
     {
@@ -278,7 +281,7 @@
         "commit": "d5270bd",
         "date": "2026-10-27"
       },
-      "limits": "nftables cannot match executables; app rules are rejected at compile (allows that opt in are omitted with a report).",
+      "limits": "No app-identity enforcement hook proven (W09 decision). nftables cannot match executables; app rules are rejected at compile (allows that opt in are omitted with a report). Device-targeted compiles skip app rules scoped to other devices (#26).",
       "open_defects": []
     },
     {
