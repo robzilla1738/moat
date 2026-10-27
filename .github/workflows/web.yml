@@ -23,6 +23,16 @@ jobs:
       - run: npm run typecheck -w web
       - run: npm test -w web
       - run: npm run build:demo -w web
+      - name: Screenshots + overflow, clipping and WCAG AA contrast checks (axe-core)
+        run: |
+          npx playwright install --with-deps chromium
+          node web/scripts/screenshots.mjs web/build/screenshots
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: web-screenshots
+          path: web/build/screenshots
+          if-no-files-found: warn
       - uses: actions/upload-pages-artifact@v3
         with:
           path: web/dist

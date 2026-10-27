@@ -12,3 +12,4 @@ DerivedData/
 *.key
 !conformance/**/*.key
 /macos/build/
+/web/build/

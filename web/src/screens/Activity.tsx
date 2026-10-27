@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Badge, Card, Chain, Icon, SectionTitle, Steps } from "../components/ui";
+import { Badge, Card, Chain, Empty, Icon, SectionTitle, Steps } from "../components/ui";
 import { useStore } from "../data/store";
 import type { Incident } from "../data/types";
 import { ago, until } from "../format";
@@ -9,6 +9,7 @@ const KIND: Record<Incident["kind"], { label: string; icon: "lock" | "alert" | "
   coverage_lost: { label: "Coverage lost", icon: "alert" },
   telemetry_gap: { label: "Activity gap", icon: "clock" },
   policy_rejected: { label: "Policy rejected", icon: "alert" },
+  policy_rolled_back: { label: "Trial rolled back", icon: "clock" },
   dns_blocked: { label: "DNS block", icon: "globe" },
   new_destination: { label: "New destination", icon: "spark" },
 };
@@ -116,7 +117,11 @@ export function Activity({ go }: { go: (to: string) => void }) {
             </button>
           );
         })}
-        {!list.length && <div className="empty">Nothing here.</div>}
+        {!list.length && (
+          <Empty title="Nothing in this view" icon="activity">
+            Blocked connections, coverage changes, rollbacks and telemetry gaps appear here as devices report them.
+          </Empty>
+        )}
       </div>
     </div>
   );

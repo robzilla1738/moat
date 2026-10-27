@@ -1805,3 +1805,385 @@ a {
     padding: 0 22px;
   }
 }
+
+/* =====================================================================================================================
+   Liquid glass layer
+   ---------------------------------------------------------------------------------------------------------------------
+   Glass is the navigation and control layer only: the top bar, the floating tab bar, the desktop sidebar, segmented
+   controls, icon buttons, the sticky decision bar and toasts. Content (cards, lists, charts) stays opaque so it reads
+   at full contrast. Only fixed chrome uses backdrop-filter (a handful of layers, blur ≤ 24px), which keeps scrolling
+   smooth on phones. Fallbacks:
+   * no backdrop-filter support          → solid surfaces (@supports);
+   * prefers-reduced-transparency        → solid surfaces;
+   * prefers-contrast: more              → solid surfaces, stronger borders and text;
+   * prefers-reduced-motion              → no animation (existing rule above) and no hover lift.
+   ===================================================================================================================== */
+:root,
+[data-theme="dark"] {
+  --glass-tint: color-mix(in srgb, #1a1d24 58%, transparent);
+  --glass-tint-strong: color-mix(in srgb, #1a1d24 74%, transparent);
+  --glass-edge: rgba(255, 255, 255, 0.14);
+  --glass-edge-soft: rgba(255, 255, 255, 0.07);
+  --glass-specular: inset 0 1px 0 rgba(255, 255, 255, 0.12), inset 0 -1px 0 rgba(0, 0, 0, 0.25);
+  --glass-shadow: 0 12px 40px -16px rgba(0, 0, 0, 0.7), 0 2px 8px -4px rgba(0, 0, 0, 0.5);
+  --glass-blur: blur(22px) saturate(170%);
+  --glass-solid: #15181d;
+  --aurora: radial-gradient(900px 520px at 85% -12%, rgba(109, 124, 255, 0.22), transparent 62%),
+    radial-gradient(700px 480px at -8% 8%, rgba(34, 211, 238, 0.13), transparent 60%),
+    radial-gradient(800px 600px at 50% 110%, rgba(167, 139, 250, 0.10), transparent 65%);
+  --muted: #9aa1ae;
+  --red: #ff7a7a;
+  --violet: #b39dfb;
+  --blue: #7ab2ff;
+  --neutral: #a3aab6;
+}
+[data-theme="light"] {
+  --glass-tint: color-mix(in srgb, #ffffff 62%, transparent);
+  --glass-tint-strong: color-mix(in srgb, #ffffff 80%, transparent);
+  --glass-edge: rgba(255, 255, 255, 0.85);
+  --glass-edge-soft: rgba(15, 23, 42, 0.08);
+  --glass-specular: inset 0 1px 0 rgba(255, 255, 255, 0.9), inset 0 -1px 0 rgba(15, 23, 42, 0.05);
+  --glass-shadow: 0 12px 36px -18px rgba(15, 23, 42, 0.35), 0 2px 6px -3px rgba(15, 23, 42, 0.12);
+  --glass-blur: blur(22px) saturate(180%);
+  --glass-solid: #ffffff;
+  --aurora: radial-gradient(900px 520px at 85% -12%, rgba(79, 93, 245, 0.16), transparent 62%),
+    radial-gradient(700px 480px at -8% 8%, rgba(14, 165, 198, 0.12), transparent 60%),
+    radial-gradient(800px 600px at 50% 110%, rgba(124, 77, 219, 0.08), transparent 65%);
+  --muted: #5d6572;
+  /* tones darkened so badges and status text meet WCAG AA (4.5:1) on white, tinted and inset surfaces */
+  --green: #066b41;
+  --red: #b91c1c;
+  --amber: #7f5200;
+  --violet: #6a3bc9;
+  --blue: #1e4fd0;
+  --neutral: #555c68;
+}
+
+body {
+  background-image: var(--aurora);
+}
+
+/* shared glass recipe */
+.topbar,
+.tabbar,
+.segmented,
+.icon-btn,
+.toast,
+.demo-pill,
+.subnav,
+.glass {
+  background: var(--glass-tint);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-edge-soft);
+  box-shadow: var(--glass-specular), var(--glass-shadow);
+}
+
+/* top bar: a floating glass capsule on phones */
+.topbar {
+  position: sticky;
+  top: 0;
+  margin: 0;
+  padding: calc(env(safe-area-inset-top) + 8px) 14px 8px;
+  border-width: 0 0 1px;
+  border-radius: 0;
+  box-shadow: var(--glass-specular);
+}
+.brand {
+  font-weight: 680;
+  letter-spacing: -0.025em;
+}
+
+/* floating tab bar (phone) */
+.tabbar {
+  inset: auto 12px calc(10px + env(safe-area-inset-bottom)) 12px;
+  padding: 6px;
+  border-radius: 26px;
+  border: 1px solid var(--glass-edge-soft);
+  gap: 2px;
+}
+.tab {
+  min-height: 48px;
+  justify-content: center;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 600;
+  transition: color 0.2s, background 0.25s;
+}
+.tab.active {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 28%, transparent);
+}
+.tab-badge {
+  box-shadow: 0 0 0 2px var(--glass-solid);
+}
+.content {
+  padding-bottom: calc(110px + env(safe-area-inset-bottom));
+}
+
+/* icon buttons are small glass circles */
+.icon-btn {
+  width: 38px;
+  height: 38px;
+  border-radius: 999px;
+  color: var(--text);
+}
+.icon-btn:hover {
+  background: var(--glass-tint-strong);
+}
+
+.demo-pill {
+  color: var(--text-2);
+  border-color: var(--glass-edge-soft);
+  box-shadow: var(--glass-specular);
+}
+
+/* segmented control: glass capsule, opaque tinted selection (glass never stacked on glass) */
+.segmented,
+.subnav {
+  border-radius: 999px;
+  padding: 4px;
+  gap: 2px;
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.segmented::-webkit-scrollbar,
+.subnav::-webkit-scrollbar {
+  display: none;
+}
+.seg,
+.subnav a {
+  border-radius: 999px;
+  padding: 7px 14px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text-2);
+  border: 0;
+  background: none;
+  white-space: nowrap;
+  min-height: 34px;
+}
+.seg.active,
+.subnav a.active {
+  background: color-mix(in srgb, var(--accent) 18%, var(--surface));
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 34%, transparent);
+}
+.subnav {
+  align-self: flex-start;
+  display: inline-flex;
+}
+
+/* sticky decision bar on detail pages floats on glass above the tab bar */
+.page > .decision-actions {
+  position: sticky;
+  bottom: calc(86px + env(safe-area-inset-bottom));
+  z-index: 15;
+  padding: 10px;
+  border-radius: 22px;
+  background: var(--glass-tint-strong);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-edge-soft);
+  box-shadow: var(--glass-specular), var(--glass-shadow);
+}
+
+/* toast: glass, readable in both themes */
+.toast {
+  background: var(--glass-tint-strong);
+  color: var(--text);
+  border-radius: 999px;
+  bottom: calc(96px + env(safe-area-inset-bottom));
+}
+
+/* content stays opaque; refine surfaces, radius and rhythm */
+.card,
+.stat {
+  border-radius: 20px;
+  border-color: var(--border);
+}
+.card {
+  padding: 18px;
+}
+.stat {
+  padding: 14px 14px 12px;
+}
+.card-button {
+  transition: border-color 0.2s, transform 0.2s, box-shadow 0.2s;
+}
+@media (hover: hover) {
+  .card-button:hover {
+    transform: translateY(-1px);
+    box-shadow: var(--shadow), 0 14px 30px -18px color-mix(in srgb, var(--accent) 45%, transparent);
+  }
+}
+.btn {
+  border-radius: 999px;
+  min-height: 44px;
+}
+.page {
+  gap: 16px;
+}
+.page-head h1,
+.hero-title {
+  text-wrap: balance;
+  letter-spacing: -0.03em;
+}
+.lede {
+  text-wrap: pretty;
+  color: var(--text-2);
+}
+.hero-title {
+  font-size: 32px;
+}
+.section-title h2 {
+  font-size: 14px;
+  font-weight: 650;
+  color: var(--text);
+}
+
+/* empty states: icon in a soft disc, title, one line of guidance */
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 36px 20px;
+  text-align: center;
+  color: var(--text-2);
+  border: 1px dashed var(--border-strong);
+  border-radius: 20px;
+  background: color-mix(in srgb, var(--surface) 70%, transparent);
+}
+.empty-icon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 999px;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  margin-bottom: 4px;
+}
+.empty-title {
+  font-weight: 650;
+  color: var(--text);
+}
+.empty-sub {
+  font-size: 13.5px;
+  max-width: 44ch;
+}
+
+/* desktop: floating glass sidebar */
+@media (min-width: 960px) {
+  .shell {
+    background-image: none;
+    grid-template-columns: 264px 1fr;
+  }
+  .sidebar {
+    position: sticky;
+    top: 12px;
+    height: calc(100dvh - 24px);
+    margin: 12px 0 12px 12px;
+    border-radius: 24px;
+    background: var(--glass-tint);
+    -webkit-backdrop-filter: var(--glass-blur);
+    backdrop-filter: var(--glass-blur);
+    border: 1px solid var(--glass-edge-soft);
+    box-shadow: var(--glass-specular), var(--glass-shadow);
+  }
+  .side-link {
+    border-radius: 12px;
+    padding: 9px 12px;
+    min-height: 40px;
+  }
+  .side-link.active {
+    background: color-mix(in srgb, var(--accent) 16%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 28%, transparent);
+  }
+  .content {
+    padding: 40px 44px 72px;
+  }
+  .hero-title {
+    font-size: 42px;
+  }
+  .toast {
+    left: calc(50% + 132px);
+    bottom: 28px;
+  }
+  .page > .decision-actions {
+    bottom: 20px;
+  }
+}
+
+/* ---------- fallbacks ---------- */
+@supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+  .topbar,
+  .tabbar,
+  .segmented,
+  .icon-btn,
+  .toast,
+  .demo-pill,
+  .subnav,
+  .glass,
+  .sidebar,
+  .page > .decision-actions {
+    background: var(--glass-solid) !important;
+  }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .topbar,
+  .tabbar,
+  .segmented,
+  .icon-btn,
+  .toast,
+  .demo-pill,
+  .subnav,
+  .glass,
+  .sidebar,
+  .page > .decision-actions {
+    background: var(--glass-solid) !important;
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+  }
+  body {
+    background-image: none;
+  }
+}
+@media (prefers-contrast: more) {
+  :root,
+  [data-theme="dark"] {
+    --muted: #b4bac4;
+    --text-2: #dfe2e8;
+    --border: rgba(255, 255, 255, 0.28);
+    --border-strong: rgba(255, 255, 255, 0.45);
+    --glass-edge-soft: rgba(255, 255, 255, 0.5);
+  }
+  [data-theme="light"] {
+    --muted: #3c434e;
+    --text-2: #20252d;
+    --border: rgba(15, 23, 42, 0.3);
+    --border-strong: rgba(15, 23, 42, 0.5);
+    --glass-edge-soft: rgba(15, 23, 42, 0.5);
+  }
+  .topbar,
+  .tabbar,
+  .segmented,
+  .icon-btn,
+  .toast,
+  .demo-pill,
+  .subnav,
+  .glass,
+  .sidebar,
+  .page > .decision-actions {
+    background: var(--glass-solid) !important;
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .card-button:hover {
+    transform: none;
+  }
+}

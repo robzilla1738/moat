@@ -55,6 +55,11 @@ struct MoatApp: App {
         let service = Bundle.main.object(forInfoDictionaryKey: "MoatMachServiceName") as? String ?? ""
         let client: ControlClient = launch.demo ? DemoControlClient(isolated: launch.isolated) : XPCControlClient(machServiceName: service)
         _model = StateObject(wrappedValue: AppModel(client: client, isDemo: launch.demo, screen: launch.screen))
+        if launch.screenshotMode {
+            NotificationCenter.default.addObserver(forName: NSApplication.didFinishLaunchingNotification, object: nil, queue: .main) { _ in
+                ScreenshotReporter.report(launch)
+            }
+        }
     }
 
     var body: some Scene {
@@ -178,7 +183,6 @@ struct MainWindow: View {
             onboardingStart = .welcome
             showOnboarding = true
         }
-        if launch.screenshotMode { ScreenshotReporter.report(launch) }
     }
 
     private func syncOnboarding() {
@@ -200,9 +204,14 @@ struct MainWindow: View {
 /// Screenshot runs: size the window, then report its window number (for `screencapture -l`) and, as a fallback,
 /// write an AppKit snapshot of the window contents.
 enum ScreenshotReporter {
-    static func report(_ o: LaunchOptions) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
-            guard let w = NSApp.windows.first(where: { $0.isVisible && $0.canBecomeMain }) ?? NSApp.windows.first(where: { $0.isVisible }) else { return }
+    static func report(_ o: LaunchOptions, attempt: Int = 0) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            let candidates = NSApp.windows.filter { $0.isVisible && !($0.className.contains("StatusBar")) && $0.frame.width > 200 }
+            FileHandle.standardError.write(Data("moat screenshot: attempt \(attempt), windows: \(NSApp.windows.map { "\($0.className) \(Int($0.frame.width))x\(Int($0.frame.height)) visible=\($0.isVisible)" })\n".utf8))
+            guard let w = candidates.first(where: { $0.canBecomeMain }) ?? candidates.first else {
+                if attempt < 30 { report(o, attempt: attempt + 1) }
+                return
+            }
             if o.special == nil {
                 w.setContentSize(NSSize(width: 1280, height: 820))
             }

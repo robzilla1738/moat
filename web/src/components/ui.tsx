@@ -181,10 +181,12 @@ export function Row({ children, onClick, chevron }: { children: ReactNode; onCli
   );
 }
 
-export function Empty({ title, children }: { title: string; children?: ReactNode }) {
+export function Empty({ title, icon = "check", children }: { title: string; icon?: IconName; children?: ReactNode }) {
   return (
-    <div className="empty">
-      <Icon name="check" size={20} />
+    <div className="empty" role="status">
+      <span className="empty-icon" aria-hidden>
+        <Icon name={icon} size={20} />
+      </span>
       <div className="empty-title">{title}</div>
       {children && <div className="empty-sub">{children}</div>}
     </div>

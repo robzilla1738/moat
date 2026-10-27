@@ -27,7 +27,7 @@ export interface ChainNode { name: string; exe: string; pid?: number; signed?: s
 export interface Incident {
   id: string;
   revision: number;
-  kind: "blocked_connection" | "coverage_lost" | "telemetry_gap" | "policy_rejected" | "dns_blocked" | "new_destination";
+  kind: "blocked_connection" | "coverage_lost" | "telemetry_gap" | "policy_rejected" | "policy_rolled_back" | "dns_blocked" | "new_destination";
   urgency: "low" | "medium" | "high";
   state: "open" | "acknowledged" | "resolved";
   deviceId: string;

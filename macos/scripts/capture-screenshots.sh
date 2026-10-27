@@ -26,7 +26,7 @@ for s in "${shots[@]}"; do
   wid="$OUT/.wid"; rm -f "$wid"
   "$BIN" "${args[@]}" --window-id-file "$wid" --snapshot "$OUT/fallback-$name-$appearance.png" >"$OUT/.log" 2>&1 &
   pid=$!
-  for _ in $(seq 150); do [[ -s "$wid" ]] && break; sleep 0.1; done
+  for _ in $(seq 250); do [[ -s "$wid" ]] && break; sleep 0.1; done
   if [[ -s "$wid" ]]; then
     sleep 0.4
     if screencapture -x -o -l "$(cat "$wid")" "$OUT/macos-$name-$appearance.png" 2>"$OUT/.err" && [[ -s "$OUT/macos-$name-$appearance.png" ]]; then
@@ -36,7 +36,7 @@ for s in "${shots[@]}"; do
       echo "screencapture refused for $name-$appearance: $(cat "$OUT/.err" 2>/dev/null); keeping the AppKit fallback"
     fi
   else
-    echo "app did not report a window for $name-$appearance"; cat "$OUT/.log"
+    echo "app did not report a window for $name-$appearance (process alive: $(kill -0 "$pid" 2>/dev/null && echo yes || echo no))"; tail -5 "$OUT/.log"
   fi
   kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null
 done
