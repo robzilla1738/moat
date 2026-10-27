@@ -114,7 +114,7 @@ public struct OnboardingView: View {
         .frame(width: 640, height: 600)
         .background(Backdrop())
         .environment(\.palette, p)
-        .tint(p.accent)
+        .tint(p.accentStrong)
         .disabled(state.busy)
     }
 

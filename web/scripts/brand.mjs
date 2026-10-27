@@ -54,7 +54,7 @@ await writeFile(join(xcColors, "Contents.json"), JSON.stringify({ info: { author
 await mkdir(join(xc, "AccentColor.colorset"), { recursive: true });
 await writeFile(
   join(xc, "AccentColor.colorset", "Contents.json"),
-  JSON.stringify({ colors: [{ idiom: "universal", color: comp(tokens.color.light.accent) }, { idiom: "universal", appearances: [{ appearance: "luminosity", value: "dark" }], color: comp(tokens.color.dark.accent) }], info: { author: "xcode", version: 1 } }, null, 2) + "\n",
+  JSON.stringify({ colors: [{ idiom: "universal", color: comp(tokens.color.light["accent-strong"]) }, { idiom: "universal", appearances: [{ appearance: "luminosity", value: "dark" }], color: comp(tokens.color.dark["accent-strong"]) }], info: { author: "xcode", version: 1 } }, null, 2) + "\n",
 );
 
 if (process.argv.includes("--tokens")) {

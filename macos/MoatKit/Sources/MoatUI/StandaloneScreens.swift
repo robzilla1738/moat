@@ -72,14 +72,14 @@ struct OverviewBento: View {
                     OverviewHero(status: s)
                     KpiTile(label: "Flows seen", symbol: "arrow.left.arrow.right", tone: .blue, value: "\(s.flowsSeen)", sub: "since the filter started")
                     KpiTile(label: "Blocked", symbol: "xmark", tone: .red, value: "\(s.flowsDenied)", sub: "before data was sent")
-                    KpiTile(label: "Proven here", symbol: "checkmark", tone: .green, value: "\(supported)", unit: "/ \(s.capabilities.count)", sub: "capabilities supported") {
+                    KpiTile(label: "Supported here", symbol: "checkmark.seal", tone: .accent, value: "\(supported)", unit: "/ \(s.capabilities.count)", sub: "capabilities supported") {
                         ProgressRing(value: supported, total: s.capabilities.count, tone: .green, size: 44, lineWidth: 6, showsText: false)
                     }
                 }
                 .fixedSize(horizontal: false, vertical: true)
                 HStack(alignment: .top, spacing: 14) {
                     Card {
-                        SectionTitle(text: "Recent flows", trailing: recent.isEmpty ? nil : "\(recent.count) newest, oldest first")
+                        SectionTitle(text: "Recent flows", trailing: recent.isEmpty ? nil : "\(recent.count) most recent · oldest first")
                         if recent.isEmpty {
                             Text("Flows appear the moment the filter reports one.").font(.callout).foregroundStyle(p.text2)
                         } else {
@@ -455,6 +455,6 @@ public struct LocalRuleSheet: View {
         .frame(width: 620, alignment: .topLeading)
         .background(p.bg)
         .environment(\.palette, p)
-        .tint(p.accent)
+        .tint(p.accentStrong)
     }
 }

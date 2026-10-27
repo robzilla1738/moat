@@ -35,7 +35,7 @@ public struct RootView: View {
             .toolbar { toolbar }
         }
         .environment(\.palette, p)
-        .tint(p.accent)
+        .tint(p.accentStrong)
         .confirmationDialog("Isolate this Mac?", isPresented: $confirmIsolate) {
             Button("Isolate now", role: .destructive) { Task { await model.enterIsolation(reason: "Turned on from the Moat toolbar") } }
             Button("Cancel", role: .cancel) {}
