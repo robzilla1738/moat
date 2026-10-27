@@ -1,0 +1,35 @@
+{
+  "schema": "moat.conformance.policy_case.v1",
+  "name": "proxy-redirect-target-judged-anew",
+  "description": "An HTTP redirect from an allowed host (github.com) to an unlisted host is a new connection; the proxy judges its own CONNECT/SNI and the allowed origin grants nothing (adversarial matrix: redirects).",
+  "policy": "../../policies/home.toml",
+  "flow": {
+    "id": "c",
+    "device_id": "omarchy",
+    "user": "robert",
+    "app": {
+      "family": "git",
+      "executable": "/usr/bin/git"
+    },
+    "ancestry_complete": true,
+    "remote_ip": "198.51.100.9",
+    "remote_port": 443,
+    "transport": "tcp",
+    "at": "2026-10-26T12:00:00Z",
+    "hostname": {
+      "name": "objects.example-cdn.net",
+      "source": "sni",
+      "confidence": "medium"
+    },
+    "session": {
+      "id": "sess-1",
+      "profile": "coding-session",
+      "boundary": "linux_cgroup",
+      "verified": true
+    }
+  },
+  "expect": {
+    "verdict": "deny",
+    "winner": "profile:coding-session"
+  }
+}

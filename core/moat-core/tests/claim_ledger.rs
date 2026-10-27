@@ -85,3 +85,57 @@ fn status_lists_every_claim_and_open_defect() {
     }
     assert!(!STATUS.to_lowercase().contains("everything buildable"), "G0: no 'everything built' language");
 }
+
+/// MASTER_ROADMAP §15.2: every adversarial case has a status; `ci` rows name tests, and every named test exists
+/// (Rust test function, conformance case, or check string in a linux/tests script). See docs/adversarial-matrix.md.
+#[test]
+fn adversarial_matrix_rows_name_real_tests() {
+    use std::path::Path;
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    fn walk(dir: &Path, ext: &str, out: &mut String) {
+        for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                if !p.ends_with("target") && !p.ends_with("node_modules") {
+                    walk(&p, ext, out);
+                }
+            } else if p.extension().is_some_and(|x| x == ext) {
+                out.push_str(&std::fs::read_to_string(&p).unwrap_or_default());
+            }
+        }
+    }
+    let mut rust = String::new();
+    walk(&root.join("core"), "rs", &mut rust);
+    walk(&root.join("linux"), "rs", &mut rust);
+    let mut scripts = String::new();
+    walk(&root.join("linux/tests"), "sh", &mut scripts);
+    let mut ts = String::new();
+    walk(&root.join("controller/test"), "ts", &mut ts);
+    let l = ledger();
+    let rows = l["adversarial_matrix"].as_array().expect("adversarial_matrix is present");
+    assert!(rows.len() >= 50, "every §15.2 case is listed");
+    for r in rows {
+        let case = r["case"].as_str().unwrap();
+        let status = r["status"].as_str().unwrap();
+        assert!(["ci", "gap", "device"].contains(&status), "{case}: bad status {status}");
+        let tests: Vec<&str> = r["tests"].as_array().unwrap().iter().map(|t| t.as_str().unwrap()).collect();
+        if status == "ci" {
+            assert!(!tests.is_empty(), "{case}: a ci row must name its tests");
+        }
+        for t in tests {
+            let t = t.trim_start_matches("inventory: ").trim_start_matches("installed: ").trim_start_matches("netns: ");
+            let found = if t.ends_with(".ts") {
+                root.join("controller/test").join(t).exists()
+            } else if t.contains(' ') || t.contains('$') {
+                let probe = t.split(['…', '(', '$']).next().unwrap().trim_end_matches([' ', ':']);
+                scripts.contains(probe)
+            } else if t.contains('-') {
+                root.join("conformance/cases/policy").join(format!("{t}.json")).exists()
+                    || root.join("conformance/cases/compile").join(format!("{t}.json")).exists()
+            } else {
+                rust.contains(&format!("fn {t}(")) || ts.contains(t)
+            };
+            assert!(found, "{case}: test {t:?} does not exist");
+        }
+    }
+}

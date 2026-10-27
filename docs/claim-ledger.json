@@ -559,5 +559,727 @@
         "conformance/cases/compile/linux-*-mac-scoped-rules.json, linux-targeted-at-a-mac-device-still-refuses.json, macos-targeted-keeps-its-own-rules.json"
       ]
     }
+  ],
+  "adversarial_matrix": [
+    {
+      "family": "Subject / authority",
+      "case": "Same executable on two devices",
+      "status": "ci",
+      "environments": [
+        "unit"
+      ],
+      "tests": [
+        "same_executable_on_two_devices_does_not_share_a_grant",
+        "same_executable_on_two_devices_are_different_grants",
+        "a_device_targeted_snapshot_installs_only_on_a_named_device"
+      ]
+    },
+    {
+      "family": "Subject / authority",
+      "case": "Reused PID / task ID",
+      "status": "ci",
+      "environments": [
+        "unit"
+      ],
+      "tests": [
+        "pid_reuse_is_a_different_instance",
+        "restarted_process_cannot_reuse_a_process_grant",
+        "task_grant_is_bound_to_device_and_task"
+      ]
+    },
+    {
+      "family": "Subject / authority",
+      "case": "Process restart",
+      "status": "ci",
+      "environments": [
+        "unit"
+      ],
+      "tests": [
+        "restarted_process_cannot_reuse_a_process_grant"
+      ]
+    },
+    {
+      "family": "Subject / authority",
+      "case": "Fake agent label",
+      "status": "ci",
+      "environments": [
+        "unit"
+      ],
+      "tests": [
+        "agents_cannot_assert_blocks_or_authorize",
+        "unverified_session_does_not_get_session_rules",
+        "unverified-session-is-a-hint"
+      ]
+    },
+    {
+      "family": "Subject / authority",
+      "case": "Weaker nested launch",
+      "status": "ci",
+      "environments": [
+        "ci-installed",
+        "ci-netns",
+        "unit"
+      ],
+      "tests": [
+        "contained_callers_cannot_broaden",
+        "blocked $(launch lab-deny nested_broader)",
+        "containment: a nested launch of the broader w11-open profile is refused"
+      ]
+    },
+    {
+      "family": "Subject / authority",
+      "case": "Raw / pre-opened control socket",
+      "status": "ci",
+      "environments": [
+        "ci-netns",
+        "unit"
+      ],
+      "tests": [
+        "pre_opened_connections_are_judged_by_the_sender",
+        "raw_writes_still_carry_kernel_credentials",
+        "peer_credentials_are_kernel_supplied",
+        "blocked $(launch lab-deny raw_from_inside)"
+      ]
+    },
+    {
+      "family": "Policy semantics",
+      "case": "Profile overlap / order",
+      "status": "ci",
+      "environments": [
+        "unit"
+      ],
+      "tests": [
+        "reordering_selectable_profiles_with_different_defaults_is_broadening",
+        "generator_produces_both_broadening_and_safe_changes"
+      ]
+    },
+    {
+      "family": "Policy semantics",
+      "case": "Timed denies",
+      "status": "ci",
+      "environments": [
+        "unit"
+      ],
+      "tests": [
+        "shortening_a_deny_is_broadening",
+        "expired_rules_are_dropped_and_reported",
+        "expired_rule_is_ignored"
+      ]
+    },
+    {
+      "family": "Policy semantics",
+      "case": "Defaults",
+      "status": "ci",
+      "environments": [
+        "unit"
+      ],
+      "tests": [
+        "ordinary_traffic_follows_fallback_observe",
+        "deny_everything_else",
+        "tightening_ordinary_profile_reports_newly_blocked"
+      ]
+    },
+    {
+      "family": "Policy semantics",
+      "case": "Safety / override precedence",
+      "status": "ci",
+      "environments": [
+        "conformance",
+        "unit"
+      ],
+      "tests": [
+        "safety_deny_precedes_session_allows",
+        "rejects_override_without_expiry",
+        "safety-beats-lan-allow",
+        "safety-beats-tailnet-allow"
+      ]
+    },
+    {
+      "family": "Policy semantics",
+      "case": "Missing identity",
+      "status": "ci",
+      "environments": [
+        "ci-netns",
+        "unit"
+      ],
+      "tests": [
+        "unknown_parent_is_incomplete",
+        "a_socket_without_a_visible_owner_is_unknown_not_guessed",
+        "unknown-session-profile-restrictive"
+      ]
+    },
+    {
+      "family": "Policy semantics",
+      "case": "Unsupported capability",
+      "status": "ci",
+      "environments": [
+        "conformance",
+        "unit"
+      ],
+      "tests": [
+        "unsupported_restrictive_profile_fails_compilation",
+        "an_unsupported_cell_on_a_targeted_device_is_still_rejected",
+        "linux-ip-only-rejects-strict-hostname-rules",
+        "linux-targeted-at-a-mac-device-still-refuses"
+      ]
+    },
+    {
+      "family": "Policy semantics",
+      "case": "Destination-set changes",
+      "status": "ci",
+      "environments": [
+        "unit"
+      ],
+      "tests": [
+        "growing_allowed_set_is_broadening",
+        "previously_ignored_fields_are_classified"
+      ]
+    },
+    {
+      "family": "Destinations",
+      "case": "IPv4 / IPv6",
+      "status": "ci",
+      "environments": [
+        "ci-netns"
+      ],
+      "tests": [
+        "IPv6 connection observed",
+        "coding-ipv6-denied"
+      ]
+    },
+    {
+      "family": "Destinations",
+      "case": "Raw IP",
+      "status": "ci",
+      "environments": [
+        "ci-netns",
+        "conformance"
+      ],
+      "tests": [
+        "blocked $(launch lab-hosts ip_no_sni)",
+        "coding-direct-ip-denied"
+      ]
+    },
+    {
+      "family": "Destinations",
+      "case": "DNS before deny",
+      "status": "ci",
+      "environments": [
+        "ci-netns",
+        "unit"
+      ],
+      "tests": [
+        "a_name_the_policy_refuses_is_never_looked_up",
+        "arbitrary_names_are_refused_without_lookup_and_agree_with_evaluation",
+        "W05: no DNS query left the host for a forbidden name (CONNECT, SNI, Host)"
+      ]
+    },
+    {
+      "family": "Destinations",
+      "case": "Alternate resolver",
+      "status": "ci",
+      "environments": [
+        "conformance"
+      ],
+      "tests": [
+        "coding-alternate-resolver-denied"
+      ]
+    },
+    {
+      "family": "Destinations",
+      "case": "Host / IP mismatch",
+      "status": "ci",
+      "environments": [
+        "ci-netns",
+        "conformance"
+      ],
+      "tests": [
+        "proxy: spoofed SNI to another IP still reaches the resolved host, never the dialed one",
+        "transparent_sni_connects_to_the_resolved_host_not_the_dialed_ip",
+        "proxy-sni-resolving-to-controller-denied"
+      ]
+    },
+    {
+      "family": "Destinations",
+      "case": "Shared infrastructure",
+      "status": "gap",
+      "environments": [],
+      "tests": []
+    },
+    {
+      "family": "Destinations",
+      "case": "Redirects",
+      "status": "ci",
+      "environments": [
+        "conformance"
+      ],
+      "tests": [
+        "proxy-redirect-target-judged-anew",
+        "proxy-connect-unlisted-host-denied"
+      ]
+    },
+    {
+      "family": "Destinations",
+      "case": "Encrypted / absent hostname evidence",
+      "status": "ci",
+      "environments": [
+        "ci-netns",
+        "unit"
+      ],
+      "tests": [
+        "hostname_rule_without_evidence_notes_it",
+        "proxy-no-sni-denied",
+        "blocked $(launch lab-hosts ip_no_sni)"
+      ]
+    },
+    {
+      "family": "Protocols",
+      "case": "TCP",
+      "status": "ci",
+      "environments": [
+        "ci-netns"
+      ],
+      "tests": [
+        "blocked $(launch lab-deny tcp4_8080)"
+      ]
+    },
+    {
+      "family": "Protocols",
+      "case": "UDP / QUIC",
+      "status": "ci",
+      "environments": [
+        "ci-netns"
+      ],
+      "tests": [
+        "session UDP datagram did not arrive",
+        "ordinary UDP delivered (observed)",
+        "coding-github-udp-denied"
+      ]
+    },
+    {
+      "family": "Protocols",
+      "case": "IPv6",
+      "status": "ci",
+      "environments": [
+        "ci-netns",
+        "conformance"
+      ],
+      "tests": [
+        "inventory: IPv6 connection observed",
+        "coding-ipv6-denied"
+      ]
+    },
+    {
+      "family": "Protocols",
+      "case": "Long-lived TLS / CONNECT / WebSockets",
+      "status": "ci",
+      "environments": [
+        "ci-netns",
+        "unit"
+      ],
+      "tests": [
+        "W05: stream ended at expiry",
+        "a revision that no longer allows it ends the open stream",
+        "closing the task ends its streams",
+        "isolation ends open proxied streams",
+        "an_admitted_stream_ends_when_its_permission_expires"
+      ]
+    },
+    {
+      "family": "Protocols",
+      "case": "Declared unsupported protocols",
+      "status": "ci",
+      "environments": [
+        "unit"
+      ],
+      "tests": [
+        "protocol_labels",
+        "users_ports_transport_render"
+      ]
+    },
+    {
+      "family": "Delegation",
+      "case": "SSH",
+      "status": "device",
+      "environments": [],
+      "tests": []
+    },
+    {
+      "family": "Delegation",
+      "case": "Browser automation",
+      "status": "device",
+      "environments": [],
+      "tests": []
+    },
+    {
+      "family": "Delegation",
+      "case": "Container / daemon sockets",
+      "status": "ci",
+      "environments": [
+        "unit"
+      ],
+      "tests": [
+        "brokers_hidden_and_env_stripped",
+        "hidden_paths_respect_flags"
+      ]
+    },
+    {
+      "family": "Delegation",
+      "case": "Inherited descriptors",
+      "status": "ci",
+      "environments": [
+        "ci-netns",
+        "unit"
+      ],
+      "tests": [
+        "inherited_descriptors_do_not_cross",
+        "pre_opened_connections_are_judged_by_the_sender"
+      ]
+    },
+    {
+      "family": "Delegation",
+      "case": "Local proxies",
+      "status": "ci",
+      "environments": [
+        "ci-netns",
+        "unit"
+      ],
+      "tests": [
+        "session_proxy_redirects_only_its_own_session_and_fences_the_port_range",
+        "blocked $(plain fence)"
+      ]
+    },
+    {
+      "family": "Delegation",
+      "case": "Remote jobs",
+      "status": "device",
+      "environments": [],
+      "tests": []
+    },
+    {
+      "family": "Lifecycle",
+      "case": "First install",
+      "status": "ci",
+      "environments": [
+        "ci-installed"
+      ],
+      "tests": [
+        "moatd.service started by systemd",
+        "installed service enforces revision 1"
+      ]
+    },
+    {
+      "family": "Lifecycle",
+      "case": "First canary",
+      "status": "ci",
+      "environments": [
+        "unit"
+      ],
+      "tests": [
+        "first_canary_needs_a_fallback_and_writes_nothing",
+        "first_revision_cannot_be_a_trial"
+      ]
+    },
+    {
+      "family": "Lifecycle",
+      "case": "Expiry",
+      "status": "ci",
+      "environments": [
+        "ci-netns",
+        "unit"
+      ],
+      "tests": [
+        "expiry_enforced",
+        "expired_grants_drop_out_of_the_effective_policy",
+        "W05: stream ended at expiry"
+      ]
+    },
+    {
+      "family": "Lifecycle",
+      "case": "Rollback failure",
+      "status": "ci",
+      "environments": [
+        "unit"
+      ],
+      "tests": [
+        "a_failed_rollback_is_retried_and_never_becomes_confirmed",
+        "rollback_intent_is_retained_until_the_restore_is_durable"
+      ]
+    },
+    {
+      "family": "Lifecycle",
+      "case": "Corrupt state",
+      "status": "ci",
+      "environments": [
+        "unit"
+      ],
+      "tests": [
+        "corrupt_journal_is_visible_and_never_a_fresh_bootstrap",
+        "corrupt_replay_mark_falls_back_to_the_journal_copy",
+        "roundtrip_missing_and_corrupt",
+        "torn_last_line_is_tolerated"
+      ]
+    },
+    {
+      "family": "Lifecycle",
+      "case": "Disk full",
+      "status": "ci",
+      "environments": [
+        "ci-netns",
+        "unit"
+      ],
+      "tests": [
+        "every_plain_apply_step_survives_disk_full_failed_rename_and_crash",
+        "W06: disk full: activation refused as not durable",
+        "W06: disk full: revision 8 stays reported and enforced"
+      ]
+    },
+    {
+      "family": "Lifecycle",
+      "case": "Stopped filter",
+      "status": "ci",
+      "environments": [
+        "unit"
+      ],
+      "tests": [
+        "missing_netfilter_downgrades_everything_enforcing",
+        "degraded_on_problems"
+      ]
+    },
+    {
+      "family": "Lifecycle",
+      "case": "Daemon crash",
+      "status": "ci",
+      "environments": [
+        "ci-netns",
+        "unit"
+      ],
+      "tests": [
+        "a_crash_during_rollback_resumes_it_on_restart",
+        "trial_past_deadline_reverts_on_restart_and_never_touches_isolation",
+        "restart restores last valid policy offline"
+      ]
+    },
+    {
+      "family": "Lifecycle",
+      "case": "Live-task restart",
+      "status": "ci",
+      "environments": [
+        "ci-netns",
+        "unit"
+      ],
+      "tests": [
+        "sessions_running_across_a_restart_are_stopped_not_adopted",
+        "W06: sessions from before the restart are stopped (not adopted)"
+      ]
+    },
+    {
+      "family": "Distribution",
+      "case": "Duplicate / reordered messages",
+      "status": "ci",
+      "environments": [
+        "unit"
+      ],
+      "tests": [
+        "sign_verify_apply_and_replay",
+        "verify_accepts_trusted_and_rejects_unknown_key_and_replay",
+        "replayed revision rejected"
+      ]
+    },
+    {
+      "family": "Distribution",
+      "case": "Concurrent publication",
+      "status": "ci",
+      "environments": [
+        "ci-node"
+      ],
+      "tests": [
+        "grants.test.ts"
+      ]
+    },
+    {
+      "family": "Distribution",
+      "case": "Lost signer response",
+      "status": "ci",
+      "environments": [
+        "ci-node",
+        "unit"
+      ],
+      "tests": [
+        "retried_request_keeps_the_original_expiry"
+      ]
+    },
+    {
+      "family": "Distribution",
+      "case": "Partial rollout",
+      "status": "ci",
+      "environments": [
+        "unit"
+      ],
+      "tests": [
+        "summary_lists_unacknowledged"
+      ]
+    },
+    {
+      "family": "Distribution",
+      "case": "Offline local change",
+      "status": "ci",
+      "environments": [
+        "ci-netns"
+      ],
+      "tests": [
+        "local disable recorded",
+        "resume re-enforces last policy",
+        "restart restores last valid policy offline"
+      ]
+    },
+    {
+      "family": "Updates",
+      "case": "App / service / extension / schema mismatch",
+      "status": "ci",
+      "environments": [
+        "unit"
+      ],
+      "tests": [
+        "fixtures_round_trip_and_rejects_hold",
+        "rejects_unknown_fields",
+        "schemas_cover_every_rust_field"
+      ]
+    },
+    {
+      "family": "Updates",
+      "case": "Failed upgrade",
+      "status": "device",
+      "environments": [],
+      "tests": []
+    },
+    {
+      "family": "Updates",
+      "case": "Interrupted migration",
+      "status": "gap",
+      "environments": [],
+      "tests": []
+    },
+    {
+      "family": "Updates",
+      "case": "Trust rotation",
+      "status": "ci",
+      "environments": [
+        "unit"
+      ],
+      "tests": [
+        "tampering_and_unknown_keys_rejected"
+      ]
+    },
+    {
+      "family": "Updates",
+      "case": "Authorized recovery downgrade",
+      "status": "ci",
+      "environments": [
+        "ci-netns",
+        "unit"
+      ],
+      "tests": [
+        "trial_reverts_unless_confirmed_and_replay_mark_holds",
+        "reverted revision 3 cannot be replayed"
+      ]
+    },
+    {
+      "family": "Load",
+      "case": "Process / connection churn",
+      "status": "ci",
+      "environments": [
+        "ci-netns"
+      ],
+      "tests": [
+        "burst accounted for: … observed + … counted as loss >= … accepted",
+        "missed short-lived connections are counted"
+      ]
+    },
+    {
+      "family": "Load",
+      "case": "Sensor map / queue limits",
+      "status": "ci",
+      "environments": [
+        "ci-netns",
+        "unit"
+      ],
+      "tests": [
+        "missed_short_lived_connections_are_counted_never_silent",
+        "unreadable_tables_are_reported"
+      ]
+    },
+    {
+      "family": "Load",
+      "case": "Proxy exhaustion",
+      "status": "ci",
+      "environments": [
+        "unit"
+      ],
+      "tests": [
+        "exhaustion_refuses_and_reports_rather_than_bypassing"
+      ]
+    },
+    {
+      "family": "Load",
+      "case": "Slow disk",
+      "status": "gap",
+      "environments": [],
+      "tests": []
+    },
+    {
+      "family": "Load",
+      "case": "Log quota",
+      "status": "ci",
+      "environments": [
+        "unit"
+      ],
+      "tests": [
+        "quota_drops_and_records_gap",
+        "unexplained_gap_detection"
+      ]
+    },
+    {
+      "family": "Load",
+      "case": "Notification floods",
+      "status": "gap",
+      "environments": [],
+      "tests": []
+    },
+    {
+      "family": "Compatibility",
+      "case": "Tailscale / Surfshark variants",
+      "status": "device",
+      "environments": [],
+      "tests": []
+    },
+    {
+      "family": "Compatibility",
+      "case": "Sleep / wake",
+      "status": "device",
+      "environments": [],
+      "tests": []
+    },
+    {
+      "family": "Compatibility",
+      "case": "Network switch",
+      "status": "device",
+      "environments": [],
+      "tests": []
+    },
+    {
+      "family": "Compatibility",
+      "case": "Plex / BlueBubbles / SSH",
+      "status": "device",
+      "environments": [],
+      "tests": []
+    },
+    {
+      "family": "Compatibility",
+      "case": "Actual TV and adb paths",
+      "status": "device",
+      "environments": [],
+      "tests": []
+    }
   ]
 }
