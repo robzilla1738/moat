@@ -201,16 +201,21 @@ pub struct FaultStore {
     pub faults: Vec<Fault>,
     pub crashed: Arc<AtomicBool>,
     pub log: Vec<String>,
+    /// Slow disk: every operation takes at least this long before it happens (the write itself still completes).
+    pub latency: std::time::Duration,
 }
 
 impl FaultStore {
     pub fn new(crashed: Arc<AtomicBool>) -> Self {
-        FaultStore { inner: FsStore, faults: Vec::new(), crashed, log: Vec::new() }
+        FaultStore { inner: FsStore, faults: Vec::new(), crashed, log: Vec::new(), latency: std::time::Duration::ZERO }
     }
 
     fn check(&mut self, op: &str, name: &str) -> io::Result<Option<FaultKind>> {
         if self.crashed.load(Ordering::SeqCst) {
             return Err(io::Error::other("process crashed"));
+        }
+        if !self.latency.is_zero() {
+            std::thread::sleep(self.latency);
         }
         self.log.push(format!("{op} {name}"));
         let Some(i) = self.faults.iter().position(|f| f.file == name) else { return Ok(None) };

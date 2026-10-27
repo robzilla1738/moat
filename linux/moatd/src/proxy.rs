@@ -18,6 +18,12 @@
 //! compile-time check refuses hostname denies that would need UDP); it cannot restrict paths, methods or
 //! repositories; only the first request's `Host` is checked on a plain-HTTP keep-alive connection; Encrypted
 //! ClientHello exposes only its public outer name; domain fronting through an allowed host's CDN remains possible.
+//!
+//! Inside a CONNECT tunnel the proxy also reads the start of the tunnelled bytes: a TLS SNI or plain-HTTP `Host`
+//! that names a different host than the CONNECT request is refused (host/SNI mismatch, the visible form of
+//! fronting). What it cannot see: the HTTP `Host` inside TLS. A client that sends an allowed SNI and a different
+//! encrypted `Host` reaches the allowed name's own server; whether that server routes it elsewhere (shared CDN
+//! infrastructure) is outside what a non-intercepting proxy can observe. docs/adversarial-matrix.md lists the limit.
 
 use std::collections::BTreeMap;
 use std::io::{Read, Write};
@@ -637,6 +643,35 @@ fn deny_http(client: &mut TcpStream, why: &str) {
 }
 
 /// Handle one connection from a proxied session.
+/// Read the start of a CONNECT tunnel (bytes already buffered first) until it can be classified, the peek wait ends,
+/// or `MAX_PEEK` is reached. Server-speaks-first protocols simply time out and are treated as opaque.
+fn peek_tunnel(client: &mut TcpStream, mut buf: Vec<u8>, wait: Duration) -> Vec<u8> {
+    let _ = client.set_read_timeout(Some(wait));
+    let mut chunk = [0u8; 8192];
+    while classify(&buf).is_none() && buf.len() < MAX_PEEK {
+        match client.read(&mut chunk) {
+            Ok(0) | Err(_) => break,
+            Ok(n) => buf.extend_from_slice(&chunk[..n]),
+        }
+    }
+    let _ = client.set_read_timeout(None);
+    buf
+}
+
+/// The tunnelled bytes name a different host than the CONNECT request: the reason to refuse, or None.
+/// Only visible names are compared (TLS SNI, plain-HTTP Host); no name inside means nothing to compare.
+pub fn tunnel_mismatch(connect_host: &str, inner: &[u8]) -> Option<String> {
+    let norm = |h: &str| h.trim_end_matches('.').to_ascii_lowercase();
+    let (inner_host, what) = match classify(inner)? {
+        Peeked::Tls { sni: Some(s) } => (s, "TLS SNI"),
+        Peeked::Http { host: Some(h), .. } => (h, "HTTP Host"),
+        Peeked::Connect { host, .. } => (host, "nested CONNECT"),
+        _ => return None,
+    };
+    (norm(&inner_host) != norm(connect_host))
+        .then(|| format!("host mismatch inside the CONNECT tunnel: CONNECT {connect_host} but {what} {inner_host} (refused: fronting)"))
+}
+
 pub fn handle_connection(shared: &Shared, sess: &SessionRef, mut client: TcpStream) {
     let orig = shared.test_original_dst.or_else(|| original_dst(&client));
     let Some(_conn) = Slot::take(&shared.active_connections, shared.limits.max_connections) else {
@@ -726,6 +761,21 @@ pub fn handle_connection(shared: &Shared, sess: &SessionRef, mut client: TcpStre
             (None, None, _) => decide(pp.as_deref(), sess, None, &orig.map(|o| vec![o.ip()]).unwrap_or_default(), port),
         },
     };
+    // CONNECT: the tunnel is acknowledged first, then its first bytes must name the same host (no fronting by a
+    // visible mismatch). The upstream is dialed only after that, so a refused tunnel never reaches it.
+    let mut forward = forward;
+    let mut outcome = outcome;
+    let mut tunnel_open = false;
+    if connect && outcome.connect_to.is_some() {
+        if client.write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n").is_err() {
+            return;
+        }
+        tunnel_open = true;
+        forward = peek_tunnel(&mut client, forward, shared.peek_timeout);
+        if let Some(why) = host.as_ref().and_then(|h| tunnel_mismatch(&h.name, &forward)) {
+            outcome = refuse(why, port.unwrap_or(0));
+        }
+    }
     let mut attempt_json = serde_json::to_value(&outcome.attempt).unwrap_or_default();
     attempt_json["dns_lookup"] = serde_json::Value::String(lookup.into());
     if let (Some(o), Some(to)) = (orig, outcome.connect_to) {
@@ -741,7 +791,7 @@ pub fn handle_connection(shared: &Shared, sess: &SessionRef, mut client: TcpStre
     };
     shared.events.lock().unwrap().push(record);
     let Some(to) = outcome.connect_to else {
-        if connect || matches!(peeked, Peeked::Http { .. }) {
+        if !tunnel_open && (connect || matches!(peeked, Peeked::Http { .. })) {
             deny_http(&mut client, &outcome.reason);
         }
         let _ = client.shutdown(Shutdown::Both);
@@ -749,17 +799,12 @@ pub fn handle_connection(shared: &Shared, sess: &SessionRef, mut client: TcpStre
     };
     let mut up = match connect_upstream(to, shared.connect_timeout) {
         Ok(u) => u,
-        Err(e) => {
-            if connect {
-                let _ = write!(client, "HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
-            }
-            let _ = e;
+        // CONNECT: the tunnel was already acknowledged, so an unreachable upstream is a closed tunnel (no 502).
+        Err(_) => {
+            let _ = client.shutdown(Shutdown::Both);
             return;
         }
     };
-    if connect && client.write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n").is_err() {
-        return;
-    }
     if !forward.is_empty() && up.write_all(&forward).is_err() {
         return;
     }
@@ -1290,5 +1335,166 @@ pub(crate) mod tests {
         std::thread::sleep(Duration::from_millis(50));
         assert!(sh.drain_events().iter().any(|e| matches!(e, Event::ProxyLimit { resource, limit: 1, .. } if resource == "connections")));
         p.stop();
+    }
+
+    /// An upstream that records what reached it and answers a WebSocket upgrade with 101, then echoes frames.
+    fn ws_server(seen: Arc<Mutex<Vec<u8>>>) -> SocketAddr {
+        let l = TcpListener::bind("127.0.0.1:0").unwrap();
+        let a = l.local_addr().unwrap();
+        std::thread::spawn(move || {
+            for c in l.incoming().flatten() {
+                let seen = seen.clone();
+                std::thread::spawn(move || {
+                    let mut c = c;
+                    let mut req = Vec::new();
+                    let mut b = [0u8; 4096];
+                    while !req.windows(4).any(|w| w == b"\r\n\r\n") {
+                        match c.read(&mut b) {
+                            Ok(0) | Err(_) => return,
+                            Ok(n) => req.extend_from_slice(&b[..n]),
+                        }
+                    }
+                    seen.lock().unwrap().extend_from_slice(&req);
+                    let text = String::from_utf8_lossy(&req).to_ascii_lowercase();
+                    if !(text.contains("upgrade: websocket") && text.contains("connection: upgrade")) {
+                        let _ = c.write_all(b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n");
+                        return;
+                    }
+                    let _ = c.write_all(b"HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: test\r\n\r\n");
+                    while let Ok(n) = c.read(&mut b) {
+                        if n == 0 || c.write_all(&b[..n]).is_err() {
+                            break;
+                        }
+                    }
+                });
+            }
+        });
+        a
+    }
+
+    fn upgrade_request(host: &str, port: u16) -> String {
+        format!("GET /ws HTTP/1.1\r\nHost: {host}:{port}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n")
+    }
+
+    /// A masked client text frame carrying `msg` (RFC 6455 §5.2), and the bytes an echo server returns.
+    fn ws_frame(msg: &[u8]) -> Vec<u8> {
+        let mask = [0x37u8, 0xfa, 0x21, 0x3d];
+        let mut f = vec![0x81, 0x80 | msg.len() as u8];
+        f.extend_from_slice(&mask);
+        f.extend(msg.iter().enumerate().map(|(i, b)| b ^ mask[i % 4]));
+        f
+    }
+
+    fn read_exact_n(c: &mut TcpStream, n: usize) -> Vec<u8> {
+        c.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+        let mut v = vec![0u8; n];
+        c.read_exact(&mut v).unwrap();
+        v
+    }
+
+    fn read_head(c: &mut TcpStream) -> String {
+        c.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+        let mut v = Vec::new();
+        let mut b = [0u8; 1];
+        while !v.ends_with(b"\r\n\r\n") {
+            match c.read(&mut b) {
+                Ok(1) => v.push(b[0]),
+                _ => break,
+            }
+        }
+        String::from_utf8_lossy(&v).into()
+    }
+
+    #[test]
+    fn websocket_upgrade_works_through_connect_and_plain_http_and_is_ended_like_any_stream() {
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let up = ws_server(seen.clone());
+        // 1. explicit proxy: CONNECT, then the upgrade inside the tunnel (same host)
+        let (sh, p) = start(None, up.port());
+        let mut c = TcpStream::connect(("127.0.0.1", p.port)).unwrap();
+        write!(c, "CONNECT allowed.test:{} HTTP/1.1\r\n\r\n", up.port()).unwrap();
+        assert!(read_head(&mut c).starts_with("HTTP/1.1 200"));
+        c.write_all(upgrade_request("allowed.test", up.port()).as_bytes()).unwrap();
+        assert!(read_head(&mut c).starts_with("HTTP/1.1 101"), "upgrade answered by the real upstream");
+        for msg in [&b"hello"[..], b"second frame"] {
+            let f = ws_frame(msg);
+            c.write_all(&f).unwrap();
+            assert_eq!(read_exact_n(&mut c, f.len()), f, "frames flow both ways after the upgrade");
+        }
+        wait_streams(&sh, 1);
+        // a revision without the allow ends the upgraded stream like any other
+        let mgr = ProxyManager { shared: sh.clone(), ports: (0, 0), sessions: BTreeMap::new() };
+        mgr.set_policy(Some(lab_policy(up.port() ^ 1)));
+        assert_ended(&mut c);
+        assert_eq!(terminated_reasons(&sh).len(), 1);
+        p.stop();
+
+        // 2. transparent redirect: plain HTTP upgrade, decided on Host
+        let (sh, p) = start(Some(SocketAddr::new("192.0.2.66".parse().unwrap(), up.port())), up.port());
+        let mut h = TcpStream::connect(("127.0.0.1", p.port)).unwrap();
+        h.write_all(upgrade_request("allowed.test", up.port()).as_bytes()).unwrap();
+        assert!(read_head(&mut h).starts_with("HTTP/1.1 101"));
+        let f = ws_frame(b"via redirect");
+        h.write_all(&f).unwrap();
+        assert_eq!(read_exact_n(&mut h, f.len()), f);
+        wait_streams(&sh, 1);
+        assert_eq!(sh.revalidate(Utc::now()).len(), 0, "still allowed: stays open");
+        // an upgrade to a name the policy refuses is a 403 from the proxy, never forwarded
+        let before = seen.lock().unwrap().len();
+        let mut d = TcpStream::connect(("127.0.0.1", p.port)).unwrap();
+        d.write_all(upgrade_request("denied.test", up.port()).as_bytes()).unwrap();
+        assert!(read_head(&mut d).starts_with("HTTP/1.1 403"));
+        std::thread::sleep(Duration::from_millis(100));
+        assert_eq!(seen.lock().unwrap().len(), before, "the refused upgrade never reached any upstream");
+        p.stop();
+    }
+
+    #[test]
+    fn a_host_mismatch_inside_a_connect_tunnel_is_refused_before_the_upstream_is_dialed() {
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let up = ws_server(seen.clone());
+        let (sh, p) = start(None, up.port());
+        // TLS: CONNECT names the allowed host, the ClientHello names another (fronting by a visible mismatch)
+        let mut c = TcpStream::connect(("127.0.0.1", p.port)).unwrap();
+        write!(c, "CONNECT allowed.test:{} HTTP/1.1\r\n\r\n", up.port()).unwrap();
+        assert!(read_head(&mut c).starts_with("HTTP/1.1 200"));
+        c.write_all(&client_hello(Some("denied.test"), 4096)).unwrap();
+        assert_eq!(read_some(&mut c), "", "tunnel closed");
+        // plain HTTP inside the tunnel with another Host
+        let mut h = TcpStream::connect(("127.0.0.1", p.port)).unwrap();
+        write!(h, "CONNECT allowed.test:{} HTTP/1.1\r\n\r\n", up.port()).unwrap();
+        assert!(read_head(&mut h).starts_with("HTTP/1.1 200"));
+        h.write_all(upgrade_request("denied.test", up.port()).as_bytes()).unwrap();
+        assert_eq!(read_some(&mut h), "", "tunnel closed");
+        std::thread::sleep(Duration::from_millis(100));
+        assert!(seen.lock().unwrap().is_empty(), "nothing from a mismatched tunnel reached the upstream");
+        let evs = sh.drain_events();
+        let denies: Vec<_> = evs
+            .iter()
+            .filter_map(|e| match e {
+                Event::Flow { decision, .. } if decision["verdict"] == "deny" => {
+                    Some(decision["summary"].as_str().unwrap_or("").to_string())
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(denies.len(), 2, "{evs:?}");
+        assert!(denies.iter().all(|r| r.contains("host mismatch inside the CONNECT tunnel")), "{denies:?}");
+        // same name inside (case and trailing dot ignored): forwarded
+        let mut ok = TcpStream::connect(("127.0.0.1", p.port)).unwrap();
+        write!(ok, "CONNECT allowed.test:{} HTTP/1.1\r\n\r\n", up.port()).unwrap();
+        assert!(read_head(&mut ok).starts_with("HTTP/1.1 200"));
+        ok.write_all(upgrade_request("Allowed.Test.", up.port()).as_bytes()).unwrap();
+        assert!(read_head(&mut ok).starts_with("HTTP/1.1 101"));
+        p.stop();
+    }
+
+    #[test]
+    fn tunnel_mismatch_compares_only_visible_names() {
+        assert!(tunnel_mismatch("allowed.test", &client_hello(Some("denied.test"), 4096)).is_some());
+        assert!(tunnel_mismatch("allowed.test", &client_hello(Some("ALLOWED.test"), 4096)).is_none());
+        assert!(tunnel_mismatch("allowed.test", &client_hello(None, 4096)).is_none(), "no SNI: nothing to compare");
+        assert!(tunnel_mismatch("allowed.test", b"GET / HTTP/1.1\r\nHost: other.test\r\n\r\n").is_some());
+        assert!(tunnel_mismatch("allowed.test", b"SSH-2.0-OpenSSH_9.6\r\n").is_none(), "opaque protocols are not judged by name");
     }
 }

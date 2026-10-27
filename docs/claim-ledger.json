@@ -202,7 +202,7 @@
         "commit": "48f8ee5",
         "date": "2026-10-27"
       },
-      "limits": "Names are authorized before any proxy DNS lookup (lab resolver saw no query for forbidden names). Admitted streams are re-checked on every install and tick and end at expiry (measured 1.15 s after the deadline, 1 s tick), on a denying revision (0.80 s), task close (0.13 s), isolation (0.37 s) and daemon stop (0.11 s); post-decision bytes are bounded by one tick plus socket buffers, not zero. Direct and proxied agree for IPv4/IPv6 at an independent receiver. Not the installed unit; workload-side DNS is governed by profile DNS rules; domain fronting and ECH outer names remain; UDP is IP-only; streams are not adopted across a daemon restart.",
+      "limits": "Names are authorized before any proxy DNS lookup (lab resolver saw no query for forbidden names). Admitted streams are re-checked on every install and tick and end at expiry (measured 1.15 s after the deadline, 1 s tick), on a denying revision (0.80 s), task close (0.13 s), isolation (0.37 s) and daemon stop (0.11 s); post-decision bytes are bounded by one tick plus socket buffers, not zero. Direct and proxied agree for IPv4/IPv6 at an independent receiver. Not the installed unit; workload-side DNS is governed by profile DNS rules; domain fronting and ECH outer names remain; UDP is IP-only; streams are not adopted across a daemon restart. Inside a CONNECT tunnel a TLS SNI or plain-HTTP Host naming another host than the CONNECT request is refused before the upstream is dialed (unit + netns); an encrypted Host behind an allowed SNI is invisible and reaches the allowed name's own server (documented limit, shown in netns).",
       "open_defects": []
     },
     {
@@ -825,9 +825,18 @@
     {
       "family": "Destinations",
       "case": "Shared infrastructure",
-      "status": "gap",
-      "environments": [],
-      "tests": []
+      "status": "ci",
+      "environments": [
+        "ci-netns",
+        "unit"
+      ],
+      "tests": [
+        "a_host_mismatch_inside_a_connect_tunnel_is_refused_before_the_upstream_is_dialed",
+        "tunnel_mismatch_compares_only_visible_names",
+        "proxy: CONNECT allowed.lab carrying TLS SNI denied.lab is refused (host/SNI mismatch)",
+        "proxy: CONNECT tunnel whose SNI matches the CONNECT host reaches the real host (control)",
+        "proxy LIMIT (documented): an encrypted Host behind an allowed SNI reaches only the allowed name's own server"
+      ]
     },
     {
       "family": "Destinations",
@@ -905,7 +914,8 @@
         "a revision that no longer allows it ends the open stream",
         "closing the task ends its streams",
         "isolation ends open proxied streams",
-        "an_admitted_stream_ends_when_its_permission_expires"
+        "an_admitted_stream_ends_when_its_permission_expires",
+        "websocket_upgrade_works_through_connect_and_plain_http_and_is_ended_like_any_stream"
       ]
     },
     {
@@ -1181,9 +1191,14 @@
     {
       "family": "Updates",
       "case": "Interrupted migration",
-      "status": "gap",
-      "environments": [],
-      "tests": []
+      "status": "ci",
+      "environments": [
+        "unit"
+      ],
+      "tests": [
+        "state_left_by_a_newer_schema_is_kept_and_refused_not_reset",
+        "corrupt_journal_is_visible_and_never_a_fresh_bootstrap"
+      ]
     },
     {
       "family": "Updates",
@@ -1248,9 +1263,13 @@
     {
       "family": "Load",
       "case": "Slow disk",
-      "status": "gap",
-      "environments": [],
-      "tests": []
+      "status": "ci",
+      "environments": [
+        "unit"
+      ],
+      "tests": [
+        "a_slow_disk_delays_activation_but_never_reorders_or_outlives_a_trial_deadline"
+      ]
     },
     {
       "family": "Load",
