@@ -217,3 +217,11 @@ test("pack browser: each module's effective delta against the current policy and
   assert.equal(after.enabled, true);
   assert.deepEqual(after.newly_allowed, [], "already enabled: no new destinations");
 });
+
+test("the macOS app bundles exactly the maintained packs (macos/MoatKit/Sources/MoatKit/Packs mirrors packs/workflows)", async () => {
+  const { readFileSync, readdirSync } = await import("node:fs");
+  const src = join(ROOT, "packs/workflows");
+  const mac = join(ROOT, "macos/MoatKit/Sources/MoatKit/Packs");
+  assert.deepEqual(readdirSync(mac).sort(), readdirSync(src).filter((f) => f.endsWith(".json")).sort());
+  for (const f of readdirSync(src).filter((x) => x.endsWith(".json"))) assert.equal(readFileSync(join(mac, f), "utf8"), readFileSync(join(src, f), "utf8"), `${f}: copy packs/workflows/${f} into the macOS bundle`);
+});

@@ -17,7 +17,7 @@ let package = Package(
         .library(name: "MoatUI", targets: ["MoatUI"]),
     ],
     targets: [
-        .target(name: "MoatKit"),
+        .target(name: "MoatKit", resources: [.copy("Packs")]),
         .systemLibrary(name: "CMoatFFI", path: "Sources/CMoatFFI"),
         .target(name: "MoatCoreBridge", dependencies: ["MoatKit", "CMoatFFI"]),
         .target(name: "MoatUI", dependencies: ["MoatKit"]),

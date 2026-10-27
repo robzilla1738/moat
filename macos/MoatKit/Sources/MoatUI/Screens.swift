@@ -254,6 +254,10 @@ struct PolicyScreen: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             ScreenHeader(eyebrow: "Policy", title: "Signed policy.", dim: "Verified on this Mac before it is used.")
+            HStack(spacing: 10) {
+                MoatButton(title: "Learning", systemImage: "sparkles") { model.screen = .learning }
+                MoatButton(title: "Workflow packs", systemImage: "shippingbox") { model.screen = .packs }
+            }
             if let s = model.status {
                 HStack(alignment: .top, spacing: 16) {
                     Card {

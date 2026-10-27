@@ -142,6 +142,9 @@ public struct ScreenContent: View {
             case .coverage: CoverageRecoveryScreen(model: model)
             case .appDetail: AppDetailScreen(model: model)
             case .whatChanged: WhatChangedScreen(model: model)
+            case .learning: LearningScreen(model: model)
+            case .candidate: CandidateReviewScreen(model: model)
+            case .packs: PacksScreen(model: model)
             }
         }
     }
@@ -153,7 +156,7 @@ struct Sidebar: View {
 
     private var selection: Binding<Screen?> {
         // Detail screens keep their parent highlighted in the sidebar.
-        Binding(get: { model.screen == .appDetail || model.screen == .whatChanged ? .apps : model.screen }, set: { if let s = $0 { model.screen = s } })
+        Binding(get: { model.screen == .appDetail || model.screen == .whatChanged ? .apps : [.learning, .candidate, .packs].contains(model.screen) ? .rules : model.screen }, set: { if let s = $0 { model.screen = s } })
     }
 
     var body: some View {
