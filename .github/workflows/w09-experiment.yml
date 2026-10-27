@@ -1,0 +1,40 @@
+name: w09-experiment
+# W09: pinned OpenSnitch read-only sensor vs native kernel collector on real traffic. An experiment, not a gate:
+# it fails only if the harness itself breaks. Results are uploaded and summarized in the job log.
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "linux/experiments/w09/**"
+      - ".github/workflows/w09-experiment.yml"
+permissions:
+  contents: read
+jobs:
+  experiment:
+    name: OpenSnitch 1.8.0 sensor vs bpftrace (ubuntu runner)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install bpftrace, jq, python venv
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq bpftrace jq python3-venv
+      - name: Host facts
+        run: uname -a; bpftrace --version; cat /etc/os-release | head -3; command -v google-chrome || true
+      - name: Run experiment
+        run: sudo OUT=/tmp/w09-out linux/experiments/w09/run.sh
+      - name: Collect
+        if: always()
+        run: sudo chmod -R a+r /tmp/w09-out || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: w09-results
+          path: |
+            /tmp/w09-out/results.json
+            /tmp/w09-out/results.md
+            /tmp/w09-out/sensor.jsonl
+            /tmp/w09-out/native.log
+            /tmp/w09-out/scenarios.jsonl
+            /tmp/w09-out/*.txt
+            /tmp/w09-out/opensnitch-config.json
+          retention-days: 30

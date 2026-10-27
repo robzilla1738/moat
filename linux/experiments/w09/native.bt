@@ -1,0 +1,13 @@
+// W09 native comparison: kernel-side attribution without OpenSnitch. TCP connects (both families) as they enter
+// SYN_SENT, in the connecting task's context; UDP sends counted per comm. Fields: pid, uid, comm, cgroup v2 id.
+tracepoint:sock:inet_sock_set_state
+/args->newstate == 2 && args->oldstate == 7/
+{
+  if (args->family == 2) {
+    printf("tcp %llu %d %d %s %d %s %d %llu\n", nsecs, pid, uid, comm, 4, ntop(args->daddr), args->dport, cgroup);
+  } else {
+    printf("tcp %llu %d %d %s %d %s %d %llu\n", nsecs, pid, uid, comm, 6, ntop(args->daddr_v6), args->dport, cgroup);
+  }
+}
+kprobe:udp_sendmsg { printf("udp %llu %d %d %s 4 - 0 %llu\n", nsecs, pid, uid, comm, cgroup); }
+kprobe:udpv6_sendmsg { printf("udp %llu %d %d %s 6 - 0 %llu\n", nsecs, pid, uid, comm, cgroup); }
