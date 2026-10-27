@@ -8,6 +8,7 @@ import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium, type Browser, type Page } from "playwright";
 import { startHarness, type Harness } from "../../controller/test/live-harness.ts";
+import { mockPihole } from "../../controller/test/resolver-mocks.ts";
 
 const WEB = resolve(dirname(fileURLToPath(import.meta.url)), "../build/live");
 let h: Harness;
@@ -203,4 +204,26 @@ test("controller outage: the page says it is not current and pauses actions; no 
   if (await btn.count()) assert.equal(await btn.isDisabled(), true);
   assert.equal(await page.getByText("Living room TV").count(), 0);
   await page.close();
+});
+
+test("W16 DNS-only: a Pi-hole client shows resolver health and evidence age, never flows, processes or bytes", async () => {
+  const pi = await mockPihole();
+  try {
+    h.c.integrations.configureResolvers([{ id: "pihole", kind: "pihole", url: pi.url, password: "pw" }], (u, i) => fetch(u, i) as never);
+    const r = await h.c.integrations.pollResolver("pihole");
+    assert.equal(r.health, "ok");
+    const page = await signedIn(h.ownerToken);
+    await page.goto(`${h.url}/#/devices/${encodeURIComponent("dns:pihole:192.168.1.50")}`);
+    await page.getByText("Evidence age").waitFor();
+    await page.getByText(/via Pi-hole \(pihole\)/).first().waitFor();
+    await page.getByText("History gaps").waitFor();
+    assert.equal(await page.getByText("Flows today").count(), 0);
+    assert.equal(await page.getByText(/bytes? (out|in)/i).count(), 0);
+    await shot(page, "live-dns-device");
+    await page.goto(`${h.url}/#/devices`);
+    await page.getByText(/resolver ok · polled/).first().waitFor();
+    await page.close();
+  } finally {
+    await pi.close();
+  }
 });
