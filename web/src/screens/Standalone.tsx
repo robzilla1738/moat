@@ -34,7 +34,7 @@ export function StatusLine() {
   const fresh = useFreshness();
   const devs = data.devices.map((d) => ({ d, f: fresh(d) }));
   const enforced = devs.filter((x) => x.f.coverage === "enforced" || x.f.coverage === "protected-session").length;
-  const gaps = devs.filter((x) => ["degraded", "unknown"].includes(x.f.coverage)).length;
+  const gaps = devs.filter((x) => ["degraded", "unknown", "recovery-required", "rollback-pending"].includes(x.f.coverage)).length;
   const newest = data.devices.map((d) => d.lastSeen).filter((x): x is string => !!x).sort().at(-1);
   return (
     <div className="status-line" role="status">

@@ -288,9 +288,37 @@ export class Controller {
           const level = String(e.level);
           this.db.prepare("UPDATE devices SET coverage = ? WHERE id = ?").run(level, d.id);
           if (level === "degraded") this.raise({ kind: "coverage_lost", device: d.id, destination: "-", reason: String(e.detail ?? "enforcement not active"), urgency: "high", ref: `seq:${r.seq}`, at: r.at });
+          // W06 labels: the device kept its last verified policy and needs the owner at the device; never shown as healthy.
+          if (level === "recovery-required") this.raise({ kind: "recovery_required", device: d.id, destination: "-", reason: String(e.detail ?? "the activation journal could not reconcile state; the last verified policy stays in force until you recover at the device"), urgency: "high", ref: `seq:${r.seq}`, at: r.at });
+          if (level === "rollback-pending") this.raise({ kind: "rollback_pending", device: d.id, destination: "-", reason: String(e.detail ?? "a trial rollback could not reinstall the fallback; the trial revision is still in force"), urgency: "high", ref: `seq:${r.seq}`, at: r.at });
           flowRecs.push({ seq: r.seq, at: r.at, kind: "coverage", detail: level });
           break;
         }
+        case "activation_recovery": {
+          // moat.activation.v1 phase names. Only recovery_required needs the owner; other phases are recorded evidence.
+          const phase = String(e.phase ?? "unknown");
+          if (phase === "recovery_required") {
+            this.db.prepare("UPDATE devices SET coverage = 'recovery-required' WHERE id = ?").run(d.id);
+            this.raise({ kind: "recovery_required", device: d.id, destination: "-", revision: e.active_revision === undefined || e.active_revision === null ? undefined : Number(e.active_revision), reason: `activation recovery required: ${String(e.detail ?? "")}`.trim(), urgency: "high", ref: `seq:${r.seq}`, at: r.at });
+          }
+          flowRecs.push({ seq: r.seq, at: r.at, kind: "activation_recovery", policy_revision: e.active_revision === undefined || e.active_revision === null ? null : Number(e.active_revision), detail: `${phase}: ${String(e.detail ?? "")}`.slice(0, 300) });
+          break;
+        }
+        case "session_not_adopted":
+          // The daemon restarted and stopped a session it could not re-adopt: the session is over, not running unprotected.
+          this.db.prepare("UPDATE sessions SET state = 'ended', ended_at = COALESCE(ended_at, ?), close_requested_at = close_requested_at WHERE device_id = ? AND id = ?").run(r.at, d.id, String(e.session_id));
+          this.raise({ kind: "session_not_adopted", device: d.id, session: String(e.session_id), destination: "-", reason: `session ${e.session_id} (${e.profile}) was stopped after a daemon restart: ${e.reason}`, urgency: "medium", ref: `seq:${r.seq}`, at: r.at });
+          flowRecs.push({ seq: r.seq, at: r.at, kind: "session_not_adopted", session_id: String(e.session_id), detail: String(e.reason ?? "").slice(0, 300) });
+          break;
+        case "stream_terminated":
+          // Evidence that Moat ended an admitted stream (revocation, isolation, close). Recorded, not an alarm.
+          flowRecs.push({ seq: r.seq, at: r.at, kind: "stream_terminated", session_id: String(e.session_id), destination: String(e.hostname ?? e.destination ?? ""), rule: String(e.admitted_by ?? ""), measurement_source: "session egress proxy", detail: String(e.reason ?? "").slice(0, 300) });
+          break;
+        case "proxy_limit":
+          // A bound was reached and the connection was refused (never a bypass). The owner should know the task hit it.
+          this.raise({ kind: "proxy_limit", device: d.id, session: String(e.session_id), destination: "-", rule: `limit:${e.resource}`, reason: `the session proxy refused a connection: ${e.resource} limit ${e.limit} reached (refused, not bypassed)`, urgency: "medium", ref: `seq:${r.seq}`, at: r.at });
+          flowRecs.push({ seq: r.seq, at: r.at, kind: "proxy_limit", session_id: String(e.session_id), detail: `${e.resource}=${e.limit}` });
+          break;
         case "gap":
           this.raise({ kind: "telemetry_gap", device: d.id, destination: "-", reason: `events ${e.from}–${e.to} lost on the device (${e.reason})`, urgency: "medium", ref: `seq:${r.seq}`, at: r.at });
           flowRecs.push({ seq: r.seq, at: r.at, kind: "gap" });

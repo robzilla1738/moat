@@ -63,6 +63,8 @@ public final class AppModel: ObservableObject {
     @Published public var selectedAppID: String?
     /// Devices this Mac knows about. A standalone Mac is one device: the sidebar says "This computer".
     @Published public var deviceCount = 1
+    /// Lifecycle events from other enrolled endpoints, filled only by fleet companion sync (W13). Empty when standalone.
+    @Published public var fleetEvents: [EndpointLifecycleEvent] = []
     /// First-ten-minutes owner actions the app records (evidence for the checklist; never inferred from views).
     @Published public var choseMode = false
     @Published public var sawRecoveryCard = false

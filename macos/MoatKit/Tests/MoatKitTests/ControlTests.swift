@@ -75,6 +75,39 @@ final class ControlTests: XCTestCase {
         XCTAssertEqual(h2.engine.decide(flow("fine.example")).source, .emergencyIsolation)
     }
 
+    final class Switch: @unchecked Sendable { var failLoads = false }
+
+    func testCanaryRollbackThatCannotLoadIsRollbackPendingUntilOwnerRecovery() throws {
+        let sw = Switch()
+        let h = ControlHandler(
+            engine: FilterEngine(deviceID: "mbp"), store: PolicyStore(directory: nil, verifier: FakeVerifier()), version: "test",
+            filterEnabled: { true }, makeEvaluator: { _ in
+                if sw.failLoads { throw ControlError("evaluator unavailable") }
+                return FakeEvaluator()
+            })
+        let t = Date()
+        _ = h.perform(.applySignedSnapshot(Data("rev:1".utf8), canarySeconds: 0), now: t)
+        _ = h.perform(.applySignedSnapshot(Data("rev:2".utf8), canarySeconds: 60), now: t)
+        sw.failLoads = true
+        h.tick(now: t.addingTimeInterval(120))
+        var status = try decode(h.perform(.status), StatusReport.self)
+        XCTAssertEqual(status.coverage, .rollbackPending)
+        XCTAssertEqual(status.installed?.revision, 2, "the trial revision is still the one enforced, and the report says so")
+        XCTAssertTrue(status.coverageNotes.first?.contains("still enforced") == true, "\(status.coverageNotes)")
+        XCTAssertTrue(status.coverage.needsOwnerAtDevice)
+        sw.failLoads = false
+        _ = try decode(h.perform(.rollbackToLastKnownGood), PolicySummary.self)
+        status = try decode(h.perform(.status), StatusReport.self)
+        XCTAssertEqual(status.coverage, .enforced)
+    }
+
+    func testCoverageLabelsRoundTripAndUnknownLabelsAreUnknown() throws {
+        let dec = JSONDecoder()
+        XCTAssertEqual(try dec.decode([CoverageLevel].self, from: Data(#"["recovery-required","rollback-pending","enforced"]"#.utf8)), [.recoveryRequired, .rollbackPending, .enforced])
+        XCTAssertEqual(try dec.decode([CoverageLevel].self, from: Data(#"["fully-protected"]"#.utf8)), [.unknown], "a label this build does not know is never shown as healthy")
+        XCTAssertEqual(String(decoding: try JSONEncoder().encode(CoverageLevel.rollbackPending), as: UTF8.self), #""rollback-pending""#)
+    }
+
     func testRollbackWithoutLastKnownGoodFails() {
         let h = makeHandler()
         if case .success = h.perform(.rollbackToLastKnownGood) { XCTFail() }

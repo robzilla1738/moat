@@ -266,7 +266,7 @@ export function whatChanged(c: Controller, q: { device?: string | null; app?: st
     } else if (!before) observed.push({ kind: "destination", title: `New destination: ${k}`, working: "not contacted", failing: [...vs].join("/") });
   }
   // 4. Endpoint health / coverage evidence and gaps.
-  const cov = (rows: FlowRow[]) => [...new Set(rows.filter((r) => r.kind === "coverage" || r.kind === "activation_recovery").map((r) => r.detail ?? r.kind))];
+  const cov = (rows: FlowRow[]) => [...new Set(rows.filter((r) => r.kind === "coverage" || r.kind === "activation_recovery" || r.kind === "session_not_adopted" || r.kind === "proxy_limit").map((r) => (r.kind === "coverage" ? r.detail ?? r.kind : `${r.kind}${r.detail ? ` (${r.detail})` : ""}`)))];
   const ca = cov(A), cb = cov(B);
   if (cb.join() !== ca.join()) {
     observed.push({ kind: "health", title: "Coverage or recovery state reported", working: ca.join(", ") || "no change reported", failing: cb.join(", ") || "no change reported" });

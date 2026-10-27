@@ -198,6 +198,7 @@ extension CoverageLevel {
         case .observed: return .blue
         case .degraded: return .amber
         case .isolated: return .red
+        case .recoveryRequired, .rollbackPending: return .red
         case .unknown: return .neutral
         }
     }
@@ -208,6 +209,8 @@ extension CoverageLevel {
         case .observed: return "eye.fill"
         case .degraded: return "exclamationmark.triangle.fill"
         case .isolated: return "lock.shield.fill"
+        case .recoveryRequired: return "wrench.and.screwdriver.fill"
+        case .rollbackPending: return "arrow.uturn.backward.circle.fill"
         case .unknown: return "questionmark.circle.fill"
         }
     }

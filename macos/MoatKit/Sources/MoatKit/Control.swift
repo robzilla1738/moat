@@ -84,6 +84,11 @@ public final class ControlHandler: @unchecked Sendable {
     private var audit: [AuditEntry] = []
     private var loadError: String?
     private var restoration: String?
+    /// A due canary rollback whose fallback could not be loaded: the trial revision is still in force.
+    private var rollbackPending: String?
+    /// Reserved for a Mac activation journal that cannot reconcile (none exists yet). A failed restoration stays
+    /// `degraded` (W07): the owner can fix trust and reload without a recovery ceremony.
+    private var recoveryRequired: String?
 
     private func setLoadError(_ e: String?) {
         lock.lock()
@@ -197,6 +202,7 @@ public final class ControlHandler: @unchecked Sendable {
                 let durable = store.commit(entry, canary: TimeInterval(canary), now: now)
                 engine.install(entry.summary, evaluator: ev, expiries: PolicyExpiries.from(policyJSON: entry.policyJSON), trustGeneration: trustGeneration)
                 setLoadError(nil)
+                clearRecovery()
                 if !durable {
                     return .failure(ControlError("Revision \(entry.summary.revision) is enforced now, but it could not be saved and will not survive a restart. \(store.lastPersistError ?? "")"))
                 }
@@ -218,6 +224,8 @@ public final class ControlHandler: @unchecked Sendable {
                 return .failure(ControlError("There is no last known good revision to roll back to."))
             }
             engine.install(e.summary, evaluator: ev, expiries: PolicyExpiries.from(policyJSON: e.policyJSON), trustGeneration: trustGeneration)
+            setLoadError(nil)
+            clearRecovery()
             return encode(s)
         case let .enterIsolation(reason):
             let trimmed = String(reason.prefix(200))
@@ -241,8 +249,11 @@ public final class ControlHandler: @unchecked Sendable {
     /// Called periodically by the extension: picks up trusted-key changes and performs a due canary rollback.
     public func tick(now: Date = Date()) {
         reloadTrustIfChanged()
-        if store.tick(now: now) != nil, let e = store.installed {
-            installIntoEngine(e)
+        if let rolled = store.tick(now: now), let e = store.installed {
+            let ok = installIntoEngine(e)
+            lock.lock()
+            rollbackPending = ok ? nil : "The canary rollback to revision \(rolled.revision) could not load; the trial revision \(engine.installedPolicy.map { String($0.revision) } ?? "none") is still enforced."
+            lock.unlock()
         }
     }
 
@@ -253,15 +264,20 @@ public final class ControlHandler: @unchecked Sendable {
         lock.lock()
         let le = loadError
         let rest = restoration
+        let rp = rollbackPending
+        let rr = recoveryRequired
         lock.unlock()
         if let le { allNotes.insert(le, at: 0) }
+        if let rp { allNotes.insert(rp, at: 0) }
+        if let rr { allNotes.insert("Recovery required: \(rr)", at: 0) }
         if let pe = store.lastPersistError { allNotes.insert(pe, at: 0) }
         if let d = store.canaryDeadline {
             allNotes.append("Canary rollout: rolls back automatically at \(ISO8601DateFormatter().string(from: d)) unless confirmed.")
         }
         return StatusReport(
             extensionVersion: version,
-            coverage: le != nil && cov == .observed ? .degraded : cov,
+            // isolation is the owner's explicit state and wins; otherwise the recovery labels outrank everything else
+            coverage: cov == .isolated ? cov : rp != nil ? .rollbackPending : rr != nil ? .recoveryRequired : le != nil && cov == .observed ? .degraded : cov,
             coverageNotes: allNotes,
             filterEnabled: enabled,
             isolation: engine.currentIsolation,
@@ -281,12 +297,23 @@ public final class ControlHandler: @unchecked Sendable {
 
     /// Install an already-committed entry (canary rollback). If its evaluator cannot be built, the running generation
     /// is kept and the failure is reported; nothing silently drops to observation.
-    private func installIntoEngine(_ e: PolicyStore.Entry) {
+    /// An owner recovery or a verified, loaded new revision ends recovery-required / rollback-pending.
+    private func clearRecovery() {
+        lock.lock()
+        rollbackPending = nil
+        recoveryRequired = nil
+        lock.unlock()
+    }
+
+    @discardableResult
+    private func installIntoEngine(_ e: PolicyStore.Entry) -> Bool {
         do {
             engine.install(e.summary, evaluator: try makeEvaluator(e.policyJSON), expiries: PolicyExpiries.from(policyJSON: e.policyJSON), trustGeneration: trustGeneration)
             setLoadError(nil)
+            return true
         } catch {
             setLoadError("Revision \(e.summary.revision) could not be loaded by the evaluator (\(error)); the filter keeps enforcing generation \(engine.currentGeneration.map { String($0.generation) } ?? "none") (revision \(engine.installedPolicy.map { String($0.revision) } ?? "none")).")
+            return false
         }
     }
 

@@ -90,6 +90,8 @@ struct OverviewHero: View {
         case .observed: return "Observing."
         case .isolated: return "Isolated."
         case .degraded: return "Needs attention."
+        case .recoveryRequired: return "Recovery required."
+        case .rollbackPending: return "Rollback pending."
         case .unknown: return "No report."
         }
     }

@@ -4,42 +4,9 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { generateKeyPair } from "../src/crypto.ts";
 import { appId, apps, appDetail, diagnostics, UNKNOWN_APP, whatChanged } from "../src/standalone.ts";
 import { authorize, bootstrap, fixture, HOME, type Fixture } from "./helpers.ts";
-
-export const CURL_RULE = `
-[[rules]]
-id = "curl-allow-example"
-description = "curl may reach example.org (skipped with report where per-app hostname rules cannot be enforced)."
-action = "allow"
-on_unsupported = "skip_with_report"
-selector = { apps = [{ executable = "/usr/bin/curl" }] }
-destinations = { hosts = ["example.org"] }
-provenance = { kind = "git", reference = "test" }
-`;
-
-export function enroll(f: Fixture, id = "mbp", platform = "macos") {
-  const owner = f.c.authenticate(f.ownerToken)!;
-  const { code } = f.c.createEnrollmentCode(owner);
-  f.c.enroll({ code, device_id: id, platform, public_hex: generateKeyPair().publicHex, capabilities: { capabilities: { session_enforcement: { support: "supported" }, app_enforcement: { support: "unsupported", note: "nftables" } } } });
-  return f.c.db.prepare("SELECT * FROM devices WHERE id = ?").get(id) as never;
-}
-
-let seq = 0;
-export function flow(f: Fixture, o: { exe?: string | null; family?: string; signer?: string; ip?: string; host?: string; port?: number; verdict?: "allow" | "deny"; observed?: boolean; rule?: string; revision?: number; minutesAgo?: number; device?: string }) {
-  const at = new Date(f.clock.t - (o.minutesAgo ?? 0) * 60_000).toISOString();
-  const app = o.exe === null ? { family: o.family ?? "curl" } : { family: o.family ?? "curl", executable: o.exe ?? "/usr/bin/curl", ...(o.signer ? { team_id: o.signer } : {}) };
-  return {
-    seq: ++seq,
-    at,
-    event: {
-      type: "flow",
-      attempt: { id: `f${seq}`, device_id: o.device ?? "mbp", app, remote_ip: o.ip ?? "93.184.215.14", remote_port: o.port ?? 443, transport: "tcp", at, ...(o.host ? { hostname: { name: o.host, source: "sni", confidence: "medium" } } : {}) },
-      decision: { verdict: o.verdict ?? "allow", permitted_by_observation: o.observed ?? false, rule: o.rule, profile: "ordinary-desktop-learning", policy_revision: o.revision ?? 1 },
-    },
-  };
-}
+import { CURL_RULE, enroll, flow, nextSeq } from "./w12-helpers.ts";
 
 async function publish(f: Fixture, source: string, message: string) {
   const p = f.c.authenticate(f.ownerToken)!;
@@ -99,7 +66,7 @@ test("what changed: observed differences are separated from candidates, each can
   f.clock.t += 0;
   await publish(f, HOME + CURL_RULE, "allow curl → example.org");
   // Failing interval: new signer identity, example.org denied at revision 2, and a lost event range.
-  seq += 3; // the endpoint lost three events
+  nextSeq(3); // the endpoint lost three events
   f.c.sync(d, { events: [flow(f, { host: "example.org", verdict: "deny", rule: "safety-example", revision: 2, minutesAgo: 5 }), flow(f, { signer: "TEAM9", host: "cdn.example.org", minutesAgo: 4, revision: 2 })] });
   const t = (m: number) => new Date(f.clock.t - m * 60_000).toISOString();
   const r = whatChanged(f.c, { device: "mbp", working: `${t(180)}/${t(60)}`, failing: `${t(30)}/${t(0)}` });
@@ -118,7 +85,7 @@ test("diagnostics: versions, policy generation, evidence age, downgraded capabil
   const f = fixture();
   const d = enroll(f);
   await bootstrap(f);
-  f.c.sync(d, { last_applied: 1, receipts: [{ revision: 1, state: "applied" }], events: [flow(f, {}), { seq: seq + 5, at: new Date(f.clock.t).toISOString(), event: { type: "coverage_changed", level: "enforced" } }] });
+  f.c.sync(d, { last_applied: 1, receipts: [{ revision: 1, state: "applied" }], events: [flow(f, {}), { seq: nextSeq(5), at: new Date(f.clock.t).toISOString(), event: { type: "coverage_changed", level: "enforced" } }] });
   f.clock.t += 15 * 60_000;
   const g = diagnostics(f.c, "0.1.0");
   const dev = g.devices.find((x) => x.id === "mbp")!;

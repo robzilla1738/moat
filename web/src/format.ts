@@ -32,6 +32,8 @@ export const COVERAGE: Record<Coverage, { label: string; tone: string; claim: st
   monitoring: { label: "Monitoring", tone: "neutral", claim: "Traffic is observed and recorded. It is permitted, not enforced." },
   "dns-only": { label: "DNS only", tone: "violet", claim: "Resolver queries only. No app, process, connection or byte count." },
   degraded: { label: "Degraded", tone: "amber", claim: "Something the policy needs is not in force. See why." },
+  "recovery-required": { label: "Recovery required", tone: "red", claim: "The device could not reconcile its activation state. It keeps its last verified policy and needs you at the device; nothing is reset or guessed." },
+  "rollback-pending": { label: "Rollback pending", tone: "red", claim: "A trial rollback could not reinstall the previous policy, so the trial revision is still in force. Recover at the device." },
   isolated: { label: "Isolated", tone: "red", claim: "Emergency isolation: only the recovery paths you chose are open." },
   unknown: { label: "Unknown", tone: "neutral", claim: "No current report from this device. Moat cannot say what it enforces right now." },
 };
