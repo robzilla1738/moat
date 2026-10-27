@@ -243,3 +243,22 @@ test("harness launch API: profiles from policy and capabilities; self-reports ca
   f.c.sync(d as never, { events: [{ seq: 5, at: new Date(f.clock.t).toISOString(), event: { type: "session_ended", session_id: "20261026-a1b2", exit_code: null, signal: 9 } }] });
   assert.equal(f.c.sync(d as never, { last_applied: 1 }).actions.length, 0);
 });
+
+test("a silent or stale device never keeps its last coverage claim", () => {
+  const f = fixture();
+  const kp = enrollDevice(f);
+  let d = f.c.devices()[0]!;
+  assert.equal(d.stale, true);
+  assert.equal(d.effective_coverage, "unknown");
+  const row = { id: "omarchy" } as Parameters<typeof f.c.sync>[0];
+  f.c.sync(row, { last_applied: null, status: { coverage: "enforced" } });
+  d = f.c.devices()[0]!;
+  assert.equal(d.stale, false);
+  f.clock.t += 11 * 60_000;
+  d = f.c.devices()[0]!;
+  assert.equal(d.stale, true);
+  assert.equal(d.effective_coverage, "degraded");
+  assert.match(String(d.coverage_note), /cannot confirm/);
+  assert.equal(f.c.overview().devices[0]!.effective_coverage, "degraded");
+  void kp;
+});

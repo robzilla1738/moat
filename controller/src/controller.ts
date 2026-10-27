@@ -37,6 +37,8 @@ export const DEVICE_ACTIONS = ["close_session"] as const;
 export const ALLOW_ONCE_DEFAULT_SECONDS = 3600;
 export const ALLOW_ONCE_MAX_SECONDS = 8 * 3600;
 const CLOCK_SKEW_MS = 5 * 60_000;
+/** A device that has not synced for this long is stale: its last report no longer supports a coverage claim. */
+export const STALE_AFTER_MS = 10 * 60_000;
 
 interface DeviceRow { id: string; name: string; platform: string; public_hex: string; key_id: string; enrolled_at: string; revoked_at: string | null; last_seen_at: string | null; capabilities: string | null; last_revision: number | null; coverage: string | null; status: string | null }
 interface IncidentRow { id: string; dedup_key: string; kind: string; device_id: string; session_id: string | null; process_instance: string | null; app: string | null; destination: string; port: number | null; transport: string | null; reason: string; rule: string | null; policy_revision: number | null; urgency: Urgency; state: string; occurrences: number; first_at: string; last_at: string; acknowledged_at: string | null; acknowledged_occurrences: number | null; resolved_at: string | null; facts: string; revision: number }
@@ -165,6 +167,7 @@ export class Controller {
       last_seen_at: d.last_seen_at,
       last_revision: d.last_revision,
       coverage: d.coverage,
+      ...this.staleness(d),
       status: d.status ? JSON.parse(d.status) : null,
       capabilities: d.capabilities ? JSON.parse(d.capabilities) : null,
       revision_states: this.db.prepare("SELECT revision, state, at, detail FROM device_revisions WHERE device_id = ? ORDER BY revision DESC, at DESC LIMIT 12").all(d.id),
@@ -535,13 +538,23 @@ export class Controller {
     return { action_id: aid, state: "queued", note: "Delivered on the device's next sync; closed when the endpoint reports session_ended." };
   }
 
+  /** Never claim more than the last report supports: a stale or silent device shows degraded / unknown. */
+  staleness(d: Pick<DeviceRow, "last_seen_at" | "coverage">) {
+    if (!d.last_seen_at) return { stale: true, effective_coverage: "unknown", coverage_note: "This device has not reported since enrollment." };
+    const age = this.now().getTime() - Date.parse(d.last_seen_at);
+    if (age > STALE_AFTER_MS) {
+      return { stale: true, effective_coverage: "degraded", coverage_note: `No report for ${Math.round(age / 60_000)} minutes; the last known policy may still be enforced locally, but Moat cannot confirm it.` };
+    }
+    return { stale: false, effective_coverage: d.coverage ?? "unknown", coverage_note: null };
+  }
+
   // ------------------------------------------------------------------ overview
   overview() {
     const devices = this.devices();
     const open = this.db.prepare("SELECT COUNT(*) AS n FROM incidents WHERE state = 'open'").get() as { n: number };
     return {
       revision: this.currentRevision()?.revision ?? null,
-      devices: devices.map((d) => ({ id: d.id, name: d.name, platform: d.platform, coverage: d.coverage, last_seen_at: d.last_seen_at, last_revision: d.last_revision })),
+      devices: devices.map((d) => ({ id: d.id, name: d.name, platform: d.platform, coverage: d.coverage, effective_coverage: d.effective_coverage, stale: d.stale, last_seen_at: d.last_seen_at, last_revision: d.last_revision })),
       open_incidents: open.n,
       active_grants: this.activeGrants().length,
       retention: this.flows.retention(),
