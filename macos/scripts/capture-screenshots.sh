@@ -26,10 +26,15 @@ for s in "${shots[@]}"; do
   wid="$OUT/.wid"; rm -f "$wid"
   "$BIN" "${args[@]}" --window-id-file "$wid" --snapshot "$OUT/fallback-$name-$appearance.png" >"$OUT/.log" 2>&1 &
   pid=$!
-  for _ in $(seq 250); do [[ -s "$wid" ]] && break; sleep 0.1; done
+  for _ in $(seq 200); do [[ -s "$wid" ]] && break; sleep 0.1; done
   if [[ -s "$wid" ]]; then
     sleep 0.4
-    if screencapture -x -o -l "$(cat "$wid")" "$OUT/macos-$name-$appearance.png" 2>"$OUT/.err" && [[ -s "$OUT/macos-$name-$appearance.png" ]]; then
+    # screencapture can block on a permission prompt; never wait more than 15 s for it.
+    screencapture -x -o -l "$(cat "$wid")" "$OUT/macos-$name-$appearance.png" 2>"$OUT/.err" &
+    sc=$!
+    for _ in $(seq 150); do kill -0 "$sc" 2>/dev/null || break; sleep 0.1; done
+    kill "$sc" 2>/dev/null
+    if wait "$sc" && [[ -s "$OUT/macos-$name-$appearance.png" ]]; then
       echo "captured macos-$name-$appearance.png ($(sips -g pixelWidth -g pixelHeight "$OUT/macos-$name-$appearance.png" 2>/dev/null | awk '/pixel/{printf "%s ", $2}'))"
       captured=$((captured + 1))
     else
@@ -38,7 +43,9 @@ for s in "${shots[@]}"; do
   else
     echo "app did not report a window for $name-$appearance (process alive: $(kill -0 "$pid" 2>/dev/null && echo yes || echo no))"; tail -5 "$OUT/.log"
   fi
-  kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null
+  kill "$pid" 2>/dev/null
+  for _ in $(seq 30); do kill -0 "$pid" 2>/dev/null || break; sleep 0.1; done
+  kill -9 "$pid" 2>/dev/null; wait "$pid" 2>/dev/null
 done
 rm -f "$OUT/.wid" "$OUT/.err" "$OUT/.log"
 echo "captured $captured of ${#shots[@]} window screenshots"

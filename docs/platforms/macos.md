@@ -18,11 +18,41 @@ macos/
     MoatKit           filter engine, verdict cache, event spool, policy store (canary, rollback), trust config,
                       typed XPC protocol + handler + client
     MoatCoreBridge    Swift wrapper over the Rust moat-core C ABI (core/moat-ffi): verify + evaluate
-    MoatUI            SwiftUI screens (Overview, Activity, Policy, Coverage, Recovery), dark/light
+    MoatUI            SwiftUI: main window (Overview, Activity, Policy, Coverage, Recovery), menu bar panel,
+                      first-run onboarding; Liquid Glass on macOS 26 with fallbacks; dark/light
   Moat/               XcodeGen project: App/ (Moat.app), Extension/ (MoatFilter system extension)
-  scripts/            build-ffi.sh, release.sh (Developer ID required), render-cask.sh
+  scripts/            build-ffi.sh, release.sh (Developer ID required), render-cask.sh,
+                      capture-screenshots.sh (CI: real window captures in demo mode)
   Casks/              Homebrew cask template
 ```
+
+## The app
+
+Requires **macOS 14 or later**. On **macOS 26** it uses Apple's Liquid Glass; on macOS 14 and 15 it falls back to system
+materials and the standard bordered controls. Built with Xcode 26 (CI: `macos-26` runner).
+
+* **Main window.** A `NavigationSplitView` whose sidebar is the system's floating glass sidebar on macOS 26. The
+  toolbar holds the coverage status, Refresh and Isolate (Isolate always asks first). Content leads: cards and lists
+  are opaque surfaces, and glass is reserved for navigation and controls, as Apple's HIG asks. Overview opens with a
+  status hero whose artwork extends under the sidebar (`backgroundExtensionEffect`). Scroll views use the soft
+  scroll-edge effect. Primary actions use `.glassProminent`, secondary ones `.glass`. The Activity filter is a glass
+  capsule, and its clear button morphs out of it (`GlassEffectContainer` + `glassEffectID`).
+* **Menu bar extra** (`MenuBarExtra`, window style): coverage, the installed revision, recent blocks, Open Moat,
+  Refresh, and **Isolate this Mac…**. Isolating takes a second explicit click: the button morphs into *Cancel* /
+  *Isolate now*. Turning isolation off is only possible in Recovery with the typed phrase.
+* **First-run onboarding** (also under Moat › Set Up Moat… and in Settings): what Moat can and cannot claim on this
+  Mac (per-app decisions *untested*, no process ancestry, no protected sessions on macOS, no fail-closed or VPN
+  claim, phones and TV DNS-only), installing and approving the system extension, turning on the content filter, and
+  adding the signer key yourself with `sudo` (the app shows the command and reads back the trusted key ids; it never
+  adds or promotes a key).
+* **Accessibility.** Reduce Transparency turns every glass surface into an opaque fill with a border; Increase
+  Contrast drops tinted glass and adds stronger borders; Reduce Motion turns off morphing, slides and symbol
+  animation. Text uses system text styles. Icon-only controls have labels, and status pills read as one element.
+* **Demo and screenshots:** `Moat.app/Contents/MacOS/Moat --demo [--screen overview|activity|policy|coverage|recovery|menubar|onboarding] [--isolated] [--appearance dark|light]`.
+  CI captures the real window this way (`scripts/capture-screenshots.sh`); the menu bar panel is shown in a window
+  for its screenshot.
+
+![Activity](../screenshots/macos-activity-light.png)
 
 ## How a flow is decided
 

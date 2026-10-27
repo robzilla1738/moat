@@ -48,7 +48,13 @@ Phones and the TV are **DNS-only**, always labeled as such (AdGuard Home / Pi-ho
   **Not yet proven on Robert's Omarchy kernel.**
 * Ordinary traffic: device-wide and per-user rules. No per-app rules (nftables cannot tell apps apart); the compiler
   rejects them or, for allow rules that opt in, leaves them out with a report.
-* Hostnames: IP-only. Strict hostname rules are rejected for this adapter, never approximated.
+* Hostnames: IP-only for ordinary traffic; strict hostname rules there are rejected, never approximated. Inside
+  protected sessions, hostname rules are enforced **for TCP only** by the session egress proxy, from the TLS SNI, a
+  `CONNECT` target or the first plain-HTTP `Host` header, with no TLS interception (labelled *untested* until proven
+  on Omarchy). The proxy connects to the name it resolves, never to the client-chosen address. UDP stays IP-only, and
+  domain fronting through an allowed host remains possible.
+* Timed trial revisions revert to the last confirmed revision unless confirmed locally (daemon must be running for
+  the countdown).
 * Gaps listed in [platforms/linux.md](platforms/linux.md#what-a-linux-protected-session-does-not-cover): abstract
   Unix sockets, the system resolver as a broker, unhidden loopback brokers, root/kernel, interactive TTY job control.
 

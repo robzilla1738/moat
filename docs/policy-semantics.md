@@ -77,7 +77,7 @@ All present fields must match:
 ## Destinations
 
 * `hosts` match **hostname evidence** only, never an IP someone once resolved. Evidence carries a source
-  (`flow_api`, `connect_proxy`, `sni`, `dns_answer`, `inferred`) and a confidence. A flow without hostname evidence
+  (`flow_api`, `connect_proxy`, `sni`, `http_host`, `dns_answer`, `inferred`) and a confidence. A flow without hostname evidence
   does not match a host rule. Leading wildcards only (`*.example.com`).
 * `cidrs`, `scopes` (`loopback`, `link_local`, `lan`, `tailnet` (100.64.0.0/10, fd7a:115c:a1e0::/48), `multicast`,
   `public`).
@@ -92,7 +92,13 @@ All present fields must match:
 Each rule implies capabilities from what it references (`apps` → `app_enforcement`; `users` →
 `user_enforcement`; `session` → `session_enforcement`; `ancestors` → `ancestor_attribution`; hostnames, directly, via
 a set, or via a provider `region_endpoints` match → `hostname_enforcement`; IPv6 CIDRs → `ipv6_enforcement`;
-`transport = "udp"` → `udp_enforcement`) plus anything listed in `requires`. The compiler checks them against the endpoint's
+`transport = "udp"` → `udp_enforcement`) plus anything listed in `requires`.
+
+Hostname rules scoped to protected sessions may instead be satisfied by `session_hostname_proxy` (Linux: TCP through
+the session egress proxy, from SNI / CONNECT / Host, no TLS interception). Then a hostname **deny** must be
+`transport = "tcp"` or the policy does not compile (it would otherwise not cover UDP), and a hostname **allow** on any
+transport compiles with a warning that it is enforced for TCP only. Hostname rules for ordinary traffic never use the
+proxy. The compiler checks them against the endpoint's
 **advertised** capabilities:
 
 | Rule needs an unsupported capability | Result |
@@ -103,7 +109,9 @@ a set, or via a provider `region_endpoints` match → `hostname_enforcement`; IP
 
 Session profiles on a platform without session enforcement are listed as `unavailable_session_profiles`, and the
 launcher refuses them. Nothing is ever compiled into a weaker rule (conformance: `macos-omits-session-rules`,
-`linux-rejects-strict-hostname-rules`, `linux-compiles-with-report`, `dns-resolver-cannot-enforce-sessions`).
+`linux-ip-only-rejects-strict-hostname-rules`, `linux-ip-only-compiles-with-report`,
+`linux-session-proxy-keeps-hostname-allows`, `linux-session-proxy-rejects-udp-hostname-deny`,
+`dns-resolver-cannot-enforce-sessions`).
 
 ## Signing, revisions and rollback
 

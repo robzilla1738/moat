@@ -35,6 +35,9 @@ in the [protection contract](protection-contract.md).
 | Agent edits policy or reports "blocked" | Signed snapshots; broadening needs the owner key; producer authority (`authority.rs`): self-reports may only assert intent. | A compromised signer or owner device is outside the claim. |
 | Stale or replayed approval ("allow once") | Bound to incident, revision, session instance and owner; rejected when stale. | — |
 | Replayed or downgraded snapshot | Replay protection by revision; platform check; local rollback keeps the high-water mark. | — |
+| Session workload lies in the SNI or `Host` to reach an allowed name's address space | Linux session egress proxy resolves the name itself and connects to the resolved address, never the dialed one; resolved addresses are evaluated too, so safety rules still win. | Domain fronting through an allowed host's CDN; a hostile resolver; ECH (only the outer name is visible). UDP has no hostname evidence. |
+| Session workload borrows another session's proxy (and its grants) | Each session may reach only its own listener; nftables rejects the rest of the proxy port range. | Root can set the upstream mark and bypass it (root is outside the claim). |
+| Broad revision locks the owner out | Linux and macOS trial revisions revert to the last confirmed revision unless confirmed locally; isolation untouched. | Linux countdown needs `moatd` running; a stopped daemon reverts at its next start. |
 | Root/kernel compromise, or the user disables protection | Detect/report where feasible (coverage *degraded*, table restoration on Linux). | Not an EDR or anti-tamper system. |
 | Controller unavailable | Endpoints keep the last valid policy and spool locally. | Fleet changes, remote actions and search are delayed. |
 | Remote/cloud agent execution | — | Local endpoints see only the connection to the provider. |

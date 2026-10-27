@@ -80,7 +80,7 @@ struct MoatApp: App {
             MenuBarRoot(model: model)
                 .preferredColorScheme(launch.appearance ?? appearance.colorScheme)
         } label: {
-            Label("Moat", systemImage: model.status?.coverage.systemImage ?? "shield.lefthalf.filled")
+            MenuBarLabel(model: model, openMainOnAppear: launch.screenshotMode)
         }
         .menuBarExtraStyle(.window)
 
@@ -100,6 +100,24 @@ struct MoatApp: App {
 
 extension Notification.Name {
     static let moatShowOnboarding = Notification.Name("moat.showOnboarding")
+}
+
+/// The status-item label. In screenshot runs it also opens the main window: a binary launched straight from a CI
+/// shell is not activated, and SwiftUI then shows only the status item.
+struct MenuBarLabel: View {
+    @ObservedObject var model: AppModel
+    var openMainOnAppear: Bool
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Label("Moat", systemImage: model.status?.coverage.systemImage ?? "shield.lefthalf.filled")
+            .onAppear {
+                guard openMainOnAppear else { return }
+                NSApp.setActivationPolicy(.regular)
+                openWindow(id: "main")
+                NSApp.activate(ignoringOtherApps: true)
+            }
+    }
 }
 
 /// Menu bar panel host: opens and focuses the main window on request.

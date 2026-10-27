@@ -11,8 +11,9 @@ Every roadmap item, tracked honestly. Updated with each batch; the commit histor
 
 CI workflows: `rust` (fmt, clippy, tests, conformance), `linux-endpoint` (privileged cgroup tests + netns
 enforcement on a real kernel), `controller` (TypeScript against the Rust `moatctl`), `web` (typecheck, tests, demo
-build, Pages deploy when enabled), `macos` (MoatKit build + tests + screenshots on macOS 15; unsigned `xcodebuild` of
-the app + system extension).
+build, screenshots with overflow/clipping/WCAG AA contrast checks via axe-core, Pages deploy when enabled), `macos`
+(MoatKit build + tests on macOS 26 with Xcode 26; unsigned `xcodebuild` of the app + system extension; real window
+screenshots captured in demo mode).
 
 ## Product contract and documents
 
@@ -36,7 +37,8 @@ the app + system extension).
 | Strict declarative policy schema, no scripts, unknown fields rejected | ✅ | `moat-core::policy` |
 | Precedence: safety > emergency (deny) > override (allow, expiring, narrow, audited) > explicit (deny beats allow) > profile default; explanation lists overridden rules | ✅ | `eval.rs`, conformance |
 | Capability contracts; strict policy fails on missing capability; `skip_with_report` only for allows | ✅ | `compile.rs`, conformance |
-| Per-platform compiler (macOS, Linux, DNS resolver) | ✅ | 4 compile conformance cases |
+| Per-platform compiler (macOS, Linux, Linux IP-only, DNS resolver) | ✅ | 6 compile conformance cases |
+| `session_hostname_proxy` capability: session hostname rules compile for TCP; hostname denies must be TCP-only; ordinary hostname rules never use it | ✅ | `compile.rs`, conformance `linux-session-proxy-*` |
 | Ed25519 signed snapshots; replay protection; platform check; expiry; rollback as a new revision | ✅ | `signing.rs` |
 | Revision states approved → distributed → received → applied → verified | ✅ | `revision.rs`, controller |
 | Policy diff and broadening detection | ✅ | `diff.rs` |
@@ -46,7 +48,7 @@ the app + system extension).
 | Enrichment: provider / ASN / region facts with source and uncertainty; batch importers | ✅ | `enrichment.rs` |
 | Deterministic alert templates; no byte claims without measurement | ✅ | `explain.rs` |
 | Producer authority (agents can only assert intent; no self-reported verified blocks) | ✅ | `authority.rs` |
-| Implementation-independent conformance suite (25 cases) | ✅ | `conformance/` |
+| Implementation-independent conformance suite (31 cases) | ✅ | `conformance/` |
 | C ABI for native apps (verify, evaluate, parse) | ✅ | `core/moat-ffi` |
 | `moatctl` CLI | ✅ | validate, compile, diff, simulate, keygen, sign, verify, explain, normalize, conformance |
 
@@ -65,15 +67,17 @@ the app + system extension).
 | Offline operation (last valid policy across restart without controller) | 🔬 | CI "offline restart" |
 | systemd unit, Arch PKGBUILD | 🔬 | packaging path written; build/install on Omarchy needed |
 | Signed Arch package | 🔑 | needs Robert's packaging key |
-| Timed canary rollback on Linux | ⏭ | macOS has it; Linux has manual local recovery only (listed in failure-behavior.md) |
+| Timed trial (canary) rollback on Linux: `apply --trial-secs`, `recover confirm/rollback`, replay mark kept, first revision cannot be a trial, isolation untouched | 🔬 | unit tests + netns CI (broken trial reverts on its own, cannot be replayed; confirmed trial stays); Omarchy untested. Countdown needs `moatd` running |
 | OpenSnitch adapter feasibility | ✅ | [evaluated](platforms/opensnitch-adapter-feasibility.md); native `moatd` chosen |
-| Hostname enforcement via a policy proxy for sessions | ⏭ | Linux rejects strict hostname rules instead of approximating |
+| Session egress proxy: hostname rules for TCP in protected sessions via TLS SNI / HTTP CONNECT / HTTP Host; no TLS interception; connects to the name it resolves; per-session listener fenced by nftables | 🔬 | unit + in-process tests, netns CI with a TLS lab (allowed/denied SNI, spoofed SNI, CONNECT, Host 403, bare IP, port fence); advertised `untested` until run on Omarchy. UDP stays IP-only; domain fronting remains possible |
 
 ## macOS endpoint (`macos/`)
 
 | Item | Status | Notes |
 | --- | --- | --- |
-| SwiftUI app: Overview, Activity, Policy, Coverage, Recovery; dark/light matching the web UI | ✅ | rendered in CI from demo data: `docs/screenshots/macos-*.png` |
+| SwiftUI app redesigned in Liquid Glass (macOS 26): NavigationSplitView glass sidebar, glass toolbar, `glassEffect` / `GlassEffectContainer` / `glassEffectID`, `.glass` buttons, `backgroundExtensionEffect` hero, soft scroll edges; macOS 14/15 fallback; Reduce Transparency / Increase Contrast / Reduce Motion | ✅ | builds on `macos-26` + Xcode 26 in CI; real window screenshots: `docs/screenshots/macos-*.png` |
+| Menu bar extra: status, recent blocks, isolate with a second explicit confirmation | ✅ | `MenuBarView.swift`; render test + window screenshot |
+| First-run onboarding: honest coverage labels, extension approval, content filter, signer key (owner adds it with sudo; app only reads) | ✅ UI · 🔑🔬 flow | approval steps need a signed build on a real Mac |
 | NEFilterDataProvider system extension (outbound socket flows, audit-token identity, drop before data, reports for bytes) | 🔬 | builds unsigned in CI; never run as a signed extension |
 | Typed XPC control surface (7 operations, no trust changes), caller code-signing requirement, refuses all callers when unsigned | 🔬 | logic unit-tested; XPC path needs a signed build |
 | Policy store: verified atomic apply, last known good, canary auto-rollback, replay mark kept across rollback | ✅ | MoatKit tests |
@@ -108,6 +112,8 @@ the app + system extension).
 | Digital Kingdom evidence feed (source authority preserved) | 🔬 | needs Robert's DK instance |
 | Reference sync agent for `moatd` | ✅ | end-to-end test over HTTP |
 | Phone-first web UI (Home, Activity, Sessions, Rules, Devices, Apps, Coverage), dark/light, demo + live API | ✅ | `docs/screenshots/` |
+| Web liquid-glass refresh: glass chrome only (top bar, floating tab bar, sidebar, segmented, decision bar, toasts); solid fallbacks for no `backdrop-filter`, `prefers-reduced-transparency`, `prefers-contrast`; reduced motion; AA contrast | ✅ | CI renders screenshots and fails on horizontal overflow, clipped text or axe-core contrast violations (20 route checks) |
+| Trial / rollback receipts per device; rollback raises attention | ✅ | controller migration 2, test |
 | Public demo on GitHub Pages | 🔑 | enable Settings → Pages → Source: GitHub Actions; the workflow then deploys (it skips with a notice until then) |
 | Optional APNs path via ntfy upstream | 🔑 decision | disclosed optional cloud dependency |
 
@@ -121,13 +127,23 @@ the app + system extension).
 | Phase 0 Linux pre-launch session path | ✅ CI · 🔬 Omarchy |
 | Phase 0 real events into Digital Kingdom | 🔬 |
 | Phase 0 licensing + supported matrix | ✅ licensing · 🔑 matrix declaration |
-| M1 local Mac experience + private tap | ✅ app · 🔑 signed release |
+| M1 local Mac experience + private tap | ✅ app (Liquid Glass, menu bar, onboarding) · 🔑 signed release |
 | M2 private fleet policy (two Macs, signed snapshots, receipts, staged rollback) | ✅ software · 🔬 two real Macs |
 | M3 selected agent sessions (launch integration, one tested boundary, service packs, bounded grants) | ✅ Linux boundary + API · 🔬 Harness/Dispatch wiring on device |
 | M4 cross-device proof (Arch adapter, two-platform conformance, DNS, phone web UI) | ✅ software · 🔬 devices |
 | M5 thirty days of real workflows | 🔬 |
 | Release gate (bypass cases on the declared matrix, offline controller keeps isolation, gaps visible, grants expire, stale approvals rejected, revision state matches endpoints) | ✅ in CI where automatable · 🔬 declared matrix |
 | Adversarial harness | ✅ written (`tests/adversarial/`, refuses CI) · 🔬 run |
+
+## Not built, and why
+
+Everything buildable in the plan is built. What remains is either excluded by the roadmap (below), needs Robert's
+hardware, credentials or decisions (🔑 / 🔬 above), or was deliberately decided against:
+
+* **macOS protected sessions** — excluded as decided; no tested macOS boundary exists, so session rules are omitted
+  on macOS with a report.
+* **Hostname rules for ordinary (non-session) traffic on Linux** — nftables cannot attribute ordinary apps and the
+  proxy is scoped to sessions on purpose; such rules are rejected or (allows that opt in) left out with a report.
 
 ## Excluded from MVP by the roadmap (⏭)
 
@@ -143,9 +159,12 @@ mobile) are not started.
    for `<prefix>.moat` and `<prefix>.moat.filter` with `content-filter-provider-systemextension`; a `notarytool`
    keychain profile. Then `macos/scripts/release.sh`.
 3. **Decide** whether to request the Endpoint Security entitlement.
-4. **Install and approve** on the M1 Pro / a second Mac; put the signer public key in
-   `/Library/Application Support/Moat/trusted-keys`.
-5. **Omarchy:** build the package, run `sudo REQUIRE_NFT=1 linux/tests/netns-enforcement.sh target/debug`, report.
+4. **Install and approve** on the M1 Pro / a second Mac (the first-run onboarding walks through it); put the signer
+   public key in `/Library/Application Support/Moat/trusted-keys`; check the Liquid Glass UI, menu bar extra and
+   accessibility settings on macOS 26.
+5. **Omarchy:** build the package, run `sudo REQUIRE_NFT=1 linux/tests/netns-enforcement.sh target/debug` (now 50
+   checks, including trial rollback and the session egress proxy), then try a real `moat-launch --profile
+   coding-session -- claude` through the proxy and a `moatd apply --trial-secs 600`; report.
 6. **Run** the [VPN matrix](vpn-test-matrix.md), the [adversarial harness](../tests/adversarial/README.md), and the
    30-day workflow suite; record results here.
 7. **Optional:** AdGuard Home / Pi-hole on the mini, a Digital Kingdom source key, an ntfy topic.
