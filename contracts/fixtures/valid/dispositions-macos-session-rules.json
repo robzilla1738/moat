@@ -1,0 +1,32 @@
+{
+  "schema": "moat.capability_dispositions.v1",
+  "device_id": "mbp-m1",
+  "backend": "moat-macos-ne",
+  "backend_version": "0.1.0",
+  "capability_generation": 1,
+  "cells": [
+    {
+      "capability": "session_enforcement",
+      "mode": "direct",
+      "subject": "task",
+      "destination_evidence": "none",
+      "transport": "any",
+      "lifecycle": "admit_new",
+      "disposition": "unsupported_rejected",
+      "note": "no tested macOS session boundary"
+    }
+  ],
+  "policy_digest": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+  "items": [
+    {
+      "item": "rule:safety-workloads-never-reach-controller",
+      "restrictive": true,
+      "disposition": "omitted_accepted",
+      "omission": "subject_unavailable",
+      "missing": [
+        "session_enforcement"
+      ],
+      "note": "sessions are refused at launch on this platform"
+    }
+  ]
+}

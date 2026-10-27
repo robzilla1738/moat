@@ -45,6 +45,7 @@
       "item": "rule:allow-github-app",
       "restrictive": false,
       "disposition": "omitted_accepted",
+      "omission": "stricter",
       "missing": [
         "app_enforcement"
       ],

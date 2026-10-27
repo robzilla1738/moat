@@ -47,6 +47,18 @@ pub struct CapabilityCell {
     pub note: Option<String>,
 }
 
+/// Why omitting an item is acceptable. Required with `omitted_accepted`.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum Omission {
+    /// Leaving the item out can only make the endpoint stricter (an allow, or a profile whose flows land in an at
+    /// least as strict fallback). Never valid for a restrictive item.
+    Stricter,
+    /// The item's subjects cannot exist on this endpoint (e.g. protected-session rules where sessions are refused
+    /// at launch), so omitting it changes no verdict.
+    SubjectUnavailable,
+}
+
 /// What became of one profile or rule when a policy was compiled for this endpoint.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -57,6 +69,8 @@ pub struct ItemDisposition {
     /// item can never be `omitted_accepted`.
     pub restrictive: bool,
     pub disposition: Disposition,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub omission: Option<Omission>,
     /// Capability names the endpoint lacks for this item.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub missing: Vec<String>,
@@ -117,11 +131,18 @@ impl Contract for CapabilityDispositions {
             if !items.insert(&it.item) {
                 errs.push(cerr(format!("$.items[{i}].item"), "duplicate item"));
             }
-            if it.restrictive && it.disposition == Disposition::OmittedAccepted {
-                errs.push(cerr(
+            match (it.disposition, it.omission) {
+                (Disposition::OmittedAccepted, None) => {
+                    errs.push(cerr(format!("$.items[{i}].omission"), "omitted_accepted must say why omission is acceptable"))
+                }
+                (Disposition::OmittedAccepted, Some(Omission::Stricter)) if it.restrictive => errs.push(cerr(
                     format!("$.items[{i}].disposition"),
-                    "a restrictive item cannot be omitted: that would silently weaken policy; it must be rejected",
-                ));
+                    "a restrictive item cannot be omitted as 'stricter': that would silently weaken policy; it must be rejected",
+                )),
+                (d, Some(_)) if d != Disposition::OmittedAccepted => {
+                    errs.push(cerr(format!("$.items[{i}].omission"), "omission only accompanies omitted_accepted"))
+                }
+                _ => {}
             }
             super::check_sorted_unique(&it.missing, &format!("$.items[{i}].missing"), &mut errs);
             if it.disposition == Disposition::SupportedInstalled && !it.missing.is_empty() {

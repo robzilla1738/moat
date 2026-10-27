@@ -32,9 +32,9 @@ DISP=E("supported_installed","implemented_unproven","unsupported_rejected","omit
 schemas["moat.capability_dispositions.v1"]=schema("moat.capability_dispositions.v1",O({"schema":None,"device_id":ID,"backend":ID,"backend_version":S(),"capability_generation":I(),
   "cells":A(O({"capability":S(),"mode":S(),"subject":S(),"destination_evidence":S(),"transport":E("tcp","udp","any"),"lifecycle":S(),"disposition":DISP,"evidence_ref":S(),"note":S()},["capability","mode","subject","destination_evidence","transport","lifecycle","disposition"])),
   "policy_digest":DIG,
-  "items":A(O({"item":S(),"restrictive":B,"disposition":DISP,"missing":A(S()),"note":S()},["item","restrictive","disposition"]))},
+  "items":A(O({"item":S(),"restrictive":B,"disposition":DISP,"omission":E("stricter","subject_unavailable"),"missing":A(S()),"note":S()},["item","restrictive","disposition"]))},
   ["schema","device_id","backend","backend_version","capability_generation","cells"]),
- "Per-endpoint capability cells and per-item (profile/rule) dispositions. A restrictive item is never omitted_accepted; supported_installed needs evidence_ref.")
+ "Per-endpoint capability cells and per-item (profile/rule) dispositions. omitted_accepted needs omission (stricter | subject_unavailable); a restrictive item is never omitted as stricter; supported_installed needs evidence_ref.")
 PHASE=E("none","prepared","applying","trial","confirmed","rollback_required","restored","recovery_required","rejected")
 DUR=E("durable","not_durable","uncertain")
 schemas["moat.activation.v1"]=schema("moat.activation.v1",O({"schema":None,"device_id":ID,"boot_id":ID,"phase":PHASE,"desired":gen,"received":gen,"verified_candidate":gen,"active":gen,"trial_deadline":TS,"rollback_target":gen,"replay_high_water":I(),"durability":DUR,"detail":S()},

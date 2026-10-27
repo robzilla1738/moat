@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/robzilla1738/moat/contracts/schemas/moat.capability_dispositions.v1.schema.json",
   "title": "moat.capability_dispositions.v1",
-  "description": "Per-endpoint capability cells and per-item (profile/rule) dispositions. A restrictive item is never omitted_accepted; supported_installed needs evidence_ref.",
+  "description": "Per-endpoint capability cells and per-item (profile/rule) dispositions. omitted_accepted needs omission (stricter | subject_unavailable); a restrictive item is never omitted as stricter; supported_installed needs evidence_ref.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -119,6 +119,13 @@
               "unsupported_rejected",
               "omitted_accepted",
               "unknown_degraded"
+            ]
+          },
+          "omission": {
+            "type": "string",
+            "enum": [
+              "stricter",
+              "subject_unavailable"
             ]
           },
           "missing": {

@@ -56,7 +56,7 @@ Consumers that act on an object must implement these (fixtures labeled `layer: s
   with the same `idempotency_key` returns the original grant and original `admission_until`.
 * **Stream policy** — `admission_only` stops new admissions at the deadline; `terminate_at_deadline` also ends admitted
   streams and only compiles where the backend has a proven stream-termination cell.
-* **Dispositions** — a `restrictive` item is never `omitted_accepted`; `supported_installed` needs `evidence_ref`;
+* **Dispositions** — `omitted_accepted` carries `omission`: `stricter` (leaving it out can only make the endpoint stricter; never valid for a `restrictive` item) or `subject_unavailable` (its subjects cannot exist there, e.g. session rules where sessions are refused at launch); `supported_installed` needs `evidence_ref`;
   capability cells are never `omitted_accepted`; item dispositions need the compiled `policy_digest`.
 * **Activation** — `replay_high_water` never trails the verified candidate, active generation or rollback target and
   never decreases; `trial` needs `trial_deadline` and a `rollback_target` older than the trial (the first policy cannot

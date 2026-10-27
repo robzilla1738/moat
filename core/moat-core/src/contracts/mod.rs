@@ -31,7 +31,7 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 pub use activation::{ActivationPhase, ActivationState, Durability, GenerationRef};
-pub use disposition::{CapabilityCell, CapabilityDispositions, Disposition, ItemDisposition};
+pub use disposition::{CapabilityCell, CapabilityDispositions, Disposition, ItemDisposition, Omission};
 pub use event::{Event, EventKind, EvidenceStage};
 pub use grant::{Grant, GrantDestination, GrantScope, GrantScopeKind, StreamPolicy};
 pub use receipt::{Freshness, Receipt};

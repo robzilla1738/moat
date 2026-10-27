@@ -23,8 +23,14 @@ valid["dispositions-linux.json"]=("moat.capability_dispositions.v1",{"schema":"m
            {"capability":"app_enforcement","mode":"direct","subject":"app_on_device","destination_evidence":"ip","transport":"any","lifecycle":"admit_new","disposition":"unsupported_rejected"}],
   "policy_digest":D4,
   "items":[{"item":"profile:coding-session","restrictive":True,"disposition":"implemented_unproven"},
-           {"item":"rule:allow-github-app","restrictive":False,"disposition":"omitted_accepted","missing":["app_enforcement"],"note":"omitting an allow is stricter"},
+           {"item":"rule:allow-github-app","restrictive":False,"disposition":"omitted_accepted","omission":"stricter","missing":["app_enforcement"],"note":"omitting an allow is stricter"},
            {"item":"rule:deny-telemetry-app","restrictive":True,"disposition":"unsupported_rejected","missing":["app_enforcement","hostname_enforcement"]}]})
+valid["dispositions-macos-session-rules.json"]=("moat.capability_dispositions.v1",{"schema":"moat.capability_dispositions.v1","device_id":"mbp-m1","backend":"moat-macos-ne","backend_version":"0.1.0","capability_generation":1,
+  "cells":[{"capability":"session_enforcement","mode":"direct","subject":"task","destination_evidence":"none","transport":"any","lifecycle":"admit_new","disposition":"unsupported_rejected","note":"no tested macOS session boundary"}],
+  "policy_digest":D4,
+  "items":[{"item":"rule:safety-workloads-never-reach-controller","restrictive":True,"disposition":"omitted_accepted","omission":"subject_unavailable","missing":["session_enforcement"],"note":"sessions are refused at launch on this platform"}]})
+d=copy.deepcopy(valid["dispositions-linux.json"][1]); del d["items"][1]["omission"]
+invalid["dispositions-omitted-without-reason.json"]=("moat.capability_dispositions.v1",d,"semantic","omission reason required")
 act={"schema":"moat.activation.v1","device_id":"arch-desk","boot_id":"6f1c2a8e-boot","phase":"trial","desired":{"revision":12,"effective_digest":D3},"received":{"revision":12,"effective_digest":D3},"verified_candidate":{"revision":12,"effective_digest":D3},"active":{"revision":12,"effective_digest":D3},"trial_deadline":"2026-10-27T15:10:00Z","rollback_target":{"revision":11,"effective_digest":D4},"replay_high_water":12,"durability":"durable"}
 valid["activation-trial.json"]=("moat.activation.v1",act)
 a2=copy.deepcopy(act); a2.update(phase="rollback_required",detail="trial deadline passed"); del a2["trial_deadline"]
@@ -65,7 +71,7 @@ invalid["grant-wildcard-host.json"]=("moat.grant.v1",grant(destination={"kind":"
 invalid["grant-noncanonical-address.json"]=("moat.grant.v1",grant(destination={"kind":"address","address":"2001:DB8:0:0:0:0:0:7"}),"semantic","non-canonical address")
 invalid["grant-float-port.json"]=("moat.grant.v1",grant(port=443.0),"schema","float")
 invalid["grant-null-reason.json"]=("moat.grant.v1",grant(reason=None),"schema","null")
-d=copy.deepcopy(valid["dispositions-linux.json"][1]); d["items"][2]["disposition"]="omitted_accepted"
+d=copy.deepcopy(valid["dispositions-linux.json"][1]); d["items"][2]["disposition"]="omitted_accepted"; d["items"][2]["omission"]="stricter"
 invalid["dispositions-omitted-restrictive.json"]=("moat.capability_dispositions.v1",d,"semantic","restrictive item omitted")
 d=copy.deepcopy(valid["dispositions-linux.json"][1]); d["cells"][0]["disposition"]="supported_installed"
 invalid["dispositions-supported-without-evidence.json"]=("moat.capability_dispositions.v1",d,"semantic","supported without evidence")

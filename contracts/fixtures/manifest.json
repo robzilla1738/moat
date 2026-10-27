@@ -31,9 +31,15 @@
       "schema": "moat.grant.v1"
     },
     {
-      "canonical_sha256": "sha256:707ef5833d9e95cec426e10ad33abecc603c078a73bb27ffb8bbb15405a75567",
+      "canonical_sha256": "sha256:d8522f6136e2b8399ec7718208dd4f4e166afad60090a68c13bce507b6c64368",
       "expect": "accept",
       "file": "valid/dispositions-linux.json",
+      "schema": "moat.capability_dispositions.v1"
+    },
+    {
+      "canonical_sha256": "sha256:19d8fc038f658fdbb08615bae84f7c4a2631d32a3b1c32876503d6bf14c0e1f9",
+      "expect": "accept",
+      "file": "valid/dispositions-macos-session-rules.json",
       "schema": "moat.capability_dispositions.v1"
     },
     {
@@ -104,6 +110,13 @@
       "expect": "accept",
       "file": "valid/event-independently-checked.json",
       "schema": "moat.event.v1"
+    },
+    {
+      "expect": "reject",
+      "file": "invalid/dispositions-omitted-without-reason.json",
+      "layer": "semantic",
+      "reason": "omission reason required",
+      "schema": "moat.capability_dispositions.v1"
     },
     {
       "expect": "reject",
