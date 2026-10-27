@@ -80,7 +80,7 @@ Unit tests are Rust test function names.
 | Case | Status | Tests | Notes |
 | --- | --- | --- | --- |
 | First install | ci (ci-installed) | installed `moatd.service started by systemd`, `installed service enforces revision 1` | Omarchy: device. |
-| First canary | ci (unit) | `first_canary_needs_a_fallback_and_writes_nothing`, `first_revision_cannot_be_a_trial` | |
+| First canary | ci (unit) | `first_canary_needs_a_fallback_and_writes_nothing`, `first_revision_cannot_be_a_trial` | macOS: `W07Tests.testFirstRevisionCannotBeACanaryAndTheRefusalWritesNothing`, `testPolicyStoreRefusesAFirstCanaryToo` (Swift, macOS CI). |
 | Expiry | ci (unit + ci-netns) | `expiry_enforced`, `expired_grants_drop_out_of_the_effective_policy`; netns `W05: stream ended at expiry` | |
 | Rollback failure | ci (unit) | `a_failed_rollback_is_retried_and_never_becomes_confirmed`, `rollback_intent_is_retained_until_the_restore_is_durable` | |
 | Corrupt state | ci (unit) | `corrupt_journal_is_visible_and_never_a_fresh_bootstrap`, `corrupt_replay_mark_falls_back_to_the_journal_copy`, `roundtrip_missing_and_corrupt`, `torn_last_line_is_tolerated` | |

@@ -29,7 +29,7 @@ The [claim ledger](docs/STATUS.md) is the source; this is its summary by release
 
 | Gate | Status | Blocked on |
 | --- | --- | --- |
-| **G0** truthful experimental build | **Not met.** Every Lane A defect from the baseline review is closed with a regression test. Three Mac/web defects are still open in the ledger. | `D-MAC-CACHE-TRUST`, `D-WEB-DEMO-SUCCESS`, `D-INCIDENT-ROUTING` |
+| **G0** truthful experimental build | **Met** (2026-10-27). Every defect from the baseline review is closed with a merged regression test and a cited CI run. | Nothing for G0; it is a truthful *experimental* build. Nothing is supported on real devices. |
 | **G1** useful local Mac alpha | Not started on a device | Developer ID, NE provisioning profiles and notarization ([#2](https://github.com/robzilla1738/moat/issues/2)); a signed install on a clean second Mac ([#7](https://github.com/robzilla1738/moat/issues/7)) |
 | **G2** cross-platform local beta | Blocked | G1. Linux ordinary-app enforcement is unavailable ([W10 decision](docs/decisions/W10-enforcement.md)); inventory is observe-only; Omarchy proof ([#6](https://github.com/robzilla1738/moat/issues/6)) |
 | **G3** private fleet beta | Blocked | Fleet sync, learning and DNS adapters pass in CI only; needs real endpoints, a 24-hour outage test and phone approvals on a device |

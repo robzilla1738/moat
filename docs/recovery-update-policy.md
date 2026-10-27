@@ -40,8 +40,9 @@ Scripted drill with the CI-runnable part run on every PR: [recovery-drill.md](re
 * **Linux:** `moatd recover isolate | clear-isolation | confirm | disable | resume` on the local socket (owner-only);
   an unconfirmed trial reverts on its own; a corrupt or unknown journal reports recovery-required and keeps the
   last verified snapshot enforced until a newer signed revision arrives.
-* **macOS:** see [platforms/macos.md](platforms/macos.md); cache and trust reload are an open defect
-  (`D-MAC-CACHE-TRUST`).
+* **macOS:** see [platforms/macos.md](platforms/macos.md). Restoration re-verifies under the current trusted keys and
+  falls back to a re-verified last known good; an unconfirmed canary rolls back; the first revision cannot be a canary.
+  Unit-tested in macOS CI only, never on a signed install.
 * **Uninstall:** the Arch package (`linux/packaging/arch/moat.install`) and the cask (`zap` stanza) define uninstall
   paths. Neither has been run on a real device, and what each leaves in the kernel or on disk is unverified.
 

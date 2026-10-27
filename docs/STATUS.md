@@ -8,7 +8,7 @@ in the environment named next to it.
 
 | Gate | Status | What blocks it |
 | --- | --- | --- |
-| **G0** truthful experimental build | **Not met.** Every Lane A defect from the baseline review is closed with a merged regression test. Three Lane B defects are still open in the ledger, and `fleet.web.live-actions` last recorded a fail. | `D-MAC-CACHE-TRUST`, `D-WEB-DEMO-SUCCESS`, `D-INCIDENT-ROUTING` (Lane B: W06–W08 Mac and web). Each closes only when its regression test is merged and the ledger cites the run. |
+| **G0** truthful experimental build | **Met** (2026-10-27). Every defect from the baseline review is closed with a merged regression test and a cited CI run; no claim records a fail. Live UI success cannot be simulated, grants keep their scope, a contained caller cannot broaden itself through Moat, and a persistence failure is never reported as durable activation (§13 stop conditions). | Nothing for G0. This is a truthful *experimental* build: it says what is unproven, and nothing is supported on real devices. |
 | **G1** useful local Mac alpha | **Not started on a device.** The standalone Mac journey runs in CI unsigned and has never run as a signed, approved system extension. | Apple Developer ID, Network Extension provisioning profiles and notarization ([#2](https://github.com/robzilla1738/moat/issues/2)); a clean signed install on a second Mac ([#7](https://github.com/robzilla1738/moat/issues/7)); `D-MAC-CACHE-TRUST`. Linux installed proof on Omarchy ([#6](https://github.com/robzilla1738/moat/issues/6)) moves alongside it. |
 | **G2** cross-platform local beta | **Blocked.** | Linux ordinary-app enforcement is unavailable: no hook is proven ([W10 decision](decisions/W10-enforcement.md)); the BPF loader is chosen ([increment 3](decisions/W10-increment-3-loader.md)) but the BPF program licence needs Robert's decision. Ordinary-app inventory is observe-only and CI-only. G1 is required first. |
 | **G3** private fleet beta | **Blocked.** Fleet sync, staged rollout, learning and DNS adapters pass component tests in CI only. | A real Mac companion (G1), two real endpoints through a 24-hour controller outage, reboot, key rotation and stale approvals, and phone approvals on a device. |
@@ -80,8 +80,8 @@ workflows).
 | `linux.ordinary-apps.connect-attribution` | implemented_unproven | native_ci | ci-ubuntu-26.04-x86_64 | pass, linux-endpoint 40559834509 @ f64a4ad | **observe_only** (`moatd inventory --ebpf`, bpftrace 0.25 on `sock:inet_sock_set_state`): 20/20 short-lived connects attributed, 20,000-connect flood fully accounted vs kernel ActiveOpens; forced buffer loss did not occur on the runner (loss path unit-tested only); TCP only; daemon path unchecked; not Omarchy. |
 | `linux.ordinary-apps.app-rules` | unsupported_rejected | semantic | unit | pass (rejection), rust 40493342610 | nftables cannot match executables; rejected at compile. |
 | `linux.packaging.systemd` | implemented_unproven | native_ci | ci-ubuntu-installed-unit | pass, linux-endpoint 40540159764 @ a63827b | Packaged unit under systemd on Ubuntu: project and /tmp writable, containment probes fail; **not Omarchy**. Keeps `CAP_SYS_PTRACE` ([decision](decisions/W11-cap-sys-ptrace.md)). |
-| `macos.filter.app-rules` | implemented_unproven | component | ci-macos-26 | pass, macos 40493342625 @ d5270bd | Never run signed; `D-MAC-CACHE-TRUST` (Lane B). |
-| `fleet.web.live-actions` | unknown_degraded | component | ci-node-22 | **fail** (review of d5270bd) | `D-WEB-DEMO-SUCCESS`, `D-INCIDENT-ROUTING` (Lane B, W08). |
+| `macos.filter.app-rules` | implemented_unproven | component | ci-macos-26 | pass, macos 40577981264 @ 2ad8be5 | Never run signed. Generation-bound cache, verified restoration, trust reload, first-canary refusal and stale XPC are unit-tested only. |
+| `fleet.web.live-actions` | implemented_unproven | component | ci-node-22 | pass, web 40577605299 @ 08e315e | Authenticated actions bound to incident and policy revision, pending until an endpoint receipt; exact notification references. Chromium against a real controller in CI; no phone, no real endpoint. |
 | `fleet.sync.acks-reconcile` | implemented_unproven | component | ci-node-22 | pass, controller 40565815980 @ 7b31e81 | Contiguous acks with declared gaps, receipt-based reconciliation, staged rollout, offline local changes held for the owner; against moatd's sync-state and spool files, not two real endpoints; no 24-hour outage (G3). |
 | `learning.reviewed-baselines` | implemented_unproven | component | ci-node-22 | pass, controller 40565815980 @ 7b31e81 | Bounded identity-bound capture, immutable reviewed baselines, drift as new candidates, three packs; no capture from a real device, alert volume unmeasured. |
 | `dns.adapters.adguard-pihole` | implemented_unproven | component | ci-node-22 | pass, controller 40565815980 @ 7b31e81 | AdGuard Home and Pi-hole v6 against recorded responses and mocks, not a live instance; DNS-only coverage (#9, #10). |
@@ -89,10 +89,10 @@ workflows).
 | `linux.recovery.local-drill` | implemented_unproven | native_ci | ci-ubuntu-26.04-x86_64 | pass, release 40569608036 @ ae2fe41 | [Recovery drill](recovery-drill.md) with real moatd in a CI netns: isolation across crash and restart, disable with the daemon stopped, trial revert and rollback, corrupt journal, newer-schema state, untrusted signer. Not the installed unit on Omarchy; no reboot. |
 | `vpn.coexistence` | unknown_degraded | none | omarchy-installed | not_run | No VPN claim. |
 
-## Open defects
+## Defects
 
 From the pinned review in MASTER_ROADMAP §2. A defect closes only when its regression test is merged and the claim
-above is updated with the run that proves it.
+above is updated with the run that proves it. **All defects are closed.**
 
 | Defect | Summary | Package | Status |
 | --- | --- | --- | --- |
@@ -110,9 +110,9 @@ above is updated with the run that proves it.
 | `D-DEVICE-SCOPE-FLEET` | Device-scoped rules refused for the whole fleet (issue #26). | W02 | **closed** (device-targeted compiles) |
 | `D-ACTIVATION-JOURNAL` | Apply/rollback state not journaled or fault-tested. | W06 | **closed** (W06, netns run 40539984069) |
 | `D-SYSTEMD-WORKSPACE` | Packaged systemd restrictions break launched coding workloads. | W11 | **closed** (W11, installed-unit job in linux-endpoint 40540159764) |
-| `D-MAC-CACHE-TRUST` | Mac cache, trust reload, first canary, stale status. | W06–W08 (Lane B) | open |
-| `D-WEB-DEMO-SUCCESS` | Live web actions reuse demo success behavior. | W08 (Lane B) | open |
-| `D-INCIDENT-ROUTING` | A notification reference can open the wrong incident. | W08/W13 (Lane B) | open |
+| `D-MAC-CACHE-TRUST` | Mac cache, trust reload, first canary, stale status. | W06–W08 (Lane B) | **closed** (W07 #19; first canary #62; macos 40577981264) |
+| `D-WEB-DEMO-SUCCESS` | Live web actions reuse demo success behavior. | W08 (Lane B) | **closed** (W08 #14; web 40577605299 live e2e) |
+| `D-INCIDENT-ROUTING` | A notification reference can open the wrong incident. | W08/W13 (Lane B) | **closed** (W08 #14; controller 40577605234, web 40577605299) |
 
 ## Work packages (MASTER_ROADMAP §12)
 
@@ -124,8 +124,8 @@ above is updated with the run that proves it.
 | W04 Linux launch authority | Lane A | done in CI netns (kernel caller identity, own-profile-only nested launch, raw/pre-opened socket refused); installed-unit proof is W11 |
 | W05 proxy semantics | Lane A | done in CI netns: authorize-before-DNS, stream registry with measured stopping delays, direct/proxied agreement; installed-unit proof is W11 |
 | W06 durable activation (Linux) | Lane A | done in CI netns: journal, fault injection at each persistence/backend step, retained rollback intent, independent replay high-water, stop-not-adopt restart; installed-unit proof is W11 |
-| W07 Mac engine | Lane B | see Lane B |
-| W08 truthful UI | Lane B | see Lane B |
+| W07 Mac engine | Lane B | done in macOS CI (unsigned): generation-bound evaluator, expiry-aware cache, candidate validation, verified restoration, trust reload, separate app/process identity, bounded XPC, first canary refused; never run as a signed extension (W11 Mac, Developer ID) |
+| W08 truthful UI | Lane B | done: explicit demo/live, evidence-only action states, exact notification references, consumer-computed freshness, hostile identifiers inert; Chromium against the real controller in CI; native UI uses the same stale semantics (StaleTests) |
 | W09 ordinary-app Linux experiment | Lane A | done: measured in CI (run 40545113846); decision: native inventory, OpenSnitch not adopted, enforcement deferred ([decision](decisions/W09-linux-ordinary-apps.md)) |
 | W10 ordinary-app Linux inventory | Lane A | increments 1–2 done in CI netns, **observe-only**: socket-table inventory and bpftrace connect-time attribution against an independent receiver, loss reported. Increment 3 decided the loader (aya + a separate BPF program, [decision](decisions/W10-increment-3-loader.md)); the program's licence needs Robert ([#53](https://github.com/robzilla1738/moat/issues/53)). Enforcement stays unavailable ([decision](decisions/W10-enforcement.md)) |
 | W11 installed-platform proofs | Lane A (Linux) / Robert | Linux: packaged unit passes under systemd on an Ubuntu runner (installed-unit.sh); the Omarchy run ([#6](https://github.com/robzilla1738/moat/issues/6)) and the `CAP_SYS_PTRACE` decision ([#54](https://github.com/robzilla1738/moat/issues/54)) need Robert. Mac: Lane B, blocked on Developer ID ([#2](https://github.com/robzilla1738/moat/issues/2)) |
