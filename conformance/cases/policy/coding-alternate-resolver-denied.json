@@ -1,0 +1,30 @@
+{
+  "schema": "moat.conformance.policy_case.v1",
+  "name": "coding-alternate-resolver-denied",
+  "description": "A protected coding session querying a resolver other than the system one directly (UDP/53 to a public resolver) is denied: no rule allows it, so the profile default applies (adversarial matrix: alternate resolver).",
+  "policy": "../../policies/home.toml",
+  "flow": {
+    "id": "c",
+    "device_id": "mbp-m1",
+    "user": "robert",
+    "app": {
+      "family": "dig",
+      "executable": "/usr/bin/dig"
+    },
+    "ancestry_complete": true,
+    "remote_ip": "8.8.8.8",
+    "remote_port": 53,
+    "transport": "udp",
+    "at": "2026-10-26T12:00:00Z",
+    "session": {
+      "id": "sess-1",
+      "profile": "coding-session",
+      "boundary": "linux_cgroup",
+      "verified": true
+    }
+  },
+  "expect": {
+    "verdict": "deny",
+    "winner": "profile:coding-session"
+  }
+}
