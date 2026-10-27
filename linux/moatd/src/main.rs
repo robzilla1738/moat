@@ -81,6 +81,11 @@ enum Cmd {
         #[arg(long)]
         device_id: String,
     },
+    /// Print the local isolation table `moatd recover isolate` installs (nft syntax), without installing it.
+    RenderIsolation {
+        #[arg(long = "keep")]
+        keep: Vec<IpNet>,
+    },
     /// Trust a policy signer public key (hex file).
     Trust {
         pubkey: PathBuf,
@@ -233,6 +238,10 @@ fn run(cli: Cli) -> Result<(), String> {
             let facts = moatd::probe::gather(&cgroup_mount, "moat.slice", "nft");
             let adv = moatd::probe::advertise(&facts);
             println!("{}", serde_json::to_string_pretty(&serde_json::json!({"host": facts, "advertisement": adv})).unwrap());
+            Ok(())
+        }
+        Cmd::RenderIsolation { keep } => {
+            print!("{}", nft::render_local_emergency(&keep));
             Ok(())
         }
         Cmd::Render { signed, device_id } => {
