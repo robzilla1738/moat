@@ -1,1 +1,216 @@
-fn main() {}
+//! `moatd` — Moat Linux endpoint daemon and local recovery CLI.
+
+use std::fs;
+use std::path::PathBuf;
+use std::process::ExitCode;
+use std::time::Duration;
+
+use clap::{Parser, Subcommand};
+use ipnet::IpNet;
+use moatd::cgroup::{boot_id, Cgroups};
+use moatd::control::{replies, send, Reply, Request};
+use moatd::endpoint::Endpoint;
+use moatd::nft::{self, NftBackend, NftCli};
+use moatd::recovery::RecoveryState;
+use moatd::spool::{Spool, SpoolConfig};
+
+#[derive(Parser)]
+#[command(name = "moatd", version, about = "Moat Linux endpoint: nftables enforcement, cgroup v2 protected sessions, event spool")]
+struct Cli {
+    #[arg(long, default_value = "/var/lib/moat", global = true)]
+    state: PathBuf,
+    #[arg(long, default_value = "/run/moat/control.sock", global = true)]
+    socket: PathBuf,
+    #[command(subcommand)]
+    cmd: Cmd,
+}
+
+#[derive(Subcommand)]
+enum Cmd {
+    /// Run the daemon (systemd: moatd.service).
+    Run {
+        /// Device id used in events and device-group matching. Default: /etc/hostname.
+        #[arg(long)]
+        device_id: Option<String>,
+        #[arg(long, default_value = "/sys/fs/cgroup")]
+        cgroup_mount: PathBuf,
+        /// Spool disk quota in MiB.
+        #[arg(long, default_value_t = 256)]
+        spool_mib: u64,
+        #[arg(long, default_value_t = 2)]
+        tick_secs: u64,
+    },
+    /// Queue a signed snapshot for the daemon (copied into <state>/inbox).
+    Apply { signed: PathBuf },
+    /// Show daemon status (coverage, revision, sessions).
+    Status,
+    /// Print this host's capability advertisement (probed, never upgraded).
+    Capabilities {
+        #[arg(long, default_value = "/sys/fs/cgroup")]
+        cgroup_mount: PathBuf,
+    },
+    /// Render the nftables ruleset for a signed snapshot without applying it.
+    Render {
+        signed: PathBuf,
+        #[arg(long)]
+        device_id: String,
+    },
+    /// Trust a policy signer public key (hex file).
+    Trust { pubkey: PathBuf },
+    /// Local recovery (root, on this device). Works with the daemon stopped.
+    #[command(subcommand)]
+    Recover(Recover),
+}
+
+#[derive(Subcommand)]
+enum Recover {
+    Status,
+    /// Remove Moat's enforcement table and keep it removed until `resume`. Protected sessions are refused meanwhile.
+    Disable {
+        #[arg(long)]
+        reason: String,
+    },
+    Resume,
+    /// Whole-device isolation except loopback and the given recovery paths. Does not reopen on its own.
+    Isolate {
+        #[arg(long = "keep")]
+        keep: Vec<IpNet>,
+    },
+    ClearIsolation,
+}
+
+fn hostname() -> String {
+    fs::read_to_string("/etc/hostname").map(|s| s.trim().to_string()).unwrap_or_else(|_| "linux".into())
+}
+
+fn require_root() -> Result<u32, String> {
+    let uid = nix::unistd::getuid().as_raw();
+    if uid != 0 {
+        return Err("this command must run as root on the device".into());
+    }
+    Ok(uid)
+}
+
+fn main() -> ExitCode {
+    let cli = Cli::parse();
+    match run(cli) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("moatd: {e}");
+            ExitCode::from(1)
+        }
+    }
+}
+
+fn run(cli: Cli) -> Result<(), String> {
+    match cli.cmd {
+        Cmd::Run { device_id, cgroup_mount, spool_mib, tick_secs } => {
+            require_root()?;
+            let device_id = device_id.unwrap_or_else(hostname);
+            fs::create_dir_all(&cli.state).map_err(|e| e.to_string())?;
+            let spool = Spool::open(SpoolConfig {
+                dir: cli.state.join("spool"),
+                device_id: device_id.clone(),
+                boot_id: boot_id(),
+                max_bytes: spool_mib * 1024 * 1024,
+                segment_bytes: 4 * 1024 * 1024,
+            })
+            .map_err(|e| e.to_string())?;
+            let cg = Cgroups { mount: cgroup_mount.clone(), root_name: "moat.slice".into() };
+            let _ = cg.ensure_profiles(&[]);
+            let facts = moatd::probe::gather(&cgroup_mount, "moat.slice", "nft");
+            let adv = moatd::probe::advertise(&facts);
+            let mut ep = Endpoint::new(cli.state.clone(), device_id, NftCli::default(), cg, spool, adv);
+            ep.startup();
+            eprintln!("moatd: coverage {}", ep.coverage_label());
+            moatd::server::serve(ep, cli.socket, Duration::from_secs(tick_secs)).map_err(|e| e.to_string())
+        }
+        Cmd::Apply { signed } => {
+            let inbox = cli.state.join("inbox");
+            fs::create_dir_all(&inbox).map_err(|e| e.to_string())?;
+            let name = format!("{}.json", chrono::Utc::now().format("%Y%m%d%H%M%S%f"));
+            fs::copy(&signed, inbox.join(name)).map_err(|e| e.to_string())?;
+            println!("queued {} for moatd", signed.display());
+            Ok(())
+        }
+        Cmd::Status => {
+            let s = std::os::unix::net::UnixStream::connect(&cli.socket).map_err(|e| format!("daemon not reachable at {}: {e}", cli.socket.display()))?;
+            send(&s, &Request::Status, &[]).map_err(|e| e.to_string())?;
+            for r in replies(&s) {
+                if let Reply::Status { status } = r {
+                    println!("{}", serde_json::to_string_pretty(&status).unwrap());
+                }
+                break;
+            }
+            Ok(())
+        }
+        Cmd::Capabilities { cgroup_mount } => {
+            let facts = moatd::probe::gather(&cgroup_mount, "moat.slice", "nft");
+            let adv = moatd::probe::advertise(&facts);
+            println!("{}", serde_json::to_string_pretty(&serde_json::json!({"host": facts, "advertisement": adv})).unwrap());
+            Ok(())
+        }
+        Cmd::Render { signed, device_id } => {
+            let s: moat_core::signing::SignedSnapshot = serde_json::from_str(&fs::read_to_string(&signed).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+            let trust = moatd::endpoint::load_trust(&cli.state.join("trusted"));
+            let snap = moat_core::signing::verify_snapshot(&s, &trust, moat_core::Platform::Linux, None, chrono::Utc::now()).map_err(|e| e.to_string())?;
+            let (rules, rep) = nft::render(&snap, &device_id, &nft::CgroupLayout::default(), &moatd::endpoint::lookup_uid).map_err(|e| e.0)?;
+            print!("{rules}");
+            eprintln!("{}", serde_json::to_string_pretty(&rep).unwrap());
+            Ok(())
+        }
+        Cmd::Trust { pubkey } => {
+            require_root()?;
+            let hexs = fs::read_to_string(&pubkey).map_err(|e| e.to_string())?;
+            let vk = moat_core::signing::verifying_key_from_hex(&hexs)?;
+            let id = moat_core::signing::key_id(&vk);
+            let dir = cli.state.join("trusted");
+            fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+            fs::write(dir.join(format!("{id}.pub")), hexs.trim()).map_err(|e| e.to_string())?;
+            println!("trusted signer {id}");
+            Ok(())
+        }
+        Cmd::Recover(r) => recover(&cli.state, r),
+    }
+}
+
+fn recover(state: &std::path::Path, r: Recover) -> Result<(), String> {
+    let mut rec = RecoveryState::load(state);
+    if let Recover::Status = r {
+        println!("{}", serde_json::to_string_pretty(&rec).unwrap());
+        return Ok(());
+    }
+    let uid = require_root()?;
+    let mut nft = NftCli::default();
+    rec.changed_by_uid = Some(uid);
+    rec.changed_at = Some(chrono::Utc::now());
+    match r {
+        Recover::Status => unreachable!(),
+        Recover::Disable { reason } => {
+            rec.enforcement_disabled = true;
+            rec.reason = Some(reason);
+            rec.save(state).map_err(|e| e.to_string())?;
+            nft.delete_table(nft::TABLE).map_err(|e| format!("state saved, but removing the table failed: {e}"))?;
+            println!("Moat enforcement disabled on this device. Protected sessions are refused until `moatd recover resume`.");
+        }
+        Recover::Resume => {
+            rec.enforcement_disabled = false;
+            rec.reason = None;
+            rec.save(state).map_err(|e| e.to_string())?;
+            println!("Enforcement will resume on the daemon's next tick with the last valid policy.");
+        }
+        Recover::Isolate { keep } => {
+            rec.isolation = moatd::recovery::Isolation { active: true, keep: keep.clone(), since: Some(chrono::Utc::now()) };
+            rec.save(state).map_err(|e| e.to_string())?;
+            nft.apply(&nft::render_local_emergency(&keep))?;
+            println!("Device isolated. Kept: loopback{}. Only `moatd recover clear-isolation` reopens.", keep.iter().map(|k| format!(", {k}")).collect::<String>());
+        }
+        Recover::ClearIsolation => {
+            rec.isolation.active = false;
+            rec.save(state).map_err(|e| e.to_string())?;
+            nft.delete_table(nft::LOCAL_EMERGENCY_TABLE)?;
+            println!("Isolation cleared.");
+        }
+    }
+    Ok(())
+}

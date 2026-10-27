@@ -1,0 +1,44 @@
+# Maintainer: Robert Courson
+# Packaging path for Arch / Omarchy. Build: `makepkg -si` from this directory (or from a release tarball).
+# A signed package requires the maintainer's own GPG key (`makepkg --sign`); none is bundled here.
+pkgname=moat
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Moat: local outbound firewall with protected agent sessions (nftables + cgroup v2)"
+arch=('x86_64' 'aarch64')
+url="https://github.com/robzilla1738/moat"
+license=('Apache-2.0')
+depends=('nftables' 'systemd' 'glibc')
+makedepends=('cargo' 'git')
+backup=('var/lib/moat/recovery.json')
+install=moat.install
+source=("git+https://github.com/robzilla1738/moat.git")
+sha256sums=('SKIP')
+
+prepare() {
+  cd moat
+  export RUSTUP_TOOLCHAIN=stable
+  cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+}
+
+build() {
+  cd moat
+  export RUSTUP_TOOLCHAIN=stable CARGO_TARGET_DIR=target
+  cargo build --frozen --release -p moatd -p moatctl
+}
+
+check() {
+  cd moat
+  cargo test --frozen -p moat-core -p moatd -p moatctl
+}
+
+package() {
+  cd moat
+  install -Dm755 target/release/moatd "$pkgdir/usr/bin/moatd"
+  install -Dm755 target/release/moat-launch "$pkgdir/usr/bin/moat-launch"
+  install -Dm755 target/release/moatctl "$pkgdir/usr/bin/moatctl"
+  install -Dm644 linux/packaging/systemd/moatd.service "$pkgdir/usr/lib/systemd/system/moatd.service"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 docs/platforms/linux.md "$pkgdir/usr/share/doc/$pkgname/linux.md"
+  install -dm700 "$pkgdir/var/lib/moat"
+}

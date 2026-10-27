@@ -1,0 +1,36 @@
+[Unit]
+Description=Moat endpoint (nftables enforcement, protected sessions, event spool)
+Documentation=https://github.com/robzilla1738/moat/blob/main/docs/platforms/linux.md
+After=network-pre.target
+Wants=network-pre.target
+# Recovery: `sudo moatd recover disable --reason "..."` works with this service stopped or running.
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/moatd run
+Restart=on-failure
+RestartSec=2
+# moatd needs root for nftables and cgroup placement. Everything else is narrowed.
+User=root
+StateDirectory=moat
+StateDirectoryMode=0700
+RuntimeDirectory=moat
+RuntimeDirectoryMode=0755
+# moatd manages /sys/fs/cgroup/moat.slice itself; do not let systemd delegate or move its children.
+Delegate=no
+NoNewPrivileges=no
+ProtectSystem=strict
+ReadWritePaths=/var/lib/moat /run/moat /sys/fs/cgroup
+ProtectHome=read-only
+PrivateTmp=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectClock=yes
+LockPersonality=yes
+RestrictRealtime=yes
+RestrictNamespaces=no
+SystemCallArchitectures=native
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_SYS_ADMIN CAP_SETUID CAP_SETGID CAP_KILL CAP_DAC_OVERRIDE CAP_CHOWN CAP_FOWNER
+
+[Install]
+WantedBy=multi-user.target

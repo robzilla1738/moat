@@ -1,0 +1,17 @@
+post_install() {
+  echo ">> Moat installed. Nothing is enforced until you:"
+  echo "   1. trust your policy signer:  sudo moatd trust /path/to/signer.pub"
+  echo "   2. start the daemon:          sudo systemctl enable --now moatd"
+  echo "   3. check capabilities:        moatd capabilities"
+  echo "   Recovery at any time:         sudo moatd recover disable --reason '...'"
+}
+pre_remove() {
+  systemctl disable --now moatd.service 2>/dev/null || true
+  nft delete table inet moat 2>/dev/null || true
+  nft delete table inet moat_local_emergency 2>/dev/null || true
+  for d in /sys/fs/cgroup/moat.slice/p-*/s-*; do [ -d "$d" ] && echo 1 > "$d/cgroup.kill" 2>/dev/null; rmdir "$d" 2>/dev/null; done
+  rmdir /sys/fs/cgroup/moat.slice/p-* /sys/fs/cgroup/moat.slice 2>/dev/null || true
+}
+post_remove() {
+  echo ">> Moat removed. Policy and spool remain in /var/lib/moat; delete it to remove all local history."
+}

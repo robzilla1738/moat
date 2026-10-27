@@ -1,0 +1,35 @@
+name: linux-endpoint
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  privileged:
+    name: cgroup v2 + nftables enforcement (netns)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install nftables, iproute2, jq
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq nftables iproute2 jq python3
+      - name: Host facts
+        run: |
+          uname -a
+          stat -fc %T /sys/fs/cgroup
+          sudo nft --version
+          sudo nft list tables || true
+      - name: Build
+        run: |
+          cargo build -p moatd -p moatctl
+          cargo test -p moatd --test privileged --no-run
+      - name: Privileged session-boundary tests (real cgroup v2, setuid drop, broker hiding)
+        run: |
+          T=$(ls target/debug/deps/privileged-* | grep -v '\.d$' | head -1)
+          sudo MOAT_PRIV_TESTS=1 "$T" --test-threads=1
+      - name: Capability probe
+        run: sudo ./target/debug/moatd capabilities
+      - name: netns enforcement test (nftables + cgroup v2 + moat-launch)
+        run: sudo REQUIRE_NFT=1 linux/tests/netns-enforcement.sh target/debug

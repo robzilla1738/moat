@@ -7,6 +7,10 @@ license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
 
+[lib]
+name = "moatd"
+path = "src/lib.rs"
+
 [[bin]]
 name = "moatd"
 path = "src/main.rs"
@@ -27,5 +31,9 @@ hex.workspace = true
 sha2.workspace = true
 libc = "0.2"
 
+nix = { version = "0.29", features = ["socket", "uio", "mount", "sched", "user", "process", "fs", "signal"] }
+base64.workspace = true
+
 [dev-dependencies]
 tempfile.workspace = true
+ed25519-dalek.workspace = true
