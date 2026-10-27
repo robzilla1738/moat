@@ -1,0 +1,16 @@
+{
+  "schema": "moat.conformance.compile_case.v1",
+  "policy": "../../policies/home-device-scoped.toml",
+  "name": "macos-targeted-keeps-its-own-rules",
+  "adapter": "macos",
+  "target_devices": [
+    "mbp-m1"
+  ],
+  "expect": {
+    "compiles": true,
+    "kept_contains": [
+      "mac-block-zoom",
+      "laptops-block-tracker"
+    ]
+  }
+}

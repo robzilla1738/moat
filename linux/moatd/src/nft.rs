@@ -556,7 +556,7 @@ pub(crate) mod tests {
         compile(
             &p,
             &CapabilityAdvertisement::linux_nftables_cgroup(),
-            &CompileOptions { revision: 4, rollback_of: None, issued_at: Utc::now(), not_after: None },
+            &CompileOptions { target_devices: vec![], revision: 4, rollback_of: None, issued_at: Utc::now(), not_after: None },
         )
         .unwrap()
     }

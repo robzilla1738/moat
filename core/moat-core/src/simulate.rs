@@ -171,6 +171,7 @@ mod tests {
             enricher: &e,
             platforms: &[CapabilityAdvertisement::macos_network_extension(), CapabilityAdvertisement::linux_nftables_cgroup()],
             compile_options: CompileOptions {
+                target_devices: vec![],
                 revision: 1,
                 rollback_of: None,
                 issued_at: "2026-10-26T12:00:00Z".parse().unwrap(),

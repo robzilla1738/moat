@@ -143,6 +143,28 @@ report (`omission: stricter`) only when the fallback is at least as restrictive.
 without sessions are omitted as `subject_unavailable`: sessions are refused at launch there, so they can never match.
 `report.items` lists the disposition of every profile and rule (contracts `moat.capability_dispositions.v1`).
 
+### Device-targeted snapshots (issue #26)
+
+A fleet policy can hold rules for one device only: an app-scoped block on one Mac, a hostname block on the laptops
+group. Compiled fleet-wide for Linux, those rules would be refused (nftables cannot match apps and is IP-only), so one
+Mac-only rule used to stop the whole fleet's Linux snapshot.
+
+`CompileOptions.target_devices` (`moatctl compile --device <id>`, repeatable) names the endpoints a snapshot is for:
+
+* A rule or profile whose device scope (`devices` and `device_groups`, combined with AND exactly as the evaluator does)
+  includes **none** of the targeted devices can never match there. It is left out, reported in `report.omitted` with
+  `not_targeted: true` and disposition `omitted_accepted` / `subject_unavailable`, and is **not** checked against this
+  platform's capabilities. The fallback profile is never skipped.
+* Every rule that can apply to a targeted device is checked exactly as before: an unsupported restrictive cell on a
+  targeted device is still **rejected**. A snapshot targeting several devices is checked for each of them.
+* The snapshot records `devices` inside the signed payload. `verify_snapshot_for_device` refuses a targeted snapshot on
+  any endpoint not listed, and `verify_snapshot` (no device identity) refuses every targeted snapshot, because a
+  snapshot built for another device may lack this device's denies. `moatd` always verifies with its device id; the
+  FFI takes `device_id`; `moatctl verify --device`.
+* Without `target_devices` the compile is fleet-wide and keeps the conservative behaviour.
+
+The controller (Lane B) should compile one snapshot per platform with that platform's device list, or one per device.
+
 ### Backend identifiers
 
 On Linux, profile ids become cgroup directories and nftables chains and rule ids become counter comments. A policy

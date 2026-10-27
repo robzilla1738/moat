@@ -79,15 +79,39 @@ pub fn verify_bytes(bytes: &[u8], sig_b64: &str, vk: &VerifyingKey) -> bool {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "error", rename_all = "snake_case")]
 pub enum VerifyError {
-    Malformed { detail: String },
-    UnknownKey { key_id: String },
-    RevokedKey { key_id: String },
+    Malformed {
+        detail: String,
+    },
+    UnknownKey {
+        key_id: String,
+    },
+    RevokedKey {
+        key_id: String,
+    },
     BadSignature,
-    WrongPlatform { expected: Platform, got: Platform },
-    Replay { revision: u64, last_applied: u64 },
-    Expired { not_after: DateTime<Utc> },
-    FromTheFuture { issued_at: DateTime<Utc> },
-    InvalidPolicy { detail: String },
+    WrongPlatform {
+        expected: Platform,
+        got: Platform,
+    },
+    Replay {
+        revision: u64,
+        last_applied: u64,
+    },
+    Expired {
+        not_after: DateTime<Utc>,
+    },
+    FromTheFuture {
+        issued_at: DateTime<Utc>,
+    },
+    InvalidPolicy {
+        detail: String,
+    },
+    /// The snapshot was compiled for named devices (rules for other devices left out) and this endpoint is not one
+    /// of them, or could not say which device it is.
+    WrongDevice {
+        expected: Option<String>,
+        targets: Vec<String>,
+    },
 }
 
 impl std::fmt::Display for VerifyError {
@@ -104,6 +128,14 @@ impl std::fmt::Display for VerifyError {
             VerifyError::Expired { not_after } => write!(f, "snapshot expired at {not_after}"),
             VerifyError::FromTheFuture { issued_at } => write!(f, "snapshot issued in the future ({issued_at})"),
             VerifyError::InvalidPolicy { detail } => write!(f, "snapshot policy is invalid: {detail}"),
+            VerifyError::WrongDevice { expected: Some(d), targets } => {
+                write!(f, "snapshot is for devices [{}], this endpoint is {d}", targets.join(", "))
+            }
+            VerifyError::WrongDevice { expected: None, targets } => write!(
+                f,
+                "snapshot is for devices [{}] and this endpoint did not say which device it is (refusing a device-targeted snapshot)",
+                targets.join(", ")
+            ),
         }
     }
 }
@@ -131,11 +163,25 @@ impl TrustStore {
     }
 }
 
-/// Verify a signed snapshot for this endpoint.
+/// Verify a signed snapshot for an endpoint that does not state its device id. Device-targeted snapshots are
+/// refused (they may lack another device's rules); use [`verify_snapshot_for_device`] on endpoints.
 pub fn verify_snapshot(
     signed: &SignedSnapshot,
     trust: &TrustStore,
     platform: Platform,
+    last_applied: Option<u64>,
+    now: DateTime<Utc>,
+) -> Result<Snapshot, VerifyError> {
+    verify_snapshot_for_device(signed, trust, platform, None, last_applied, now)
+}
+
+/// Verify a signed snapshot for this endpoint (`device`). A snapshot that names target devices installs only on a
+/// listed device (issue #26): it was compiled without the rules scoped to other devices.
+pub fn verify_snapshot_for_device(
+    signed: &SignedSnapshot,
+    trust: &TrustStore,
+    platform: Platform,
+    device: Option<&str>,
     last_applied: Option<u64>,
     now: DateTime<Utc>,
 ) -> Result<Snapshot, VerifyError> {
@@ -156,6 +202,9 @@ pub fn verify_snapshot(
     }
     if snap.platform != platform {
         return Err(VerifyError::WrongPlatform { expected: platform, got: snap.platform });
+    }
+    if !snap.devices.is_empty() && !device.is_some_and(|d| snap.devices.iter().any(|t| t == d)) {
+        return Err(VerifyError::WrongDevice { expected: device.map(str::to_string), targets: snap.devices.clone() });
     }
     if let Some(last) = last_applied {
         if snap.revision <= last {
@@ -236,7 +285,13 @@ mod tests {
         compile(
             &p,
             &CapabilityAdvertisement::linux_nftables_cgroup(),
-            &CompileOptions { revision: rev, rollback_of, issued_at: "2026-10-26T12:00:00Z".parse().unwrap(), not_after: None },
+            &CompileOptions {
+                target_devices: vec![],
+                revision: rev,
+                rollback_of,
+                issued_at: "2026-10-26T12:00:00Z".parse().unwrap(),
+                not_after: None,
+            },
         )
         .unwrap()
     }
@@ -300,5 +355,45 @@ mod tests {
         let vk = verifying_key_from_hex(&hex::encode(k.verifying_key().to_bytes())).unwrap();
         assert!(verify_bytes(b"x", &sign_bytes(b"x", &k), &vk));
         assert!(!verify_bytes(b"y", &sign_bytes(b"x", &k), &vk));
+    }
+
+    #[test]
+    fn a_device_targeted_snapshot_installs_only_on_a_named_device() {
+        // Issue #26: a targeted snapshot was compiled without other devices' rules, so it must not install elsewhere.
+        let p = Policy::parse(include_str!("../../../conformance/policies/home.toml")).unwrap();
+        let opts = CompileOptions {
+            target_devices: vec!["omarchy".into()],
+            revision: 3,
+            rollback_of: None,
+            issued_at: "2026-10-26T12:00:00Z".parse().unwrap(),
+            not_after: None,
+        };
+        let s = compile(&p, &CapabilityAdvertisement::linux_nftables_cgroup(), &opts).unwrap();
+        let key = generate_key();
+        let signed = sign_snapshot(&s, &key);
+        let mut t = TrustStore::new();
+        t.trust(key.verifying_key());
+        let ok = verify_snapshot_for_device(&signed, &t, Platform::Linux, Some("omarchy"), None, now()).unwrap();
+        assert_eq!(ok.devices, vec!["omarchy".to_string()]);
+        let other = verify_snapshot_for_device(&signed, &t, Platform::Linux, Some("linux-2"), None, now()).unwrap_err();
+        assert!(matches!(other, VerifyError::WrongDevice { expected: Some(ref d), .. } if d == "linux-2"), "{other:?}");
+        let anon = verify_snapshot(&signed, &t, Platform::Linux, None, now()).unwrap_err();
+        assert!(
+            matches!(anon, VerifyError::WrongDevice { expected: None, .. }),
+            "an endpoint that does not say who it is refuses: {anon:?}"
+        );
+        // The device list is inside the signed payload: editing it breaks the signature.
+        let mut forged = signed.clone();
+        let mut v: serde_json::Value = serde_json::from_slice(&B64.decode(&forged.payload).unwrap()).unwrap();
+        v["devices"] = serde_json::json!(["omarchy", "linux-2"]);
+        forged.payload = B64.encode(serde_json::to_vec(&v).unwrap());
+        assert_eq!(
+            verify_snapshot_for_device(&forged, &t, Platform::Linux, Some("linux-2"), None, now()).unwrap_err(),
+            VerifyError::BadSignature
+        );
+        // An untargeted snapshot still installs on any device of the platform.
+        let fleet = sign_snapshot(&snap(4, None), &key);
+        assert!(verify_snapshot_for_device(&fleet, &t, Platform::Linux, Some("linux-2"), None, now()).is_ok());
+        assert!(verify_snapshot(&fleet, &t, Platform::Linux, None, now()).is_ok());
     }
 }

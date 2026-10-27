@@ -86,8 +86,9 @@
       "evidence_level": "semantic",
       "disposition": "implemented_unproven",
       "tests": [
+        "conformance/cases/compile",
         "core/moat-core/src/compile.rs::tests",
-        "conformance/cases/compile"
+        "core/moat-core/src/signing.rs::tests"
       ],
       "environment": "unit",
       "last_result": {
@@ -96,7 +97,7 @@
         "commit": "w02-semantics",
         "date": "2026-10-27"
       },
-      "limits": "Profiles are capability-checked: unsupported deny profiles fail compilation; other unsupported profiles are omitted only when the fallback is at least as strict. Linux backend id collisions are rejected.",
+      "limits": "Profiles are capability-checked: unsupported deny profiles fail compilation; other unsupported profiles are omitted only when the fallback is at least as strict. Linux backend id collisions are rejected. Device-targeted compiles (issue #26) skip rules/profiles whose device scope excludes every targeted device; the snapshot binds its device list and endpoints refuse a snapshot that does not name them. Controller adoption of per-device compiles is Lane B.",
       "open_defects": []
     },
     {
@@ -538,6 +539,22 @@
       "summary": "A notification reference can open the wrong incident.",
       "package": "W08/W13 (Lane B)",
       "status": "open"
+    },
+    {
+      "id": "D-DEVICE-SCOPE-FLEET",
+      "summary": "A device-scoped rule (app-scoped block, hostname block on a Mac) was refused for the whole fleet because the compiler checked every rule against every platform in the fleet (issue #26).",
+      "package": "W02",
+      "status": "closed",
+      "closed_by": "issue #26: CompileOptions.target_devices, Snapshot.devices, verify_snapshot_for_device (core/moat-core/src/compile.rs, signing.rs; moatd, moat-ffi, moatctl)",
+      "regression_tests": [
+        "compile::tests::a_mac_app_block_does_not_refuse_the_linux_snapshot_for_linux_devices",
+        "compile::tests::an_unsupported_cell_on_a_targeted_device_is_still_rejected",
+        "compile::tests::a_hostname_block_on_a_device_group_follows_group_membership",
+        "compile::tests::a_device_scoped_profile_is_not_checked_for_other_devices_but_the_fallback_always_is",
+        "signing::tests::a_device_targeted_snapshot_installs_only_on_a_named_device",
+        "moat-ffi tests::verify_passes_the_device_id_for_targeted_snapshots",
+        "conformance/cases/compile/linux-*-mac-scoped-rules.json, linux-targeted-at-a-mac-device-still-refuses.json, macos-targeted-keeps-its-own-rules.json"
+      ]
     }
   ]
 }

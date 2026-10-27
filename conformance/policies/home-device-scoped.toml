@@ -1,0 +1,136 @@
+# Example home policy for Robert's fleet. Reviewed in Git; signed by the policy authority, never by an agent.
+schema = "moat.policy.v1"
+name = "courson-home-device-scoped"
+description = "Ordinary apps observed; selected agent sessions restricted to approved services."
+fallback_profile = "ordinary-desktop-learning"
+
+[device_groups]
+laptops = ["mbp-m1", "mbp-air"]
+servers = ["mini"]
+linux = ["omarchy"]
+
+[destination_sets.controller-admin]
+description = "Controller and signer admin endpoints on the mini. Workloads must never reach these."
+cidrs = ["192.168.1.2/32", "100.100.1.2/32"]
+
+[destination_sets.github]
+description = "GitHub web, API, git over HTTPS and release/raw downloads."
+hosts = ["github.com", "api.github.com", "codeload.github.com", "*.githubusercontent.com"]
+
+[destination_sets.npm]
+description = "npm registry (download and publish share this host; publication is not separately enforced)."
+hosts = ["registry.npmjs.org"]
+
+[destination_sets.anthropic-api]
+description = "Anthropic API for Claude Code."
+hosts = ["api.anthropic.com"]
+
+[[profiles]]
+id = "ordinary-desktop-learning"
+description = "Observe existing behavior. Traffic is permitted and recorded."
+default = "observe"
+learning = "observe"
+
+[[profiles]]
+id = "local-inference"
+description = "Deny Internet access for the selected inference workload."
+default = "deny"
+learning = "restrictive"
+
+[[profiles]]
+id = "model-install"
+description = "Time-limited registry access, kept separate from inference."
+default = "deny"
+learning = "restrictive"
+
+[[profiles]]
+id = "coding-session"
+description = "Deny unknown egress from the protected coding session."
+default = "deny"
+learning = "restrictive"
+
+[[profiles]]
+id = "private-services-only"
+description = "Public destinations blocked; chosen LAN/tailnet services allowed. Not air-gapped."
+default = "deny"
+learning = "restrictive"
+
+[[rules]]
+id = "safety-workloads-never-reach-controller"
+description = "Protected workloads cannot reach the controller/signer admin endpoints."
+action = "deny"
+layer = "safety"
+selector = { session = { any_protected = true } }
+destinations = { sets = ["controller-admin"] }
+provenance = { kind = "built_in", reference = "moat safety baseline" }
+
+[[rules]]
+id = "inference-loopback"
+description = "Model client/server on loopback only."
+action = "allow"
+selector = { session = { profiles = ["local-inference"] } }
+destinations = { scopes = ["loopback"] }
+provenance = { kind = "git", reference = "policy@3f2a91c" }
+
+[[rules]]
+id = "coding-allow-github"
+on_unsupported = "skip_with_report"
+action = "allow"
+selector = { session = { profiles = ["coding-session"] } }
+destinations = { sets = ["github"] }
+transport = "tcp"
+ports = [443]
+provenance = { kind = "service_pack", reference = "github@2026.10.1" }
+
+[[rules]]
+id = "coding-allow-npm"
+on_unsupported = "skip_with_report"
+action = "allow"
+selector = { session = { profiles = ["coding-session"] } }
+destinations = { sets = ["npm"] }
+transport = "tcp"
+ports = [443]
+provenance = { kind = "service_pack", reference = "npm@2026.10.1" }
+
+[[rules]]
+id = "coding-allow-anthropic"
+on_unsupported = "skip_with_report"
+action = "allow"
+selector = { session = { profiles = ["coding-session"] } }
+destinations = { sets = ["anthropic-api"] }
+transport = "tcp"
+ports = [443]
+provenance = { kind = "service_pack", reference = "anthropic@2026.10.1" }
+
+[[rules]]
+id = "coding-allow-loopback"
+action = "allow"
+selector = { session = { profiles = ["coding-session"] } }
+destinations = { scopes = ["loopback"] }
+provenance = { kind = "git", reference = "policy@3f2a91c" }
+
+[[rules]]
+id = "private-services-lan-tailnet"
+description = "Chosen private services. Controller/admin addresses stay excluded by the safety rule."
+action = "allow"
+selector = { session = { profiles = ["private-services-only"] } }
+destinations = { scopes = ["loopback", "lan", "tailnet"] }
+provenance = { kind = "git", reference = "policy@3f2a91c" }
+
+# Issue #26: rules scoped to Macs. Linux cannot enforce either (no app identity, IP-only), so a fleet-wide Linux
+# compile refuses them; a Linux snapshot targeted at the Linux device leaves them out (they can never match there).
+[[rules]]
+id = "mac-block-zoom"
+description = "App-scoped block on one Mac."
+action = "deny"
+selector = { devices = ["mbp-m1"], apps = [{ bundle_id = "us.zoom.xos" }] }
+destinations = { cidrs = ["0.0.0.0/0", "::/0"] }
+provenance = { kind = "git", reference = "conformance" }
+
+[[rules]]
+id = "laptops-block-tracker"
+description = "Hostname block on the laptops group."
+action = "deny"
+selector = { device_groups = ["laptops"] }
+destinations = { hosts = ["tracker.example"] }
+provenance = { kind = "git", reference = "conformance" }

@@ -1,0 +1,19 @@
+{
+  "schema": "moat.conformance.compile_case.v1",
+  "policy": "../../policies/home-device-scoped.toml",
+  "name": "linux-targeted-omits-mac-scoped-rules",
+  "adapter": "linux",
+  "target_devices": [
+    "omarchy"
+  ],
+  "expect": {
+    "compiles": true,
+    "omitted_contains": [
+      "mac-block-zoom",
+      "laptops-block-tracker"
+    ],
+    "kept_contains": [
+      "safety-workloads-never-reach-controller"
+    ]
+  }
+}

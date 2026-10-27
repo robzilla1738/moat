@@ -19,7 +19,7 @@ use moat_core::capability::{CapabilityAdvertisement, Platform};
 use moat_core::enrichment::Enricher;
 use moat_core::eval::{evaluate, EvalContext, FlowAttempt};
 use moat_core::policy::Policy;
-use moat_core::signing::{verify_snapshot, verifying_key_from_hex, SignedSnapshot, TrustStore};
+use moat_core::signing::{verify_snapshot_for_device, verifying_key_from_hex, SignedSnapshot, TrustStore};
 
 /// Version of this ABI. Bumped on any breaking change to request or response shapes.
 pub const ABI_VERSION: u32 = 1;
@@ -74,6 +74,9 @@ pub mod api {
         revoked_key_ids: Vec<String>,
         #[serde(default)]
         last_applied: Option<u64>,
+        /// This endpoint's device id. Required to accept a device-targeted snapshot (issue #26).
+        #[serde(default)]
+        device_id: Option<String>,
         #[serde(default)]
         now: Option<DateTime<Utc>>,
         #[serde(default = "default_platform")]
@@ -94,7 +97,7 @@ pub mod api {
             trust.revoke(id);
         }
         let now = r.now.unwrap_or_else(Utc::now);
-        match verify_snapshot(&r.signed, &trust, r.platform, r.last_applied, now) {
+        match verify_snapshot_for_device(&r.signed, &trust, r.platform, r.device_id.as_deref(), r.last_applied, now) {
             Ok(snap) => Ok(json!({"ok": true, "snapshot": snap})),
             Err(e) => Ok(json!({"ok": false, "error": e.to_string(), "verify_error": e})),
         }
@@ -197,7 +200,7 @@ mod tests {
 
     fn signed_macos(revision: u64) -> (String, SignedSnapshot) {
         let p = Policy::parse(POLICY).unwrap();
-        let opts = CompileOptions { revision, rollback_of: None, issued_at: Utc::now(), not_after: None };
+        let opts = CompileOptions { target_devices: vec![], revision, rollback_of: None, issued_at: Utc::now(), not_after: None };
         let snap = compile(&p, &CapabilityAdvertisement::macos_network_extension(), &opts).expect("compiles for macOS");
         let key = generate_key();
         (hex::encode(key.verifying_key().to_bytes()), sign_snapshot(&snap, &key))
@@ -262,5 +265,27 @@ mod tests {
         assert_eq!(out["ok"], true, "{out}");
         assert!(out["decision"]["verdict"] == "allow" || out["decision"]["verdict"] == "deny");
         assert!(out["summary"].as_str().unwrap().contains("by"));
+    }
+
+    #[test]
+    fn verify_passes_the_device_id_for_targeted_snapshots() {
+        let p = Policy::parse(POLICY).unwrap();
+        let opts = CompileOptions {
+            target_devices: vec!["mbp-m1".into()],
+            revision: 3,
+            rollback_of: None,
+            issued_at: Utc::now(),
+            not_after: None,
+        };
+        let snap = compile(&p, &CapabilityAdvertisement::macos_network_extension(), &opts).expect("compiles for one Mac");
+        let key = generate_key();
+        let pk = hex::encode(key.verifying_key().to_bytes());
+        let signed = sign_snapshot(&snap, &key);
+        let ok = call(moat_verify_snapshot, &json!({"signed": signed, "trusted_keys": [pk], "device_id": "mbp-m1"}).to_string());
+        assert_eq!(ok["ok"], true, "{ok}");
+        let other = call(moat_verify_snapshot, &json!({"signed": signed, "trusted_keys": [pk], "device_id": "mbp-air"}).to_string());
+        assert_eq!(other["verify_error"]["error"], "wrong_device", "{other}");
+        let anon = call(moat_verify_snapshot, &json!({"signed": signed, "trusted_keys": [pk]}).to_string());
+        assert_eq!(anon["verify_error"]["error"], "wrong_device", "{anon}");
     }
 }
