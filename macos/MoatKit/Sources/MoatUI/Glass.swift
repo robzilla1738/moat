@@ -1,47 +1,26 @@
 import SwiftUI
 
-// Liquid Glass, used the way Apple's HIG asks: glass is the navigation and control layer (sidebar, toolbar,
-// floating controls, the menu bar panel), never the content itself. Every helper here:
+// Control surfaces in the bento design (docs/design.md). Moat's own controls are opaque: a solid fill with a hairline
+// border, so text always sits on a known colour and Reduce Transparency needs no special case. The system still draws
+// its own chrome (the sidebar, toolbar and menu bar) the native way. The helpers keep their names so call sites stay
+// small:
 //
-// * uses the native macOS 26 APIs (`glassEffect`, `GlassEffectContainer`, `glassEffectID`, `.glass` button styles,
-//   `backgroundExtensionEffect`, scroll-edge effects) behind `#available(macOS 26.0, *)`;
-// * falls back on macOS 14/15 to system materials and the bordered button styles;
-// * honours Reduce Transparency (solid, opaque fills), Increase Contrast (stronger borders, no tinted glass) and
-//   Reduce Motion (no morphing or symbol animation).
+// * `moatGlass` draws a solid surface (tinted for prominent controls) with a border; Increase Contrast strengthens it;
+// * `moatButtonStyle` uses the bordered button styles;
+// * the morphing helpers are no-ops with Reduce Motion.
 
 /// Glass for a control surface (capsule or rounded rectangle). `tint` colours prominent controls only.
 struct MoatGlassModifier<S: InsettableShape>: ViewModifier {
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorSchemeContrast) private var contrast
     @Environment(\.palette) private var p
     let shape: S
     var tint: Color?
     var interactive: Bool
 
-    @ViewBuilder func body(content: Content) -> some View {
-        if reduceTransparency {
-            content
-                .background(shape.fill(tint.map { $0.opacity(0.22) } ?? p.surface2))
-                .overlay(shape.strokeBorder(contrast == .increased ? p.text.opacity(0.55) : p.borderStrong, lineWidth: 1))
-        } else {
-            if #available(macOS 26.0, *) {
-                content
-                    .glassEffect(glassStyle, in: shape)
-                    .overlay(shape.strokeBorder(contrast == .increased ? p.text.opacity(0.45) : Color.clear, lineWidth: 1))
-            } else {
-                content
-                    .background(shape.fill(.regularMaterial))
-                    .background(shape.fill((tint ?? Color.clear).opacity(0.18)))
-                    .overlay(shape.strokeBorder(contrast == .increased ? p.text.opacity(0.45) : p.border, lineWidth: 1))
-            }
-        }
-    }
-
-    @available(macOS 26.0, *)
-    private var glassStyle: Glass {
-        // Increase Contrast: untinted glass plus a visible border, so tint never carries meaning on its own.
-        let base: Glass = contrast == .increased ? .regular : .regular.tint(tint)
-        return base.interactive(interactive)
+    func body(content: Content) -> some View {
+        content
+            .background(shape.fill(tint.map { $0.opacity(0.16) } ?? p.surface))
+            .overlay(shape.strokeBorder(contrast == .increased ? p.text.opacity(0.55) : (tint.map { $0.opacity(0.35) } ?? p.border), lineWidth: 1))
     }
 }
 
@@ -63,20 +42,12 @@ extension View {
         }
     }
 
-    /// Primary / secondary control buttons: `.glassProminent` / `.glass` on macOS 26.
+    /// Primary / secondary control buttons: bordered prominent / bordered.
     @ViewBuilder func moatButtonStyle(prominent: Bool = false, destructive: Bool = false) -> some View {
-        if #available(macOS 26.0, *) {
-            if prominent {
-                buttonStyle(.glassProminent).tint(destructive ? Color.red : nil)
-            } else {
-                buttonStyle(.glass).tint(destructive ? Color.red : nil)
-            }
+        if prominent {
+            buttonStyle(.borderedProminent).tint(destructive ? Color.red : nil)
         } else {
-            if prominent {
-                buttonStyle(.borderedProminent).tint(destructive ? Color.red : nil)
-            } else {
-                buttonStyle(.bordered).tint(destructive ? Color.red : nil)
-            }
+            buttonStyle(.bordered).tint(destructive ? Color.red : nil)
         }
     }
 
@@ -89,13 +60,9 @@ extension View {
         }
     }
 
-    /// Lets hero artwork extend under the floating glass sidebar (macOS 26).
-    @ViewBuilder func moatBackgroundExtension() -> some View {
-        if #available(macOS 26.0, *) {
-            backgroundExtensionEffect()
-        } else {
-            self
-        }
+    /// No artwork extends under the sidebar in the bento design; kept as a no-op for existing call sites.
+    func moatBackgroundExtension() -> some View {
+        self
     }
 
     /// Symbol animation that respects Reduce Motion.

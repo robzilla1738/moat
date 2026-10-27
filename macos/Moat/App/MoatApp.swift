@@ -131,7 +131,15 @@ struct MenuBarLabel: View {
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
-        Label("Moat", systemImage: model.status?.coverage.systemImage ?? "shield.lefthalf.filled")
+        // The Moat mark (a template image) while coverage is as expected; the coverage symbol replaces it whenever the
+        // filter reports something that needs attention, so the status item never hides a problem behind the logo.
+        Group {
+            if let c = model.status?.coverage, c != .enforced, c != .observed {
+                Label("Moat: \(c.label)", systemImage: c.systemImage)
+            } else {
+                Label("Moat", image: "MenuBarIcon")
+            }
+        }
             .onAppear {
                 guard openMainOnAppear else { return }
                 NSApp.setActivationPolicy(.regular)

@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Capture the real Moat window in demo mode (Liquid Glass, toolbar and sidebar included) for the docs.
+# Capture the real Moat window in demo mode (toolbar, native sidebar and bento content included) for the docs.
 #
 #   macos/scripts/capture-screenshots.sh path/to/Moat.app out-dir
 #
 # Each shot launches the app with --demo, waits for it to report its window number, and captures exactly that
 # window with `screencapture -l`. If the runner refuses screen capture, the app's own AppKit snapshot of the window
-# (written with --snapshot; glass may render flat there) is kept as fallback-*.png and the script says so.
+# (written with --snapshot; system chrome may render flat there) is kept as fallback-*.png and the script says so.
 set -uo pipefail
 APP="${1:?Moat.app}"; OUT="${2:?out dir}"
 mkdir -p "$OUT"

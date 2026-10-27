@@ -1,8 +1,8 @@
 import MoatKit
 import SwiftUI
 
-/// The main window: a NavigationSplitView with the system's floating glass sidebar on macOS 26, a glass toolbar
-/// carrying status and the two global actions, and content that leads underneath.
+/// The main window: a native NavigationSplitView sidebar, a unified toolbar carrying status and the two global
+/// actions, and the bento content on the calm canvas.
 public struct RootView: View {
     @ObservedObject var model: AppModel
     @Environment(\.colorScheme) private var scheme
@@ -21,14 +21,11 @@ public struct RootView: View {
         } detail: {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    if model.screen == .apps, let s = model.status {
-                        OverviewHero(status: s)
-                    }
-                    ScreenContent(model: model, heroShown: model.screen == .apps && model.status != nil)
+                    ScreenContent(model: model)
                         .padding(.horizontal, 32)
-                        .padding(.top, model.screen == .apps ? 22 : 8)
+                        .padding(.top, 20)
                         .padding(.bottom, 40)
-                        .frame(maxWidth: 1040, alignment: .leading)
+                        .frame(maxWidth: 1120, alignment: .leading)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -101,21 +98,12 @@ struct CoverageBadge: View {
     }
 }
 
-/// Quiet window backdrop behind the content (the content itself stays opaque and readable).
+/// The canvas behind the bento cards: one flat, cool tone (no gradients, no translucency).
 struct Backdrop: View {
     @Environment(\.palette) private var p
-    @Environment(\.colorScheme) private var scheme
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     var body: some View {
-        ZStack {
-            p.bg
-            if !reduceTransparency {
-                RadialGradient(colors: [p.accent.opacity(scheme == .dark ? 0.16 : 0.10), .clear], center: UnitPoint(x: 0.85, y: -0.15), startRadius: 0, endRadius: 720)
-                RadialGradient(colors: [p.accent2.opacity(scheme == .dark ? 0.10 : 0.07), .clear], center: UnitPoint(x: 0.0, y: 0.0), startRadius: 0, endRadius: 560)
-            }
-        }
-        .ignoresSafeArea()
+        p.bg.ignoresSafeArea()
     }
 }
 
@@ -184,12 +172,13 @@ struct Sidebar: View {
                     Text(s.installed.map { "Policy r\($0.revision) · \($0.policyName)" } ?? "No signed policy")
                         .font(.caption).foregroundStyle(p.text2).lineLimit(2)
                     if model.isDemo {
-                        Label("Demo data", systemImage: "theatermasks").font(.caption.weight(.semibold)).foregroundStyle(p.amber)
+                        Label("Demo data", systemImage: "theatermasks").font(.caption.weight(.semibold)).foregroundStyle(p.accent)
                     }
                 }
                 .padding(12)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .moatGlass(in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(p.surface))
+                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(p.border, lineWidth: 1))
                 .padding(12)
                 .accessibilityElement(children: .combine)
             }
@@ -212,22 +201,6 @@ struct Sidebar: View {
             Image(systemName: s.symbol)
         }
         .tag(s)
-    }
-}
-
-/// The Moat mark: a shield on the brand gradient.
-struct AppMark: View {
-    @Environment(\.palette) private var p
-    var size: CGFloat = 30
-
-    var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: size * 0.3, style: .continuous)
-                .fill(LinearGradient(colors: [p.accent, p.accent2], startPoint: .topLeading, endPoint: .bottomTrailing))
-            Image(systemName: "shield.lefthalf.filled").font(.system(size: size * 0.5, weight: .bold)).foregroundStyle(.white)
-        }
-        .frame(width: size, height: size)
-        .accessibilityHidden(true)
     }
 }
 
@@ -258,8 +231,8 @@ struct Banner: View {
             .accessibilityLabel("Dismiss")
         }
         .padding(12)
-        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(tone.color(p).opacity(0.12)))
-        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(tone.color(p).opacity(0.3), lineWidth: 1))
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(tone.color(p).opacity(0.10)))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(tone.color(p).opacity(0.3), lineWidth: 1))
         .accessibilityElement(children: .combine)
     }
 }
@@ -272,8 +245,8 @@ struct ScreenHeader: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(eyebrow).font(.subheadline.weight(.semibold)).foregroundStyle(p.accent)
-            Text(title).font(.largeTitle.weight(.bold)).foregroundStyle(p.text).fixedSize(horizontal: false, vertical: true)
+            Text(eyebrow).font(.subheadline.weight(.semibold)).foregroundStyle(p.muted)
+            Text(title).font(.system(size: 30, weight: .bold)).foregroundStyle(p.text).fixedSize(horizontal: false, vertical: true)
                 .accessibilityAddTraits(.isHeader)
             if let dim {
                 Text(dim).font(.title3).foregroundStyle(p.text2).fixedSize(horizontal: false, vertical: true)
@@ -303,8 +276,8 @@ struct EmptyStateView: View {
         .frame(maxWidth: .infinity)
         .padding(.vertical, 36)
         .padding(.horizontal, 24)
-        .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(p.surface))
-        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(p.border, style: StrokeStyle(lineWidth: 1, dash: [5, 4])))
+        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(p.surface))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(p.borderStrong, style: StrokeStyle(lineWidth: 1, dash: [5, 4])))
         .accessibilityElement(children: .combine)
     }
 }
