@@ -14,9 +14,22 @@ export function CoverageScreen({ go }: { go: (to: string) => void }) {
     <div className="page">
       <SubNav active="coverage" />
       <div className="page-head">
-        <h1>Coverage</h1>
+        <h1>Coverage & recovery</h1>
         <p className="lede">What each device can actually establish. Weaker coverage is labeled, never presented as equivalent protection.</p>
       </div>
+      <Card className="recovery-card">
+        <SectionTitle>Local recovery</SectionTitle>
+        <div className="small">If a change breaks something, recovery happens on the device itself and never needs this controller:</div>
+        <ul className="small">
+          <li>A trial revision reverts on its own unless you confirm it on the device.</li>
+          <li>On Linux, <span className="mono">sudo moatd rollback</span> reinstalls the previous verified revision; on the Mac, use Recovery in the Moat app (owner authentication required).</li>
+          <li>A device that reports <span className="mono">recovery-required</span> or <span className="mono">rollback-pending</span> needs you at the device: Moat keeps the last verified policy in force and does not guess.</li>
+        </ul>
+        <div className="decision-actions">
+          <a className="btn btn-quiet" href="#/diagnostics">Diagnostics</a>
+          <a className="btn btn-quiet" href="#/changed">What changed?</a>
+        </div>
+      </Card>
       <div className="levels">
         {ORDER.map((c) => {
           const n = data.devices.filter((d) => fresh(d).coverage === c);

@@ -7,7 +7,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { inspectIdent } from "./data/ident";
 import { deviceFreshness, evidenceAgeMs, STALE_AFTER_MS } from "./data/freshness";
 import { grantSteps, StoreProvider } from "./data/store";
-import { ApiError, loadLive, mapIncident, makeApi, type Api, type WireIncident } from "./data/api";
+import { ApiError, loadLive, mapApp, mapIncident, makeApi, type Api, type WireIncident } from "./data/api";
 import { DecisionCard, IncidentDetail, allowOnceUnavailable } from "./screens/Activity";
 import { App } from "./App";
 import type { Incident, Snapshot } from "./data/types";
@@ -169,6 +169,7 @@ describe("demo and live are separate", () => {
       "/v1/policy/revisions": [],
       "/v1/sessions": [],
       "/v1/grants": [],
+      "/v1/apps": [],
     };
     const api: Api = { get: async (p) => (p.startsWith("/v1/rollups") ? [] : replies[p]) as never, post: async () => ({}) as never };
     const s = await loadLive(api, () => new Date(T0));
@@ -176,6 +177,15 @@ describe("demo and live are separate", () => {
     expect(s.simulation).toBeNull();
     expect(s.apps).toEqual([]);
     expect(s.serverTime).toBe(T0);
+  });
+  it("live apps are executable identities with evidence counts; unknown identity is never labeled enforced", () => {
+    const known = mapApp({ id: "app-1", name: "curl", family: "curl", exe: "/usr/bin/curl", signer: null, identity: "executable", devices: ["mbp"], sessions: 0, flows: 3, denied: 1, observed: 2, destinations: [{ host: "example.org", port: 443, count: 3, verdict: "deny", firstAt: T0, lastAt: T0, new: true }], lastActive: T0, firstSeen: T0 });
+    expect(known.enforcement).toBe("evidence");
+    expect(known.signing).toBe("no signing identity reported");
+    expect(known.destinations[0]).toEqual({ host: "example.org:443", count: 3, verdict: "deny", firstSeen: true });
+    const unknown = mapApp({ id: "unknown-identity", name: "Identity unknown", family: null, exe: null, signer: null, identity: "unknown", devices: ["mbp"], sessions: 0, flows: 1, denied: 0, observed: 1, destinations: [], lastActive: T0, firstSeen: T0 });
+    expect(unknown.identity).toBe("unknown");
+    expect(unknown.exe).toBe("executable not recorded");
   });
   it("network failures are errors with status 0, not data", async () => {
     const api = makeApi("t", (async () => {

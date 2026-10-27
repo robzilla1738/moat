@@ -2,7 +2,7 @@
  * Live mode: read the Moat controller's API and map it onto the UI model. Nothing here falls back to demo data:
  * anything the controller does not provide stays empty, and every failure is reported as a failure.
  */
-import type { Capability, Coverage, Device, Incident, Platform, Revision, RevisionState, Session, Snapshot, Support } from "./types";
+import type { App, Capability, Coverage, Device, Incident, Platform, Revision, RevisionState, Session, Snapshot, Support } from "./types";
 
 export const TOKEN_KEY = "moat.token";
 
@@ -57,6 +57,7 @@ export interface WireIncident { id: string; revision: number; kind: Incident["ki
 export interface WireRevision { revision: number; created_at: string; approved_by: string; authorized_by: Revision["authorizedBy"]; owner_key_id: string | null; rollback_of: number | null; source_digest: string; message: string | null; grants: string[]; devices: { device_id: string; state: string; at: string; detail: string | null }[]; platforms: { platform: string; report: { omitted?: unknown[]; unavailable_session_profiles?: string[] } | null }[] }
 export interface WireSession { id: string; device_id: string; profile: string; boundary: string; verified: number; state: string; started_at: string; ended_at: string | null; intent: string | null; close_requested_at: string | null }
 export interface WireGrant { id: string; kind: string; device_id: string | null; session_id: string | null; process_instance: string | null; destination: string; transport: string; port: number | null; expires_at: string; created_by: string; state: string }
+export interface WireApp { id: string; name: string; family: string | null; exe: string | null; signer: string | null; identity: "executable" | "unknown"; devices: string[]; sessions: number; flows: number; denied: number; observed: number; destinations: { host: string; port: number | null; count: number; verdict: "allow" | "deny" | "observed"; firstAt: string; lastAt: string; new: boolean }[]; lastActive: string; firstSeen: string }
 export interface WireRollup { hour: string; verdict: string; flows: number }
 export interface WireGrantStatus { id: string; state: "pending" | "active" | "rejected" | "expired" | "revoked"; revision: number | null; authorized_by: string | null; expires_at: string; devices: { device_id: string; state: string; stale: boolean; evidence: { revision: number; state: string; at: string; detail: string | null } | null }[]; server_time: string }
 export interface WireProposal { id: string; broadening: boolean; status: string; base_revision: number | null; rollback_of: number | null; message: string; authorization_subject: string; authorization_digest: string; diff: Record<string, unknown> }
@@ -157,6 +158,25 @@ export function mapSession(s: WireSession): Session {
   return { id: s.id, deviceId: s.device_id, profile: s.profile, boundary: s.boundary === "linux_cgroup" ? "Linux cgroup v2 + nftables" : s.boundary, boundaryKind: s.boundary === "linux_cgroup" ? "linux_cgroup" : "instrumented_only", verified: !!s.verified, state: s.state === "running" ? "running" : "ended", startedAt: s.started_at, endedAt: s.ended_at ?? undefined, closeRequestedAt: s.close_requested_at ?? undefined, launcher: "moat-launch", chain: [], intent: parseIntent(s.intent), allowed: [], blocked: [], grants: [] };
 }
 
+/** Live apps: executable identities from recorded flows. Nothing is labeled "enforced" from a name; counts are evidence. */
+export function mapApp(a: WireApp): App {
+  return {
+    id: a.id,
+    name: a.name,
+    family: a.family ?? "",
+    exe: a.exe ?? "executable not recorded",
+    signing: a.signer ?? (a.identity === "unknown" ? "identity unknown" : "no signing identity reported"),
+    devices: a.devices,
+    profile: "",
+    enforcement: "evidence",
+    identity: a.identity,
+    counts: { flows: a.flows, denied: a.denied, observed: a.observed, sessions: a.sessions },
+    destinations: a.destinations.slice(0, 12).map((d) => ({ host: d.port ? `${d.host}:${d.port}` : d.host, count: d.count, verdict: d.verdict, firstSeen: d.new })),
+    category: a.identity === "unknown" ? "Identity unknown" : a.family ?? "app",
+    lastActive: a.lastActive,
+  };
+}
+
 export function grantScope(g: Pick<WireGrant, "device_id" | "session_id" | "process_instance" | "transport" | "port">): string {
   const who = g.session_id ? `session ${g.session_id}` : g.process_instance ? `app ${g.process_instance}` : "unscoped";
   return `${who}${g.device_id ? ` on ${g.device_id}` : ""} · ${g.transport.toUpperCase()} ${g.port ?? "any"}`;
@@ -164,7 +184,7 @@ export function grantScope(g: Pick<WireGrant, "device_id" | "session_id" | "proc
 
 export async function loadLive(api: Api, now = () => new Date()): Promise<Snapshot> {
   const since = new Date(now().getTime() - 24 * 3600_000).toISOString();
-  const [me, overview, devices, incidents, revisions, sessions, grants, rollups] = await Promise.all([
+  const [me, overview, devices, incidents, revisions, sessions, grants, rollups, apps] = await Promise.all([
     api.get<WireMe>("/v1/me"),
     api.get<WireOverview>("/v1/overview"),
     api.get<WireDevice[]>("/v1/devices"),
@@ -173,6 +193,7 @@ export async function loadLive(api: Api, now = () => new Date()): Promise<Snapsh
     api.get<WireSession[]>("/v1/sessions"),
     api.get<WireGrant[]>("/v1/grants"),
     api.get<WireRollup[]>(`/v1/rollups?since=${encodeURIComponent(since)}`),
+    api.get<WireApp[]>("/v1/apps"),
   ]);
   const hours = new Map<string, { hour: string; allowed: number; blocked: number; observed: number }>();
   for (const r of rollups) {
@@ -194,7 +215,7 @@ export async function loadLive(api: Api, now = () => new Date()): Promise<Snapsh
     incidents: incidents.map(mapIncident),
     revisions: revisions.map(mapRevision),
     sessions: sessions.map(mapSession),
-    apps: [],
+    apps: apps.map(mapApp),
     timeline: [...hours.values()].sort((a, b) => a.hour.localeCompare(b.hour)),
     grants: grants.filter((g) => g.state === "active").map((g) => ({ id: g.id, destination: `${g.destination}${g.port ? `:${g.port}` : ""}`, scope: grantScope(g), expiresAt: g.expires_at, by: g.created_by, state: g.state })),
     simulation: null,

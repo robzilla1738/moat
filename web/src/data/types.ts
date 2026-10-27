@@ -126,7 +126,11 @@ export interface App {
   signing: string;
   devices: string[];
   profile: string;
-  enforcement: "observed" | "enforced" | "session-only";
+  /** "evidence": live data, where enforcement is shown from recorded verdicts, never assumed from a label. */
+  enforcement: "observed" | "enforced" | "session-only" | "evidence";
+  /** Live: executable identity, or "unknown" when the endpoint recorded no executable (never merged into a known app). */
+  identity?: "executable" | "unknown";
+  counts?: { flows: number; denied: number; observed: number; sessions: number };
   destinations: { host: string; count: number; verdict: "allow" | "deny" | "observed"; firstSeen?: boolean }[];
   category: string;
   recognizedBy?: string;
@@ -182,4 +186,37 @@ export interface Snapshot {
   simulation: Simulation | null;
   timeline: TimelinePoint[];
   grants: { id: string; destination: string; scope: string; expiresAt: string; by: string; state?: string }[];
+}
+
+/** GET /v1/apps/:id (controller/src/standalone.ts). */
+export interface AppDetailView {
+  app: { id: string; name: string; family: string | null; exe: string | null; signer: string | null; identity: "executable" | "unknown"; devices: string[]; flows: number; denied: number; observed: number; sessions: number; lastActive: string; firstSeen: string; destinations: { host: string; port: number | null; count: number; verdict: "allow" | "deny" | "observed"; firstAt: string; lastAt: string; new: boolean }[] };
+  policy_revision: number | null;
+  permissions: { rule: string; action: string; layer: string; how: "direct" | "inherited" | "session" | "temporary"; description: string; expiresAt?: string; devices: { device: string; enforced: boolean; note: string | null }[] }[];
+  changes: { revision: number; at: string; by: string; kind: "added" | "removed" | "changed"; rule: string }[];
+  identity_variants: { id: string; exe: string | null; signer: string | null; firstSeen: string }[];
+  activity: { at: string; device: string; destination: string | null; port: number | null; transport: string | null; verdict: "allow" | "deny" | "observed"; rule: string | null; session: string | null; revision: number | null }[];
+  why: { destination: string; port: number | null; recorded: { verdict: string; rule: string | null; revision: number | null; at: string }; now: { verdict?: string; permitted_by_observation?: boolean; profile?: string; winner?: { kind?: string; rule_id?: string; id?: string; profile?: string; default?: string }; notes?: string[] } | null; nowError?: string }[];
+  notes: string[];
+}
+
+/** GET /v1/what-changed. */
+export interface WhatChangedView {
+  working: { from: string; to: string };
+  failing: { from: string; to: string };
+  counts: { working: number; failing: number };
+  observed: { kind: string; title: string; working: string; failing: string }[];
+  candidates: { kind: string; title: string; why: string; test: { label: string; action: string; reversible: true } }[];
+  not_compared: string[];
+  disclaimer: string;
+}
+
+/** GET /v1/diagnostics. */
+export interface DiagnosticsView {
+  generated_at: string;
+  controller: { version: string; control_schema: number; flow_schema: number; policy_revision: number | null; publications: Record<string, number> };
+  devices: { id: string; name: string; platform: string; versions: { os: unknown; endpoint: unknown }; policy: { applied: number | null; latest_state: { revision: number; state: string; at: string } | null; trial: { revision: number; detail: string | null } | null }; health: { reported_coverage: string | null; effective_coverage: string; stale: boolean; note: string | null; evidence_age_s: number | null }; capabilities: { supported: string[]; downgraded: { key: string; support: string; note: string | null }[] }; spool: { acknowledged_seq: number; gaps: [number, number][] } }[];
+  storage: { flow_db_bytes: number; retention: { raw_before: string | null; rollup_before: string | null; trimmed_for_quota: number } };
+  compatibility_tests: { run: unknown[]; note: string };
+  limits: string[];
 }

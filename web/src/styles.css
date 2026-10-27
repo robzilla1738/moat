@@ -2309,3 +2309,30 @@ body {
 .plan-facts dd {
   overflow-wrap: anywhere;
 }
+
+/* ---------------------------------------------------------------- W12 standalone (Apps-first, app detail, diagnostics) */
+.status-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 13px; padding: 8px 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-2); margin-bottom: 14px; }
+.status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; background: currentColor; }
+.status-dot.tone-green { color: var(--green, #22c55e); }
+.status-dot.tone-amber { color: var(--amber, #f59e0b); }
+.app-card { text-align: left; width: 100%; font: inherit; color: inherit; cursor: pointer; }
+.app-avatar-unknown { background: var(--surface-3); color: var(--muted); }
+.perm-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.perm { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 8px; padding: 6px 0; border-top: 1px solid var(--border); }
+.perm:first-child { border-top: 0; }
+.why { display: grid; gap: 3px; padding: 8px 0; border-top: 1px solid var(--border); }
+.why:first-of-type { border-top: 0; }
+.kv { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; margin-bottom: 8px; }
+.kv > span:nth-child(odd) { color: var(--muted); }
+.kv > span { overflow-wrap: anywhere; }
+.form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 12px; }
+.form-grid label { display: grid; gap: 4px; font-size: 12px; color: var(--muted); }
+.form-grid input, .form-grid select { font: inherit; font-size: 14px; color: inherit; background: var(--surface-2); border: 1px solid var(--border-strong); border-radius: 10px; padding: 7px 9px; min-width: 0; }
+.activity-table { display: grid; gap: 2px; }
+.activity-row { display: grid; grid-template-columns: max-content minmax(0, 1fr) max-content; align-items: center; gap: 8px; padding: 5px 0; border-top: 1px solid var(--border); }
+.activity-row:first-child { border-top: 0; }
+.note-amber, .note-red { padding: 8px 12px; border-radius: 10px; margin-bottom: 10px; border: 1px solid var(--border-strong); }
+.note-amber { background: color-mix(in srgb, var(--amber, #f59e0b) 12%, transparent); }
+.note-red { background: color-mix(in srgb, var(--red, #ef4444) 12%, transparent); }
+.tone-text-amber { color: var(--amber, #b45309); flex-basis: 100%; }
+@media (max-width: 560px) { .activity-row { grid-template-columns: max-content minmax(0, 1fr); } .activity-row > :last-child { grid-column: 2; } }
