@@ -1,0 +1,25 @@
+{
+  "schema": "moat.receipt.v1",
+  "receipt_id": "rcpt-arch-desk-78",
+  "device_id": "arch-desk",
+  "boot_id": "6f1c2a8e-boot",
+  "sequence": 78,
+  "producer": "moatd",
+  "observed_at": "2026-10-27T15:30:00Z",
+  "monotonic_ms": 5400000,
+  "clock": {
+    "source": "synchronized",
+    "uncertainty_ms": 250
+  },
+  "activation": {
+    "phase": "confirmed",
+    "active": {
+      "revision": 12,
+      "effective_digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    "replay_high_water": 12,
+    "capability_generation": 3,
+    "durability": "durable"
+  },
+  "health_label": "healthy"
+}

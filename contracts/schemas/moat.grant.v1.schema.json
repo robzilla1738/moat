@@ -1,0 +1,198 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/robzilla1738/moat/contracts/schemas/moat.grant.v1.schema.json",
+  "title": "moat.grant.v1",
+  "description": "A temporary permission as a precise object. Scope kind fixes which identity fields are required: app_on_device needs executable and forbids boot/process/task; process_instance needs boot_id+process; task needs boot_id+task_id. Window at most 86400 s.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "admission_until",
+    "approval_digest",
+    "base_policy_digest",
+    "destination",
+    "grant_id",
+    "idempotency_key",
+    "issued_at",
+    "issuer",
+    "not_before",
+    "port",
+    "schema",
+    "scope",
+    "stream_policy",
+    "transport"
+  ],
+  "properties": {
+    "schema": {
+      "const": "moat.grant.v1"
+    },
+    "grant_id": {
+      "type": "string",
+      "description": "[A-Za-z0-9-_.:@/]{1,128}"
+    },
+    "idempotency_key": {
+      "type": "string",
+      "description": "[A-Za-z0-9-_.:@/]{1,128}"
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "device_id",
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "app_on_device",
+            "process_instance",
+            "task"
+          ]
+        },
+        "device_id": {
+          "type": "string",
+          "description": "[A-Za-z0-9-_.:@/]{1,128}"
+        },
+        "boot_id": {
+          "type": "string",
+          "description": "[A-Za-z0-9-_.:@/]{1,128}"
+        },
+        "process": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "pid",
+            "start_generation"
+          ],
+          "properties": {
+            "pid": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "start_generation": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          }
+        },
+        "task_id": {
+          "type": "string",
+          "description": "[A-Za-z0-9-_.:@/]{1,128}"
+        },
+        "executable": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [],
+          "properties": {
+            "team_id": {
+              "type": "string"
+            },
+            "signing_id": {
+              "type": "string"
+            },
+            "bundle_id": {
+              "type": "string"
+            },
+            "digest": {
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "destination": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "address",
+            "hostname"
+          ]
+        },
+        "address": {
+          "type": "string"
+        },
+        "hostname": {
+          "type": "string"
+        }
+      }
+    },
+    "transport": {
+      "type": "string",
+      "enum": [
+        "tcp",
+        "udp"
+      ]
+    },
+    "port": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "issued_at": {
+      "type": "string",
+      "description": "canonical UTC timestamp YYYY-MM-DDTHH:MM:SSZ"
+    },
+    "not_before": {
+      "type": "string",
+      "description": "canonical UTC timestamp YYYY-MM-DDTHH:MM:SSZ"
+    },
+    "admission_until": {
+      "type": "string",
+      "description": "canonical UTC timestamp YYYY-MM-DDTHH:MM:SSZ"
+    },
+    "stream_policy": {
+      "type": "string",
+      "enum": [
+        "admission_only",
+        "terminate_at_deadline"
+      ]
+    },
+    "base_policy_digest": {
+      "type": "string",
+      "description": "sha256: + 64 lowercase hex"
+    },
+    "issuer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "principal",
+        "role"
+      ],
+      "properties": {
+        "principal": {
+          "type": "string",
+          "description": "[A-Za-z0-9-_.:@/]{1,128}"
+        },
+        "role": {
+          "type": "string",
+          "enum": [
+            "owner",
+            "delegated"
+          ]
+        },
+        "key_id": {
+          "type": "string",
+          "description": "[A-Za-z0-9-_.:@/]{1,128}"
+        }
+      }
+    },
+    "approval_digest": {
+      "type": "string",
+      "description": "sha256: + 64 lowercase hex"
+    },
+    "reason": {
+      "type": "string"
+    }
+  }
+}

@@ -1,0 +1,290 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/robzilla1738/moat/contracts/schemas/moat.event.v1.schema.json",
+  "title": "moat.event.v1",
+  "description": "Event envelope and evidence vocabulary. The producer's authority must permit what the event asserts (e.g. only independent_observer may assert independently_checked).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "authority",
+    "boot_id",
+    "clock_uncertainty_ms",
+    "device_id",
+    "event_id",
+    "event_time",
+    "kind",
+    "producer",
+    "schema",
+    "sequence"
+  ],
+  "properties": {
+    "schema": {
+      "const": "moat.event.v1"
+    },
+    "event_id": {
+      "type": "string",
+      "description": "[A-Za-z0-9-_.:@/]{1,128}"
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "lifecycle",
+        "flow_decision",
+        "gap",
+        "restart",
+        "coverage_change",
+        "task_lifecycle"
+      ]
+    },
+    "producer": {
+      "type": "string",
+      "description": "[A-Za-z0-9-_.:@/]{1,128}"
+    },
+    "authority": {
+      "type": "string",
+      "enum": [
+        "runtime_self_report",
+        "launcher",
+        "endpoint_enforcer",
+        "independent_observer",
+        "dns_resolver"
+      ]
+    },
+    "device_id": {
+      "type": "string",
+      "description": "[A-Za-z0-9-_.:@/]{1,128}"
+    },
+    "boot_id": {
+      "type": "string",
+      "description": "[A-Za-z0-9-_.:@/]{1,128}"
+    },
+    "sequence": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "event_time": {
+      "type": "string",
+      "description": "canonical UTC timestamp YYYY-MM-DDTHH:MM:SSZ"
+    },
+    "ingest_time": {
+      "type": "string",
+      "description": "canonical UTC timestamp YYYY-MM-DDTHH:MM:SSZ"
+    },
+    "clock_uncertainty_ms": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "stage": {
+      "type": "string",
+      "enum": [
+        "requested",
+        "authorized",
+        "compiled",
+        "delivered",
+        "received",
+        "activated",
+        "independently_checked"
+      ]
+    },
+    "subject": {
+      "$ref": "moat.subject.v1.schema.json"
+    },
+    "subject_confidence": {
+      "type": "string",
+      "enum": [
+        "low",
+        "medium",
+        "high"
+      ]
+    },
+    "destination": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "transport"
+      ],
+      "properties": {
+        "address": {
+          "type": "string"
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "transport": {
+          "type": "string",
+          "enum": [
+            "tcp",
+            "udp",
+            "other"
+          ]
+        },
+        "hostname": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "confidence",
+            "name",
+            "source"
+          ],
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "source": {
+              "type": "string",
+              "enum": [
+                "flow_api",
+                "connect_proxy",
+                "sni",
+                "http_host",
+                "dns_answer",
+                "inferred"
+              ]
+            },
+            "confidence": {
+              "type": "string",
+              "enum": [
+                "low",
+                "medium",
+                "high"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "generations": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {
+        "policy_revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "effective_digest": {
+          "type": "string",
+          "description": "sha256: + 64 lowercase hex"
+        },
+        "trust_generation": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "capability_generation": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      }
+    },
+    "decision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "verdict",
+        "winner"
+      ],
+      "properties": {
+        "verdict": {
+          "type": "string",
+          "enum": [
+            "allow",
+            "deny",
+            "observe"
+          ]
+        },
+        "winner": {
+          "type": "string"
+        },
+        "overridden": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "measurements": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "scope",
+          "source",
+          "unit",
+          "value"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "value": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "unit": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "flow",
+              "rule_counter",
+              "conversation_window",
+              "task"
+            ]
+          },
+          "source": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "gap": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scope"
+      ],
+      "properties": {
+        "scope": {
+          "type": "string"
+        },
+        "count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "from_sequence": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "to_sequence": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      }
+    },
+    "coverage": {
+      "type": "string"
+    },
+    "parent_event_id": {
+      "type": "string",
+      "description": "[A-Za-z0-9-_.:@/]{1,128}"
+    },
+    "ext": {
+      "type": "object"
+    }
+  }
+}

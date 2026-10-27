@@ -18,6 +18,7 @@
 pub mod authority;
 pub mod capability;
 pub mod compile;
+pub mod contracts;
 pub mod coverage;
 pub mod diff;
 pub mod enrichment;

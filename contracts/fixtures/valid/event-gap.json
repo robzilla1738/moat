@@ -1,0 +1,18 @@
+{
+  "schema": "moat.event.v1",
+  "event_id": "ev-arch-desk-902",
+  "kind": "gap",
+  "producer": "moatd",
+  "authority": "endpoint_enforcer",
+  "device_id": "arch-desk",
+  "boot_id": "6f1c2a8e-boot",
+  "sequence": 902,
+  "event_time": "2026-10-27T15:00:05Z",
+  "clock_uncertainty_ms": 250,
+  "gap": {
+    "scope": "quota_pruned",
+    "count": 120,
+    "from_sequence": 100,
+    "to_sequence": 219
+  }
+}

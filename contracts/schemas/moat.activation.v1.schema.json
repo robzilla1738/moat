@@ -1,0 +1,158 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/robzilla1738/moat/contracts/schemas/moat.activation.v1.schema.json",
+  "title": "moat.activation.v1",
+  "description": "Endpoint activation state. replay_high_water is independent of active and never trails an accepted revision; trial needs trial_deadline and rollback_target; rollback_required keeps rollback_target.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "boot_id",
+    "device_id",
+    "durability",
+    "phase",
+    "replay_high_water",
+    "schema"
+  ],
+  "properties": {
+    "schema": {
+      "const": "moat.activation.v1"
+    },
+    "device_id": {
+      "type": "string",
+      "description": "[A-Za-z0-9-_.:@/]{1,128}"
+    },
+    "boot_id": {
+      "type": "string",
+      "description": "[A-Za-z0-9-_.:@/]{1,128}"
+    },
+    "phase": {
+      "type": "string",
+      "enum": [
+        "none",
+        "prepared",
+        "applying",
+        "trial",
+        "confirmed",
+        "rollback_required",
+        "restored",
+        "recovery_required",
+        "rejected"
+      ]
+    },
+    "desired": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "effective_digest",
+        "revision"
+      ],
+      "properties": {
+        "revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "effective_digest": {
+          "type": "string",
+          "description": "sha256: + 64 lowercase hex"
+        }
+      }
+    },
+    "received": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "effective_digest",
+        "revision"
+      ],
+      "properties": {
+        "revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "effective_digest": {
+          "type": "string",
+          "description": "sha256: + 64 lowercase hex"
+        }
+      }
+    },
+    "verified_candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "effective_digest",
+        "revision"
+      ],
+      "properties": {
+        "revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "effective_digest": {
+          "type": "string",
+          "description": "sha256: + 64 lowercase hex"
+        }
+      }
+    },
+    "active": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "effective_digest",
+        "revision"
+      ],
+      "properties": {
+        "revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "effective_digest": {
+          "type": "string",
+          "description": "sha256: + 64 lowercase hex"
+        }
+      }
+    },
+    "trial_deadline": {
+      "type": "string",
+      "description": "canonical UTC timestamp YYYY-MM-DDTHH:MM:SSZ"
+    },
+    "rollback_target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "effective_digest",
+        "revision"
+      ],
+      "properties": {
+        "revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "effective_digest": {
+          "type": "string",
+          "description": "sha256: + 64 lowercase hex"
+        }
+      }
+    },
+    "replay_high_water": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "durability": {
+      "type": "string",
+      "enum": [
+        "durable",
+        "not_durable",
+        "uncertain"
+      ]
+    },
+    "detail": {
+      "type": "string"
+    }
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "schema": "moat.event.v1",
+  "event_id": "canary-mini-31",
+  "kind": "lifecycle",
+  "stage": "activated",
+  "producer": "canary-receiver",
+  "authority": "runtime_self_report",
+  "device_id": "arch-desk",
+  "boot_id": "6f1c2a8e-boot",
+  "sequence": 31,
+  "event_time": "2026-10-27T15:01:00Z",
+  "clock_uncertainty_ms": 1000,
+  "generations": {
+    "policy_revision": 12
+  },
+  "parent_event_id": "ev-arch-desk-880"
+}

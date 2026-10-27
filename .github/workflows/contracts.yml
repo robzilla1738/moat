@@ -1,0 +1,27 @@
+name: contracts
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  fixtures:
+    name: shared fixtures (JavaScript consumer + Rust reference)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: JavaScript consumer (no Rust, no dependencies)
+        run: node --test contracts/test/fixtures.test.mjs
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Rust reference
+        run: cargo test -p moat-core --test contracts --test claim_ledger
+      - name: moatctl contract on every valid fixture
+        run: |
+          cargo build -q -p moatctl
+          for f in contracts/fixtures/valid/*.json; do ./target/debug/moatctl contract "$f" > /dev/null; done
+          for f in contracts/fixtures/invalid/*.json; do if ./target/debug/moatctl contract "$f" > /dev/null 2>&1; then echo "accepted $f"; exit 1; fi; done

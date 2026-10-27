@@ -1,0 +1,65 @@
+{
+  "schema": "moat.capability_dispositions.v1",
+  "device_id": "arch-desk",
+  "backend": "moatd-nftables",
+  "backend_version": "0.1.0",
+  "capability_generation": 3,
+  "cells": [
+    {
+      "capability": "session_enforcement",
+      "mode": "direct",
+      "subject": "task",
+      "destination_evidence": "ip",
+      "transport": "any",
+      "lifecycle": "admit_new",
+      "disposition": "implemented_unproven",
+      "note": "CI runner kernel only"
+    },
+    {
+      "capability": "session_hostname_proxy",
+      "mode": "session_proxy",
+      "subject": "task",
+      "destination_evidence": "proxy_hostname",
+      "transport": "tcp",
+      "lifecycle": "admit_new",
+      "disposition": "implemented_unproven"
+    },
+    {
+      "capability": "app_enforcement",
+      "mode": "direct",
+      "subject": "app_on_device",
+      "destination_evidence": "ip",
+      "transport": "any",
+      "lifecycle": "admit_new",
+      "disposition": "unsupported_rejected"
+    }
+  ],
+  "policy_digest": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+  "items": [
+    {
+      "item": "profile:coding-session",
+      "restrictive": true,
+      "disposition": "implemented_unproven"
+    },
+    {
+      "item": "rule:allow-github-app",
+      "restrictive": false,
+      "disposition": "omitted_accepted",
+      "omission": "stricter",
+      "missing": [
+        "app_enforcement"
+      ],
+      "note": "omitting an allow is stricter"
+    },
+    {
+      "item": "rule:deny-telemetry-app",
+      "restrictive": true,
+      "disposition": "omitted_accepted",
+      "missing": [
+        "app_enforcement",
+        "hostname_enforcement"
+      ],
+      "omission": "stricter"
+    }
+  ]
+}

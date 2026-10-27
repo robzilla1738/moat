@@ -1,0 +1,36 @@
+{
+  "schema": "moat.grant.v1",
+  "grant_id": "grant-01hx",
+  "idempotency_key": "incident-42:allow-once",
+  "scope": {
+    "kind": "app_on_device",
+    "device_id": "mbp-m1",
+    "executable": {
+      "path": "/Applications/Claude.app/Contents/MacOS/claude",
+      "team_id": "Q6L2SF6YDW",
+      "signing_id": "com.anthropic.claude"
+    },
+    "process": {
+      "pid": 1,
+      "start_generation": 2
+    }
+  },
+  "destination": {
+    "kind": "hostname",
+    "hostname": "api.example.com"
+  },
+  "transport": "tcp",
+  "port": 443,
+  "issued_at": "2026-10-27T15:00:00Z",
+  "not_before": "2026-10-27T15:00:00Z",
+  "admission_until": "2026-10-27T15:10:00Z",
+  "stream_policy": "admission_only",
+  "base_policy_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+  "issuer": {
+    "principal": "owner:robert",
+    "role": "owner",
+    "key_id": "a1b2c3d4e5f60718"
+  },
+  "approval_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+  "reason": "Allow once for incident 42"
+}

@@ -1,0 +1,285 @@
+{
+  "fixtures": [
+    {
+      "canonical_sha256": "sha256:4a8c3c0e3bb2ea2445f1c9d635a3f5385c06d24d4ee6b402af5d67e68749e665",
+      "expect": "accept",
+      "file": "valid/subject-process.json",
+      "schema": "moat.subject.v1"
+    },
+    {
+      "canonical_sha256": "sha256:404d731df1f715c01cc7af33f1b6206dcebb1c1d9a033b7df7ce1bc4646c53d5",
+      "expect": "accept",
+      "file": "valid/grant-app-on-device.json",
+      "schema": "moat.grant.v1"
+    },
+    {
+      "canonical_sha256": "sha256:10846a53cea4f5a74bd6172a5e946805b9df89c2605a8b14bb8d73837e613b69",
+      "expect": "accept",
+      "file": "valid/grant-app-on-device-second-device.json",
+      "schema": "moat.grant.v1"
+    },
+    {
+      "canonical_sha256": "sha256:77578b541d5b35f41cd4ad7187078d7a0a3d56d1ca1fa833b859e5ebe48f8d74",
+      "expect": "accept",
+      "file": "valid/grant-process-instance.json",
+      "schema": "moat.grant.v1"
+    },
+    {
+      "canonical_sha256": "sha256:6e206479b927a60c0e31f5a9374c913eb2adde7f7785ebdb932f9e8a26b4db20",
+      "expect": "accept",
+      "file": "valid/grant-task.json",
+      "schema": "moat.grant.v1"
+    },
+    {
+      "canonical_sha256": "sha256:d8522f6136e2b8399ec7718208dd4f4e166afad60090a68c13bce507b6c64368",
+      "expect": "accept",
+      "file": "valid/dispositions-linux.json",
+      "schema": "moat.capability_dispositions.v1"
+    },
+    {
+      "canonical_sha256": "sha256:19d8fc038f658fdbb08615bae84f7c4a2631d32a3b1c32876503d6bf14c0e1f9",
+      "expect": "accept",
+      "file": "valid/dispositions-macos-session-rules.json",
+      "schema": "moat.capability_dispositions.v1"
+    },
+    {
+      "canonical_sha256": "sha256:e8fb66aa8b9722ee3caa66b113673214c5087bb79a93bad29b3a71c09b96c143",
+      "expect": "accept",
+      "file": "valid/activation-trial.json",
+      "schema": "moat.activation.v1"
+    },
+    {
+      "canonical_sha256": "sha256:a04f398e98915c03b783aad66db2add118b37b547ba0f77210b605d825cc6b07",
+      "expect": "accept",
+      "file": "valid/activation-rollback-required.json",
+      "schema": "moat.activation.v1"
+    },
+    {
+      "canonical_sha256": "sha256:9d3dd9807a4cbd9f67d202567e06e33f9256ac4c3e44c12d683d982636817669",
+      "expect": "accept",
+      "file": "valid/activation-restored-high-water-kept.json",
+      "schema": "moat.activation.v1"
+    },
+    {
+      "canonical_sha256": "sha256:fa6b9a2ecbded10028fc8ebb59d8fef729d6bb005bd665c5e4954b306cb7fc2a",
+      "expect": "accept",
+      "file": "valid/receipt-current.json",
+      "freshness": {
+        "expect": "fresh",
+        "max_age_seconds": 300,
+        "now": "2026-10-27T15:01:00Z"
+      },
+      "schema": "moat.receipt.v1"
+    },
+    {
+      "canonical_sha256": "sha256:24ab5157efd40b24f9f97a4af907cfdfc859038b4020ff4add3b30d6bae1c8a1",
+      "expect": "accept",
+      "file": "valid/receipt-old-labeled-healthy.json",
+      "freshness": {
+        "expect": "stale",
+        "max_age_seconds": 300,
+        "now": "2026-10-27T15:01:00Z"
+      },
+      "schema": "moat.receipt.v1"
+    },
+    {
+      "canonical_sha256": "sha256:0ddecd5a42964394a9256d49bcae2f252c865e81807e53da1119a9b48465596e",
+      "expect": "accept",
+      "file": "valid/receipt-future-clock.json",
+      "freshness": {
+        "expect": "unknown",
+        "max_age_seconds": 300,
+        "now": "2026-10-27T15:01:00Z"
+      },
+      "schema": "moat.receipt.v1"
+    },
+    {
+      "canonical_sha256": "sha256:b957edd7bdfc183e9df63782dd41c9f968d0607261633102723224bb699d1261",
+      "expect": "accept",
+      "file": "valid/event-flow-decision.json",
+      "schema": "moat.event.v1"
+    },
+    {
+      "canonical_sha256": "sha256:b6b7d07aae357a5beac40e4397ffc74a634f18adbfc3d1c1f3a0aa33bba50b7f",
+      "expect": "accept",
+      "file": "valid/event-gap.json",
+      "schema": "moat.event.v1"
+    },
+    {
+      "canonical_sha256": "sha256:411076eceaaaa89b642947151e010e0adce5ca69f821a5a4bb0d224fe9d46bea",
+      "expect": "accept",
+      "file": "valid/event-independently-checked.json",
+      "schema": "moat.event.v1"
+    },
+    {
+      "expect": "reject",
+      "file": "invalid/dispositions-omitted-without-reason.json",
+      "layer": "semantic",
+      "reason": "omission reason required",
+      "schema": "moat.capability_dispositions.v1"
+    },
+    {
+      "expect": "reject",
+      "file": "invalid/grant-missing-device.json",
+      "layer": "schema",
+      "reason": "missing mandatory scope",
+      "schema": "moat.grant.v1"
+    },
+    {
+      "expect": "reject",
+      "file": "invalid/grant-process-without-boot.json",
+      "layer": "semantic",
+      "reason": "process scope needs boot_id",
+      "schema": "moat.grant.v1"
+    },
+    {
+      "expect": "reject",
+      "file": "invalid/grant-app-scope-with-process.json",
+      "layer": "semantic",
+      "reason": "app_on_device forbids process",
+      "schema": "moat.grant.v1"
+    },
+    {
+      "expect": "reject",
+      "file": "invalid/grant-app-scope-without-executable.json",
+      "layer": "semantic",
+      "reason": "app_on_device needs executable",
+      "schema": "moat.grant.v1"
+    },
+    {
+      "expect": "reject",
+      "file": "invalid/grant-unknown-field.json",
+      "layer": "schema",
+      "reason": "unknown field",
+      "schema": "moat.grant.v1"
+    },
+    {
+      "expect": "reject",
+      "file": "invalid/grant-unknown-version.json",
+      "layer": "schema",
+      "reason": "unknown schema version",
+      "schema": "moat.grant.v1"
+    },
+    {
+      "expect": "reject",
+      "file": "invalid/grant-noncanonical-time.json",
+      "layer": "semantic",
+      "reason": "non-canonical timestamp",
+      "schema": "moat.grant.v1"
+    },
+    {
+      "expect": "reject",
+      "file": "invalid/grant-window-too-long.json",
+      "layer": "semantic",
+      "reason": "window over 24h",
+      "schema": "moat.grant.v1"
+    },
+    {
+      "expect": "reject",
+      "file": "invalid/grant-wildcard-host.json",
+      "layer": "semantic",
+      "reason": "wildcard host",
+      "schema": "moat.grant.v1"
+    },
+    {
+      "expect": "reject",
+      "file": "invalid/grant-noncanonical-address.json",
+      "layer": "semantic",
+      "reason": "non-canonical address",
+      "schema": "moat.grant.v1"
+    },
+    {
+      "expect": "reject",
+      "file": "invalid/grant-float-port.json",
+      "layer": "schema",
+      "reason": "float",
+      "schema": "moat.grant.v1"
+    },
+    {
+      "expect": "reject",
+      "file": "invalid/grant-null-reason.json",
+      "layer": "schema",
+      "reason": "null",
+      "schema": "moat.grant.v1"
+    },
+    {
+      "expect": "reject",
+      "file": "invalid/dispositions-omitted-restrictive.json",
+      "layer": "semantic",
+      "reason": "restrictive item omitted",
+      "schema": "moat.capability_dispositions.v1"
+    },
+    {
+      "expect": "reject",
+      "file": "invalid/dispositions-supported-without-evidence.json",
+      "layer": "semantic",
+      "reason": "supported without evidence",
+      "schema": "moat.capability_dispositions.v1"
+    },
+    {
+      "expect": "reject",
+      "file": "invalid/dispositions-unknown-disposition.json",
+      "layer": "schema",
+      "reason": "unknown disposition value",
+      "schema": "moat.capability_dispositions.v1"
+    },
+    {
+      "expect": "reject",
+      "file": "invalid/activation-trial-without-rollback-target.json",
+      "layer": "semantic",
+      "reason": "first canary needs a fallback",
+      "schema": "moat.activation.v1"
+    },
+    {
+      "expect": "reject",
+      "file": "invalid/activation-high-water-lowered.json",
+      "layer": "semantic",
+      "reason": "high-water below accepted revision",
+      "schema": "moat.activation.v1"
+    },
+    {
+      "expect": "reject",
+      "file": "invalid/activation-rollback-without-target.json",
+      "layer": "semantic",
+      "reason": "rollback intent lost",
+      "schema": "moat.activation.v1"
+    },
+    {
+      "expect": "reject",
+      "file": "invalid/receipt-applied-phase.json",
+      "layer": "schema",
+      "reason": "no 'applied' phase; activation commit states only",
+      "schema": "moat.receipt.v1"
+    },
+    {
+      "expect": "reject",
+      "file": "invalid/receipt-missing-observed-at.json",
+      "layer": "schema",
+      "reason": "observation time required",
+      "schema": "moat.receipt.v1"
+    },
+    {
+      "expect": "reject",
+      "file": "invalid/event-enforcer-self-verifies.json",
+      "layer": "semantic",
+      "reason": "endpoint cannot independently check itself",
+      "schema": "moat.event.v1"
+    },
+    {
+      "expect": "reject",
+      "file": "invalid/event-agent-claims-activation.json",
+      "layer": "semantic",
+      "reason": "agent cannot assert activation",
+      "schema": "moat.event.v1"
+    },
+    {
+      "expect": "reject",
+      "file": "invalid/event-flow-without-decision.json",
+      "layer": "semantic",
+      "reason": "flow decision needs decision",
+      "schema": "moat.event.v1"
+    }
+  ],
+  "note": "Every implementation must accept each valid fixture, re-serialize it canonically and produce canonical_sha256 exactly; and must reject each invalid fixture. layer=schema rejects are caught by the JSON schema alone; layer=semantic rejects need the semantic checks in contracts/README.md.",
+  "schema": "moat.contract_fixtures.v1"
+}
