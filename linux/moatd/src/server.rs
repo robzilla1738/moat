@@ -11,8 +11,9 @@ use std::time::Duration;
 
 use chrono::Utc;
 
+use crate::caller::{self, Caller, SessionCgroupRef};
 use crate::cgroup::start_generation;
-use crate::control::{peer, recv_request, send, Reply, Request};
+use crate::control::{pass_credentials, peer, recv_request, send, Reply, Request};
 use crate::endpoint::{Endpoint, SessionInfo};
 use crate::launch::{spawn, BrokerIsolation, LaunchSpec};
 use crate::nft::NftBackend;
@@ -42,6 +43,7 @@ pub fn serve<B: NftBackend + Send + 'static>(ep: Endpoint<B>, socket: PathBuf, t
     }
     let _ = fs::remove_file(&socket);
     let l = UnixListener::bind(&socket)?;
+    pass_credentials(&l)?;
     // Any local user may ask for a session that restricts *themselves*.
     fs::set_permissions(&socket, fs::Permissions::from_mode(0o666))?;
     {
@@ -64,9 +66,25 @@ pub fn serve<B: NftBackend + Send + 'static>(ep: Endpoint<B>, socket: PathBuf, t
     Ok(())
 }
 
+/// Who is calling, from kernel facts only (connect-time peer + request sender). See `caller`.
+fn caller_of<B: NftBackend + Send + 'static>(ep: &Endpoint<B>, connect_pid: i32, sender_pid: Option<i32>) -> Caller {
+    let root = ep.cgroups.root_name.clone();
+    let sessions: Vec<SessionCgroupRef> = ep
+        .sessions
+        .values()
+        .map(|(i, _)| SessionCgroupRef { id: i.id.clone(), profile: i.profile.clone(), rel: i.cgroup.clone() })
+        .collect();
+    let c = caller::inspect(connect_pid, &root, &sessions);
+    let snd = sender_pid.map(|p| if p == connect_pid { c.clone() } else { caller::inspect(p, &root, &sessions) });
+    caller::combine(c, snd)
+}
+
 fn handle<B: NftBackend + Send + 'static>(ep: Arc<Mutex<Endpoint<B>>>, s: UnixStream) {
+    // Make sure credentials are attached to whatever arrives from now on (accepted sockets normally inherit the
+    // listener's SO_PASSCRED; this is belt and braces). Requests that arrive without them are refused below.
+    let _ = pass_credentials(&s);
     let Ok(p) = peer(&s) else { return };
-    let (req, fds) = match recv_request(&s) {
+    let (req, fds, sender) = match recv_request(&s) {
         Ok(x) => x,
         Err(e) => {
             let _ = send(&s, &Reply::Error { message: e.to_string() }, &[]);
@@ -84,6 +102,11 @@ fn handle<B: NftBackend + Send + 'static>(ep: Arc<Mutex<Endpoint<B>>>, s: UnixSt
         }
         Request::Close { session_id } => {
             let mut e = ep.lock().unwrap();
+            let who = caller_of(&e, p.pid, sender.map(|x| x.pid));
+            if let Err(reason) = caller::decide_close(&who, &session_id) {
+                let _ = send(&s, &Reply::Refused { reason }, &[]);
+                return;
+            }
             let owner = e.sessions.get(&session_id).map(|(i, _)| i.uid);
             match owner {
                 Some(u) if u == p.uid || p.uid == 0 => {
@@ -99,6 +122,26 @@ fn handle<B: NftBackend + Send + 'static>(ep: Arc<Mutex<Endpoint<B>>>, s: UnixSt
             }
         }
         Request::Launch { profile, argv, cwd, env, isolate_brokers, controlling_tty } => {
+            // W04: a contained caller can never obtain a less restricted session through this socket.
+            let decision = {
+                let mut e = ep.lock().unwrap();
+                if sender.is_some_and(|x| x.uid != p.uid) {
+                    let reason = "the request was sent by a different user than the one that connected".to_string();
+                    e.refuse(&profile, p.uid, &reason);
+                    let _ = send(&s, &Reply::Refused { reason }, &[]);
+                    return;
+                }
+                let who = caller_of(&e, p.pid, sender.map(|x| x.pid));
+                match caller::decide_launch(&who, &profile) {
+                    Ok(d) => d,
+                    Err(reason) => {
+                        e.refuse(&profile, p.uid, &reason);
+                        let _ = send(&s, &Reply::Refused { reason }, &[]);
+                        return;
+                    }
+                }
+            };
+            let isolate_brokers = isolate_brokers || decision.force_isolation;
             launch(ep, s, p, profile, argv, cwd, env, isolate_brokers, controlling_tty, fds)
         }
     }

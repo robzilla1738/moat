@@ -124,6 +124,39 @@ sleep 0.5
 grep -q ordinary-udp "$UDPLOG" && ok "ordinary UDP delivered (observed)" || bad "ordinary UDP delivered"
 grep -q session-udp "$UDPLOG" && bad "session UDP datagram must not arrive" || ok "session UDP datagram did not arrive"
 
+# --- W04: a contained caller cannot obtain a looser session through the control socket ----------------------------
+mkdir -p "$WORK/o"; chmod 777 "$WORK/o"
+mk nested_broader "MOAT_QUIET=1 $BIN/moat-launch --socket $SOCK --profile lab-allow -- bash $WORK/s/tcp4_8080.sh; [ \$? -eq 126 ] && exit 7; exit 0"
+mk nested_same "MOAT_QUIET=1 $BIN/moat-launch --socket $SOCK --profile lab-allow -- bash $WORK/s/tcp4_8080.sh"
+cat > "$WORK/s/raw_launch.py" <<PY
+import json, socket, sys
+fd = int(sys.argv[1]) if len(sys.argv) > 1 else -1
+if fd >= 0:
+    s = socket.socket(fileno=fd)
+else:
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM); s.connect("$SOCK")
+s.sendall((json.dumps({"op": "launch", "profile": "lab-allow", "argv": ["/bin/true"], "cwd": "/", "isolate_brokers": False}) + "\n").encode())
+reply = s.recv(65536).decode()
+print(reply)
+sys.exit(7 if '"refused"' in reply else 0)
+PY
+chmod 644 "$WORK/s/raw_launch.py"
+mk raw_from_inside "python3 $WORK/s/raw_launch.py"
+mk preopened_inside "python3 $WORK/s/raw_launch.py 0"
+cat > "$WORK/s/preopen.py" <<PY
+import socket, subprocess, sys
+s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM); s.connect("$SOCK")
+# the connection is opened OUTSIDE any session, then handed to a lab-deny workload as its stdin
+r = subprocess.run(["$BIN/moat-launch", "--socket", "$SOCK", "--profile", "lab-deny", "--no-pty", "--", "bash", "$WORK/s/preopened_inside.sh"], stdin=s.fileno(), env={"MOAT_QUIET": "1", "PATH": "/usr/bin:/bin"})
+sys.exit(r.returncode)
+PY
+chmod 644 "$WORK/s/preopen.py"
+expect "W04: lab-deny workload cannot launch a lab-allow session via moat-launch" blocked "$(launch lab-deny nested_broader)"
+expect "W04: nested launch with the same profile is allowed (and keeps that profile)" 0 "$(launch lab-allow nested_same)"
+expect "W04: raw control-socket request from inside lab-deny refused" blocked "$(launch lab-deny raw_from_inside)"
+P=$(as_nobody "python3 $WORK/s/preopen.py" >/dev/null 2>&1 && echo 0 || echo $?)
+expect "W04: pre-opened outside connection used from inside lab-deny refused" 7 "$P"
+grep -q 'cannot start a session with another profile' "$WORK/moatd.log" "$S"/spool* 2>/dev/null || true
 # --- replay and malformed policy --------------------------------------------------------------------------------
 "$BIN/moatd" --state "$S" apply "$WORK/signed1.json" >/dev/null
 wait_for '.last_rejection != null and (.last_rejection | test("replay|revision"))' && ok "replayed revision rejected" || bad "replayed revision rejected"
