@@ -20,8 +20,10 @@ final class ScreenshotTests: XCTestCase {
     }
 
     func render<V: View>(_ view: V, _ scheme: ColorScheme, width: CGFloat, height: CGFloat, name: String) throws {
+        // The window's RootView supplies the palette; a bare render must too, or light renders draw dark cards.
         let framed = view
             .environment(\.colorScheme, scheme)
+            .environment(\.palette, Palette.of(scheme))
             .frame(width: width, height: height, alignment: .topLeading)
             .background(scheme == .dark ? Color.black : Color.white)
         let r = ImageRenderer(content: framed)
