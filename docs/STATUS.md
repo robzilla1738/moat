@@ -12,8 +12,8 @@ Every roadmap item, tracked honestly. Updated with each batch; the commit histor
 CI workflows: `rust` (fmt, clippy, tests, conformance), `linux-endpoint` (privileged cgroup tests + netns
 enforcement on a real kernel), `controller` (TypeScript against the Rust `moatctl`), `web` (typecheck, tests, demo
 build, screenshots with overflow/clipping/WCAG AA contrast checks via axe-core, Pages deploy when enabled), `macos`
-(MoatKit build + tests on macOS 26 with Xcode 26; unsigned `xcodebuild` of the app + system extension; real window
-screenshots captured in demo mode).
+(MoatKit build + 44 XCTest tests on macOS 26 with Xcode 26; unsigned `xcodebuild` of the app + system extension; real
+window screenshots captured in demo mode).
 
 ## Product contract and documents
 
@@ -75,8 +75,8 @@ screenshots captured in demo mode).
 
 | Item | Status | Notes |
 | --- | --- | --- |
-| SwiftUI app redesigned in Liquid Glass (macOS 26): NavigationSplitView glass sidebar, glass toolbar, `glassEffect` / `GlassEffectContainer` / `glassEffectID`, `.glass` buttons, `backgroundExtensionEffect` hero, soft scroll edges; macOS 14/15 fallback; Reduce Transparency / Increase Contrast / Reduce Motion | ✅ | builds on `macos-26` + Xcode 26 in CI; real window screenshots: `docs/screenshots/macos-*.png` |
-| Menu bar extra: status, recent blocks, isolate with a second explicit confirmation | ✅ | `MenuBarView.swift`; render test + window screenshot |
+| SwiftUI app redesigned in Liquid Glass (macOS 26): NavigationSplitView glass sidebar, glass toolbar, `glassEffect` / `GlassEffectContainer` / `glassEffectID`, `.glass` buttons, `backgroundExtensionEffect` hero, soft scroll edges; macOS 14/15 fallback; Reduce Transparency / Increase Contrast / Reduce Motion | ✅ | builds on `macos-26` + Xcode 26 in CI; `docs/screenshots/macos-*.png` are captured from the real app window on the CI runner in demo mode (unsigned build, demo data). Not yet looked at on a real Mac |
+| Menu bar extra: status, recent blocks, isolate with a second explicit confirmation | ✅ | `MenuBarView.swift`; render test + window screenshot (the panel hosted in a window for capture; the live status-item popover is not captured in CI) |
 | First-run onboarding: honest coverage labels, extension approval, content filter, signer key (owner adds it with sudo; app only reads) | ✅ UI · 🔑🔬 flow | approval steps need a signed build on a real Mac |
 | NEFilterDataProvider system extension (outbound socket flows, audit-token identity, drop before data, reports for bytes) | 🔬 | builds unsigned in CI; never run as a signed extension |
 | Typed XPC control surface (7 operations, no trust changes), caller code-signing requirement, refuses all callers when unsigned | 🔬 | logic unit-tested; XPC path needs a signed build |

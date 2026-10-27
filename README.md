@@ -13,8 +13,9 @@ machines, enforced locally on each device, coordinated by an optional controller
 </div>
 
 <p align="center">
-  <img src="docs/screenshots/macos-overview-dark.png" alt="Moat for macOS: overview" width="880">
+  <img src="docs/screenshots/macos-overview-dark.png" alt="Moat for macOS: the Liquid Glass overview window, demo data" width="880">
 </p>
+<p align="center"><sub>The macOS app on macOS 26, captured from the real app window on the CI runner in demo mode (no signed install).</sub></p>
 
 > **Read this first.** Moat states exactly what it covers and nothing more. The Linux protected-session boundary is
 > proven in CI on a real kernel; the macOS content filter builds and is unit-tested but **has not yet run as a signed
@@ -28,7 +29,7 @@ machines, enforced locally on each device, coordinated by an optional controller
 | --- | --- | --- |
 | **Observed** | Moat sees a connection and records it. Nothing is blocked, and the UI says *permitted, not enforced*. | macOS, Linux |
 | **Enforced** | Your signed policy decides; a deny happens at the OS hook before data passes. | macOS per-app (untested on device), Linux device/user-wide |
-| **Protected session** | A boundary built **before the workload runs**, inherited by every child, escape-tested. | Linux `moat-launch` (cgroup v2 + nftables) |
+| **Protected session** | A boundary built **before the workload runs**, inherited by every child, escape-tested. Hostname rules for TCP are enforced by a per-session egress proxy (TLS SNI / HTTP CONNECT / Host, no TLS interception). | Linux `moat-launch` (cgroup v2 + nftables); proxy CI-tested, *untested* on Omarchy |
 
 A launcher that only adds a label is an *instrumented* session, not a protected one, and Moat never calls it one.
 
@@ -36,11 +37,19 @@ A launcher that only adds a label is an *instrumented* session, not a protected 
 
 <table>
 <tr>
-<td width="58%"><img src="docs/screenshots/macos-activity-light.png" alt="macOS activity"></td>
-<td><img src="docs/screenshots/mobile-allow-once-dark.png" alt="Phone: allow once for this session"></td>
+<td width="58%"><img src="docs/screenshots/macos-activity-light.png" alt="macOS Activity, light"></td>
+<td><img src="docs/screenshots/macos-menubar-dark.png" alt="macOS menu bar extra, dark"></td>
 </tr>
 <tr>
 <td><sub><b>macOS Activity.</b> Blocked flows say <i>blocked before data was sent</i>; observed flows are never called allowed; bytes appear only when macOS reported them.</sub></td>
+<td><sub><b>Menu bar extra.</b> Coverage at a glance, recent blocks, and Isolate this Mac behind a second explicit confirmation. Turning isolation off still needs the typed phrase in Recovery.</sub></td>
+</tr>
+<tr>
+<td><img src="docs/screenshots/macos-onboarding-light.png" alt="macOS first-run onboarding: what Moat can claim"></td>
+<td><img src="docs/screenshots/mobile-allow-once-dark.png" alt="Phone: allow once for this session"></td>
+</tr>
+<tr>
+<td><sub><b>First-run onboarding.</b> Starts with what Moat can and cannot claim on this Mac, then walks through extension approval, the content filter and adding your signer key (you add it; the app only reads it).</sub></td>
 <td><sub><b>Phone web UI.</b> "Allow once for this session" is bound to the incident, policy revision and session instance; stale approvals are rejected.</sub></td>
 </tr>
 <tr>
@@ -53,8 +62,30 @@ A launcher that only adds a label is an *instrumented* session, not a protected 
 </tr>
 </table>
 
-macOS screenshots are rendered in CI from demo data by the real `ControlHandler` (`macos/MoatKit/Tests/MoatUITests`).
-More in [docs/screenshots](docs/screenshots).
+**About these images.** The `macos-*.png` files are captured from the real Moat app window (`screencapture -l`) on
+GitHub's `macos-26` runner, built unsigned with Xcode 26 and launched with `--demo`, so the data comes from the demo
+client backed by the real `ControlHandler`, not from a running content filter
+([`macos/scripts/capture-screenshots.sh`](macos/scripts/capture-screenshots.sh)). The window height is limited by the
+runner's small display. The phone and desktop images are the fleet web UI rendered in CI from its demo build. More in
+[docs/screenshots](docs/screenshots).
+
+## What's in this build
+
+* **macOS app in Liquid Glass.** Rebuilt for macOS 26: glass sidebar and toolbar, glass controls and morphing
+  status, with macOS 14/15 fallbacks and support for Reduce Transparency, Increase Contrast and Reduce Motion.
+  Builds and is captured in CI; not yet checked by eye on a real Mac.
+* **Menu bar extra.** Status, recent blocks and a confirmed isolate, without opening the window.
+* **First-run onboarding.** Honest coverage labels first, then extension approval, the content filter and signer
+  key. The approval steps need a signed build on a real Mac and have not run there yet.
+* **Linux timed rollback.** `moatd apply --trial-secs N` installs a trial revision that reverts on its own unless you
+  run `moatd recover confirm`; `recover rollback` reverts now. The replay mark is kept, the first revision cannot be a
+  trial, and rollback never touches isolation. Proven in CI's netns suite; untested on Omarchy.
+* **Session hostname proxy (Linux).** Inside a protected session, TCP hostname rules are enforced by a per-session
+  loopback proxy that reads TLS SNI, HTTP CONNECT or Host, resolves the name itself and connects only to what it
+  resolved; nftables fences the listener. No TLS interception. UDP stays IP-only and domain fronting is still
+  possible. Advertised as `untested` until run on Omarchy.
+
+See [docs/STATUS.md](docs/STATUS.md) for exactly what each of these has and has not been proven on.
 
 ## Architecture
 
