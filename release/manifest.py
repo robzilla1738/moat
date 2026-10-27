@@ -51,7 +51,7 @@ def is_ancestor(short, commit):
     return None
 
 
-def build(commit):
+def build(commit, label=None):
     ledger = json.load(open(os.path.join(ROOT, "docs", "claim-ledger.json")))
     open_defects = {d["id"] for d in ledger.get("defects", []) if d.get("status") == "open"}
     problems, rows = [], []
@@ -95,6 +95,16 @@ def build(commit):
     manifest = {
         "schema": "moat.release_manifest.v1",
         "release_commit": commit,
+        "release_label": label or f"{workspace_version()}-dev",
+        "release_signing": {
+            "artifacts": "SHA256SUMS lists every release asset; SHA256SUMS carries a keyless Sigstore signature "
+            "(cosign, GitHub Actions OIDC identity of .github/workflows/release.yml) and every asset has a GitHub "
+            "build-provenance attestation. No long-lived release key exists.",
+            "owner_policy_key": "Separate trust domain (MASTER_ROADMAP 17.1). The owner policy key signs policy "
+            "snapshots on the owner's devices; it is never present in CI and is not used to sign releases.",
+            "platform_signing": "None. No Apple Developer ID signature or notarization and no signed Arch package "
+            "in this release.",
+        },
         "workspace_version": workspace_version(),
         "npm_packages": npm_versions(),
         "ledger_schema": ledger["schema"],
@@ -111,7 +121,13 @@ def build(commit):
 
 def markdown(m):
     out = [
-        f"# Moat release manifest — {m['release_commit'][:12]}",
+        f"# Moat release manifest — {m['release_label']} ({m['release_commit'][:12]})",
+        "",
+        "Release signing: " + m["release_signing"]["artifacts"],
+        "",
+        "Owner policy key: " + m["release_signing"]["owner_policy_key"],
+        "",
+        "Platform signing: " + m["release_signing"]["platform_signing"],
         "",
         f"Workspace version `{m['workspace_version']}`; generated from the claim ledger (updated {m['ledger_updated']}).",
         "",
@@ -135,11 +151,12 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--commit", default=os.environ.get("GITHUB_SHA") or "HEAD")
     ap.add_argument("--out-dir", default="dist")
+    ap.add_argument("--label", help="release version label, e.g. 0.1.0-alpha.2")
     a = ap.parse_args()
     commit = a.commit
     if commit == "HEAD":
         commit = subprocess.run(["git", "-C", ROOT, "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
-    m, problems = build(commit)
+    m, problems = build(commit, a.label)
     os.makedirs(a.out_dir, exist_ok=True)
     json.dump(m, open(os.path.join(a.out_dir, "release-manifest.json"), "w"), indent=2)
     open(os.path.join(a.out_dir, "release-manifest.md"), "w").write(markdown(m))
