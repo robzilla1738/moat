@@ -453,11 +453,20 @@ pub fn render_at(
 
 /// A local, owner-initiated whole-device isolation table that survives policy changes and controller loss.
 /// Only `moatd recover clear-isolation` removes it.
+///
+/// "Loopback" includes connections that conntrack redirected to a loopback address (the session egress proxy):
+/// the output hook still sees the original route's interface (`oif` is the external one, `daddr` already
+/// 127.0.0.1/::1) for every packet of such a connection, so `oif lo` alone would drop the client's ACKs to its local
+/// proxy. The proxy's data and the FIN that ends a stream would then queue behind unacknowledged bytes and the
+/// client would never see the stream end (issue #31, measured in CI). Only connections the kernel itself DNATed to a
+/// loopback address match; nothing with a loopback destination can leave the host.
 pub fn render_local_emergency(keep: &[IpNet]) -> String {
     let mut s =
         format!("table inet {LOCAL_EMERGENCY_TABLE}\ndelete table inet {LOCAL_EMERGENCY_TABLE}\ntable inet {LOCAL_EMERGENCY_TABLE} {{\n");
     s.push_str("  chain output {\n    type filter hook output priority -10; policy accept;\n");
     s.push_str("    oif lo accept comment \"loopback\"\n");
+    s.push_str("    ip daddr 127.0.0.0/8 ct status dnat accept comment \"loopback (redirected to the local proxy)\"\n");
+    s.push_str("    ip6 daddr ::1 ct status dnat accept comment \"loopback (redirected to the local proxy)\"\n");
     for n in keep {
         let fam = if matches!(n, IpNet::V6(_)) { "ip6" } else { "ip" };
         let _ = writeln!(s, "    {fam} daddr {n} accept comment \"recovery path\"");
@@ -704,6 +713,13 @@ pub(crate) mod tests {
         assert!(s.contains("priority -10"));
         assert!(s.contains("ip daddr 100.100.1.2/32 accept"));
         assert!(s.trim_end().ends_with("}"));
+        // issue #31: a session's packets to its redirected local proxy keep flowing during isolation, so the proxy
+        // can deliver the FIN that ends each stream; only kernel-DNATed loopback destinations match.
+        assert!(s.contains("ip daddr 127.0.0.0/8 ct status dnat accept"));
+        assert!(s.contains("ip6 daddr ::1 ct status dnat accept"));
+        assert!(!s.contains("ip daddr 0.0.0.0/0"), "no wider accept than loopback");
+        let (lo, reject) = (s.find("ct status dnat").unwrap(), s.find("counter reject").unwrap());
+        assert!(lo < reject, "loopback accepts come before the reject");
         assert!(s.contains("counter reject"));
     }
 
