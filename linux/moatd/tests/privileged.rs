@@ -46,6 +46,7 @@ fn run_in_session(c: &Cgroups, id: &str, argv: &[&str], iso: BrokerIsolation, en
         session_id: id.into(),
         profile: "lab".into(),
         stdio: [None, Some(w), None],
+        controlling_tty: false,
     })
     .unwrap();
     let st = child.wait().unwrap();
@@ -184,6 +185,7 @@ fn closing_a_session_kills_detached_children() {
         session_id: "d1".into(),
         profile: "lab".into(),
         stdio: [None, None, None],
+        controlling_tty: false,
     })
     .unwrap();
     child.wait().unwrap();

@@ -30,6 +30,10 @@ pub enum Request {
         /// Hide user-session brokers (systemd --user/D-Bus, Docker, SSH agent). Default true.
         #[serde(default = "yes")]
         isolate_brokers: bool,
+        /// stdin (fd 0 passed) is a PTY slave allocated by moat-launch: make it the workload's controlling terminal
+        /// (setsid + TIOCSCTTY) so interactive programs get job control.
+        #[serde(default)]
+        controlling_tty: bool,
     },
     Status,
     Sessions,
@@ -138,6 +142,7 @@ mod tests {
             cwd: "/tmp".into(),
             env: BTreeMap::new(),
             isolate_brokers: true,
+            controlling_tty: false,
         };
         send(&a, &req, &[w.as_raw_fd()]).unwrap();
         let (got, fds) = recv_request(&b).unwrap();

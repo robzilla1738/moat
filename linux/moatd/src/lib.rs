@@ -13,6 +13,7 @@ pub mod endpoint;
 pub mod launch;
 pub mod nft;
 pub mod probe;
+pub mod pty;
 pub mod recovery;
 pub mod server;
 pub mod spool;

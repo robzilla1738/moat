@@ -142,6 +142,16 @@ A "$BIN/moatd" --state "$S" recover clear-isolation >/dev/null
 wait_for '.isolation_active | not' || true
 expect "clear-isolation reopens ordinary traffic" 0 "$(plain tcp4_8080)"
 
+# --- PTY proxy: interactive programs get their own controlling terminal and are its foreground group --------------
+if command -v script >/dev/null && command -v ps >/dev/null; then
+  mk pty_fg 'test -t 0 && [ "$(ps -o tpgid= -p $$ | tr -d " ")" = "$(ps -o pgid= -p $$ | tr -d " ")" ]'
+  pty_launch() { as_nobody "script -qec 'MOAT_QUIET=1 $BIN/moat-launch --socket $SOCK --profile lab-deny $1 -- bash $WORK/s/pty_fg.sh' /dev/null" >/dev/null 2>&1 && echo 0 || echo $?; }
+  expect "--pty: workload owns a controlling terminal and is its foreground group" 0 "$(pty_launch --pty)"
+  expect "--no-pty: workload is not the terminal's foreground group (documented limitation)" blocked "$(pty_launch --no-pty)"
+else
+  echo "SKIP  PTY proxy checks (script/ps not installed)"
+fi
+
 # --- restart: controller-free operation -------------------------------------------------------------------------
 kill "$DAEMON_PID"; wait "$DAEMON_PID" 2>/dev/null || true
 if pgrep -f "moatd --state $S" >/dev/null; then bad "daemon stopped before restart"; pkill -f "moatd --state $S"; sleep 0.5; fi

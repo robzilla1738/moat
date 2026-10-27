@@ -98,7 +98,9 @@ fn handle<B: NftBackend + Send + 'static>(ep: Arc<Mutex<Endpoint<B>>>, s: UnixSt
                 }
             }
         }
-        Request::Launch { profile, argv, cwd, env, isolate_brokers } => launch(ep, s, p, profile, argv, cwd, env, isolate_brokers, fds),
+        Request::Launch { profile, argv, cwd, env, isolate_brokers, controlling_tty } => {
+            launch(ep, s, p, profile, argv, cwd, env, isolate_brokers, controlling_tty, fds)
+        }
     }
 }
 
@@ -112,6 +114,7 @@ fn launch<B: NftBackend + Send + 'static>(
     cwd: PathBuf,
     env: std::collections::BTreeMap<String, String>,
     isolate_brokers: bool,
+    controlling_tty: bool,
     fds: Vec<OwnedFd>,
 ) {
     let mut it = fds.into_iter();
@@ -144,6 +147,7 @@ fn launch<B: NftBackend + Send + 'static>(
             session_id: id.clone(),
             profile: profile.clone(),
             stdio,
+            controlling_tty,
         };
         match spawn(spec) {
             Ok(child) => {

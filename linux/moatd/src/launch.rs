@@ -61,6 +61,8 @@ pub struct LaunchSpec {
     pub profile: String,
     /// stdin, stdout, stderr. None = /dev/null.
     pub stdio: [Option<OwnedFd>; 3],
+    /// Make stdin (a PTY slave from `moat-launch --pty`) the controlling terminal: `setsid` + `TIOCSCTTY`.
+    pub controlling_tty: bool,
 }
 
 fn errno(ctx: &str) -> std::io::Error {
@@ -110,6 +112,10 @@ pub fn spawn(spec: LaunchSpec) -> std::io::Result<Child> {
     let hide_files: Vec<CString> = hide_files.iter().map(|p| CString::new(p.as_os_str().as_encoded_bytes()).unwrap()).collect();
     let isolate = spec.isolation.any();
     let (uid, gid) = (spec.uid, spec.gid);
+    let ctty = spec.controlling_tty;
+    if ctty && spec.stdio[0].is_none() {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "controlling_tty needs a terminal on stdin"));
+    }
 
     let mut cmd = Command::new(&spec.argv[0]);
     cmd.args(&spec.argv[1..]).current_dir(&spec.cwd).env_clear();
@@ -182,6 +188,17 @@ pub fn spawn(spec: LaunchSpec) -> std::io::Result<Child> {
             if libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0 {
                 return Err(errno("no_new_privs"));
             }
+            // 4b. interactive: own session with the caller-allocated PTY slave (fd 0) as controlling terminal, so the
+            //     workload is the terminal's foreground process group. After the privilege drop, so the session and
+            //     terminal belong to the caller's uid.
+            if ctty {
+                if libc::setsid() < 0 {
+                    return Err(errno("setsid"));
+                }
+                if libc::ioctl(0, libc::TIOCSCTTY, 0) != 0 {
+                    return Err(errno("TIOCSCTTY"));
+                }
+            }
             // 5. nothing inherited beyond stdio survives exec.
             let r = libc::syscall(libc::SYS_close_range, 3u32, u32::MAX, libc::CLOSE_RANGE_CLOEXEC);
             if r != 0 {
@@ -230,6 +247,7 @@ mod tests {
             session_id: "t".into(),
             profile: "p".into(),
             stdio: [None, None, None],
+            controlling_tty: false,
         };
         assert_eq!(spawn(spec(0, vec!["true".into()])).unwrap_err().kind(), std::io::ErrorKind::PermissionDenied);
         assert!(spawn(spec(1000, vec![])).is_err());

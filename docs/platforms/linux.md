@@ -84,9 +84,12 @@ Stated so nobody infers a stronger claim:
   rejected or left out for this adapter rather than approximated.
 * **Root, the kernel and the session user's other processes.** A root compromise, a kernel bug, or the same user
   running the workload *outside* `moat-launch` is outside the claim.
-* **Interactive terminals.** The session receives the caller's stdin/stdout/stderr but is not the terminal's
-  foreground process group; full-screen TUIs may lose job control (Ctrl-Z) and Ctrl-C reaches `moat-launch`, not the
-  workload. PTY proxying is planned.
+* **Interactive terminals without `--pty`.** With `--no-pty` (or when stdin/stdout are not terminals) the session
+  receives the caller's descriptors but is not the terminal's foreground process group, so TUIs lose job control.
+  With a terminal, `moat-launch` defaults to its **PTY proxy**: it allocates a fresh PTY as the caller, hands the
+  slave to the workload as its controlling terminal (`setsid` + `TIOCSCTTY` after the cgroup join and privilege
+  drop), and relays bytes and window-size changes from the real terminal. The relay runs outside the session and
+  moves terminal bytes only; it opens no sockets. CI checks both behaviors (`netns-enforcement.sh`).
 
 ## Ordinary traffic
 
