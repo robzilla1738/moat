@@ -154,4 +154,46 @@ final class AppModelTests: XCTestCase {
         let iso = FlowDecision(verdict: .deny, source: .emergencyIsolation, summary: "")
         XCTAssertEqual(iso.pill.0, "Isolated")
     }
+
+}
+
+@MainActor
+final class StandaloneApplyCopyTests: XCTestCase {
+    func model(_ screen: Screen) -> AppModel {
+        let client = DemoControlClient(now: Date())
+        let (s, f) = client.snapshot()
+        let m = AppModel(client: client, isDemo: true, screen: screen)
+        m.status = s
+        m.flows = f
+        return m
+    }
+
+    func testApplyCopyFollowsTheAvailablePath() {
+        let plain = model(.appDetail)
+        XCTAssertFalse(plain.canApplyStandalone)
+        let withApplier = model(.appDetail)
+        withApplier.applier = StandaloneApplier(authoring: RefusingAuthoring(), signer: OwnerSigner(store: NoStore(), presence: NoPresence()), client: withApplier.client, bookURL: FileManager.default.temporaryDirectory.appendingPathComponent("moat-ui-book-\(UUID().uuidString).json"), deviceID: "mbp-m1")
+        XCTAssertTrue(withApplier.canApplyStandalone)
+        XCTAssertFalse(AppModel.standaloneApplyHow.contains("not available"), "once the path exists the UI no longer says apply is unavailable")
+        XCTAssertTrue(AppModel.standaloneApplyUnavailable.contains("no policy compiler"))
+        XCTAssertEqual(plain.applyUnavailableReason, AppModel.standaloneApplyUnavailable)
+        XCTAssertTrue(AppModel.demoApplyNote.hasPrefix("Demo:"), "a demo run says it signs nothing instead of claiming the compiler is missing")
+    }
+}
+
+private struct RefusingAuthoring: SnapshotAuthoring {
+    func compile(policyText: String, revision: UInt64, issuedAt: Date, deviceID: String?) throws -> CompiledSnapshot { throw StandaloneApplyError("not in UI tests") }
+    func assemble(payload: Data, signature: Data, publicKeyHex: String) throws -> Data { throw StandaloneApplyError("not in UI tests") }
+}
+
+private final class NoStore: ProtectedKeyStore {
+    var requiresUserPresence: Bool { true }
+    func publicKey() -> Data? { nil }
+    func create(seed: Data, publicKey: Data) throws { throw OwnerSigningError.keychain(-1) }
+    func readSeed(context: OwnerPresenceContext) throws -> Data { throw OwnerSigningError.noKey }
+    func delete() throws {}
+}
+
+private struct NoPresence: OwnerPresence {
+    func authenticate(reason: String) async throws -> OwnerPresenceContext { throw OwnerSigningError.presenceDenied("UI test") }
 }

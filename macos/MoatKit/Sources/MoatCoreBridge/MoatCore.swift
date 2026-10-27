@@ -147,3 +147,38 @@ public final class CoreEvaluator: PolicyEvaluator, @unchecked Sendable {
             notes: d["notes"] as? [String] ?? [])
     }
 }
+
+/// `SnapshotAuthoring` backed by moat-core (`moat_compile`, `moat_assemble_signed_snapshot`, PR #35). Holds no key:
+/// the owner signature comes from OwnerSigner (Keychain + user presence) over the exact payload bytes compiled here.
+public struct CoreSnapshotAuthoring: SnapshotAuthoring {
+    public init() {}
+
+    /// True when this moat-ffi build exports the compile/assemble entry points (feature detection, ABI stays 1).
+    public static var available: Bool {
+        guard let eps = (try? MoatCore.info())?["entry_points"] as? [String] else { return false }
+        return eps.contains("moat_compile") && eps.contains("moat_assemble_signed_snapshot")
+    }
+
+    public func compile(policyText: String, revision: UInt64, issuedAt: Date, deviceID: String?) throws -> CompiledSnapshot {
+        guard Self.available else { throw MoatCore.FFIError(message: "this moat-ffi build has no moat_compile; standalone apply is unavailable") }
+        var req: [String: Any] = ["policy_text": policyText, "adapter": "macos", "revision": revision, "issued_at": MoatCore.iso.string(from: issuedAt)]
+        if let deviceID, !deviceID.isEmpty { req["devices"] = [deviceID] }
+        let r = try MoatCore.call(req) { moat_compile($0) }
+        guard r["ok"] as? Bool == true else {
+            let details = (r["errors"] as? [[String: Any]] ?? []).map { "\($0["path"] as? String ?? ""): \($0["message"] as? String ?? "")" }
+            throw MoatCore.FFIError(message: ([r["error"] as? String ?? "compile failed"] + details).joined(separator: "; "))
+        }
+        guard let b64 = r["payload"] as? String, let payload = Data(base64Encoded: b64), let sha = r["payload_sha256"] as? String,
+              let rev = (r["revision"] as? NSNumber)?.uint64Value
+        else { throw MoatCore.FFIError(message: "moat_compile reply is missing payload, payload_sha256 or revision") }
+        let report = r["report"] as? [String: Any] ?? [:]
+        let omitted = (report["omitted"] as? [[String: Any]] ?? []).map { OmittedRule(ruleID: $0["rule_id"] as? String ?? "?", reason: $0["reason"] as? String ?? "") }
+        return CompiledSnapshot(payload: payload, payloadSHA256: sha, revision: rev, policyDigest: r["policy_digest"] as? String ?? "", omitted: omitted)
+    }
+
+    public func assemble(payload: Data, signature: Data, publicKeyHex: String) throws -> Data {
+        let r = try MoatCore.call(["payload": payload.base64EncodedString(), "signature": signature.base64EncodedString(), "public_key": publicKeyHex]) { moat_assemble_signed_snapshot($0) }
+        guard r["ok"] as? Bool == true, let signed = r["signed"] else { throw MoatCore.FFIError(message: r["error"] as? String ?? "assembly refused") }
+        return try JSONSerialization.data(withJSONObject: signed, options: [])
+    }
+}

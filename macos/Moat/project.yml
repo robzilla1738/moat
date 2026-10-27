@@ -26,11 +26,14 @@ targets:
         CODE_SIGN_ENTITLEMENTS: App/Moat.entitlements
         GENERATE_INFOPLIST_FILE: NO
         INFOPLIST_FILE: App/Info.plist
+        LIBRARY_SEARCH_PATHS: $(SRCROOT)/../build/ffi
     dependencies:
       - package: MoatKit
         product: MoatKit
       - package: MoatKit
         product: MoatUI
+      - package: MoatKit
+        product: MoatCoreBridge
       - target: MoatFilter
         embed: true
       - sdk: SystemExtensions.framework
