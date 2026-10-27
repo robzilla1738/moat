@@ -1,0 +1,30 @@
+{
+  "schema": "moat.service_pack.v1",
+  "id": "ollama-registry",
+  "version": "2026.10.1",
+  "name": "Ollama registry",
+  "description": "Model pulls for Ollama. Keep separate from local inference.",
+  "reviewed_against": "vendor documentation, October 2026. Verify on device; pack updates produce reviewable diffs, never silent trust expansion.",
+  "destinations": [
+    {
+      "host": "registry.ollama.ai",
+      "necessity": "required",
+      "explanation": "Model manifests and blobs (may redirect to a storage CDN: verify redirects on device).",
+      "intention": "download",
+      "ports": [
+        443
+      ],
+      "transport": "tcp"
+    },
+    {
+      "host": "ollama.com",
+      "necessity": "optional",
+      "explanation": "Website and update checks.",
+      "intention": "update",
+      "ports": [
+        443
+      ],
+      "transport": "tcp"
+    }
+  ]
+}

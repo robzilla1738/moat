@@ -1,0 +1,30 @@
+{
+  "schema": "moat.conformance.policy_case.v1",
+  "name": "ordinary-app-observed",
+  "description": "Ordinary apps fall to the observing profile: permitted and labeled as observation.",
+  "policy": "../../policies/home.toml",
+  "flow": {
+    "id": "c",
+    "device_id": "mbp-m1",
+    "user": "robert",
+    "app": {
+      "family": "safari",
+      "executable": "/usr/bin/safari"
+    },
+    "ancestry_complete": true,
+    "remote_ip": "198.51.100.10",
+    "remote_port": 443,
+    "transport": "tcp",
+    "at": "2026-10-26T12:00:00Z",
+    "hostname": {
+      "name": "example.com",
+      "source": "flow_api",
+      "confidence": "high"
+    }
+  },
+  "expect": {
+    "verdict": "allow",
+    "permitted_by_observation": true,
+    "winner": "profile:ordinary-desktop-learning"
+  }
+}

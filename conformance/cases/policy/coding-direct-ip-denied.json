@@ -1,0 +1,30 @@
+{
+  "schema": "moat.conformance.policy_case.v1",
+  "name": "coding-direct-ip-denied",
+  "description": "Direct IP without hostname evidence does not match hostname allows.",
+  "policy": "../../policies/home.toml",
+  "flow": {
+    "id": "c",
+    "device_id": "mbp-m1",
+    "user": "robert",
+    "app": {
+      "family": "python3",
+      "executable": "/usr/bin/python3"
+    },
+    "ancestry_complete": true,
+    "remote_ip": "140.82.112.3",
+    "remote_port": 443,
+    "transport": "tcp",
+    "at": "2026-10-26T12:00:00Z",
+    "session": {
+      "id": "sess-1",
+      "profile": "coding-session",
+      "boundary": "linux_cgroup",
+      "verified": true
+    }
+  },
+  "expect": {
+    "verdict": "deny",
+    "notes_contain": "no hostname evidence"
+  }
+}

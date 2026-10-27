@@ -1,0 +1,35 @@
+{
+  "schema": "moat.conformance.policy_case.v1",
+  "name": "coding-github-wrong-port",
+  "description": "Allow is port-scoped.",
+  "policy": "../../policies/home.toml",
+  "flow": {
+    "id": "c",
+    "device_id": "mbp-m1",
+    "user": "robert",
+    "app": {
+      "family": "git",
+      "executable": "/usr/bin/git"
+    },
+    "ancestry_complete": true,
+    "remote_ip": "140.82.112.3",
+    "remote_port": 22,
+    "transport": "tcp",
+    "at": "2026-10-26T12:00:00Z",
+    "hostname": {
+      "name": "github.com",
+      "source": "flow_api",
+      "confidence": "high"
+    },
+    "session": {
+      "id": "sess-1",
+      "profile": "coding-session",
+      "boundary": "linux_cgroup",
+      "verified": true
+    }
+  },
+  "expect": {
+    "verdict": "deny",
+    "winner": "profile:coding-session"
+  }
+}

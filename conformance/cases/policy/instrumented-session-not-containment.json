@@ -1,0 +1,30 @@
+{
+  "schema": "moat.conformance.policy_case.v1",
+  "name": "instrumented-session-not-containment",
+  "description": "An instrumented-only session is not a protected session.",
+  "policy": "../../policies/home.toml",
+  "flow": {
+    "id": "c",
+    "device_id": "mbp-m1",
+    "user": "robert",
+    "app": {
+      "family": "curl",
+      "executable": "/usr/bin/curl"
+    },
+    "ancestry_complete": true,
+    "remote_ip": "203.0.113.50",
+    "remote_port": 443,
+    "transport": "tcp",
+    "at": "2026-10-26T12:00:00Z",
+    "session": {
+      "id": "sess-1",
+      "profile": "coding-session",
+      "boundary": "instrumented_only",
+      "verified": true
+    }
+  },
+  "expect": {
+    "verdict": "allow",
+    "permitted_by_observation": true
+  }
+}

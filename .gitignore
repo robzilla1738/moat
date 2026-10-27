@@ -1,0 +1,13 @@
+target/
+node_modules/
+dist/
+*.log
+.DS_Store
+.build/
+.swiftpm/
+DerivedData/
+*.xcodeproj/xcuserdata/
+/web/screenshots/tmp/
+.env
+*.key
+!conformance/**/*.key

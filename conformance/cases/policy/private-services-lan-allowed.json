@@ -1,0 +1,30 @@
+{
+  "schema": "moat.conformance.policy_case.v1",
+  "name": "private-services-lan-allowed",
+  "description": "Private services only: chosen LAN service allowed.",
+  "policy": "../../policies/home.toml",
+  "flow": {
+    "id": "c",
+    "device_id": "mbp-m1",
+    "user": "robert",
+    "app": {
+      "family": "plex",
+      "executable": "/usr/bin/plex"
+    },
+    "ancestry_complete": true,
+    "remote_ip": "192.168.1.40",
+    "remote_port": 32400,
+    "transport": "tcp",
+    "at": "2026-10-26T12:00:00Z",
+    "session": {
+      "id": "sess-1",
+      "profile": "private-services-only",
+      "boundary": "linux_cgroup",
+      "verified": true
+    }
+  },
+  "expect": {
+    "verdict": "allow",
+    "winner": "rule:private-services-lan-tailnet"
+  }
+}

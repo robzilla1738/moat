@@ -1,0 +1,33 @@
+{
+  "schema": "moat.conformance.policy_case.v1",
+  "name": "safety-beats-lan-allow",
+  "description": "A broad LAN allow never defeats the safety deny on controller admin endpoints.",
+  "policy": "../../policies/home.toml",
+  "flow": {
+    "id": "c",
+    "device_id": "mbp-m1",
+    "user": "robert",
+    "app": {
+      "family": "python3",
+      "executable": "/usr/bin/python3"
+    },
+    "ancestry_complete": true,
+    "remote_ip": "192.168.1.2",
+    "remote_port": 8443,
+    "transport": "tcp",
+    "at": "2026-10-26T12:00:00Z",
+    "session": {
+      "id": "sess-1",
+      "profile": "private-services-only",
+      "boundary": "linux_cgroup",
+      "verified": true
+    }
+  },
+  "expect": {
+    "verdict": "deny",
+    "winner": "rule:safety-workloads-never-reach-controller",
+    "overridden_contains": [
+      "private-services-lan-tailnet"
+    ]
+  }
+}

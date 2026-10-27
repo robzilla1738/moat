@@ -1,0 +1,70 @@
+{
+  "schema": "moat.service_pack.v1",
+  "id": "github",
+  "version": "2026.10.1",
+  "name": "GitHub",
+  "description": "Source control: web, API, git over HTTPS, release and raw downloads.",
+  "reviewed_against": "vendor documentation, October 2026. Verify on device; pack updates produce reviewable diffs, never silent trust expansion.",
+  "destinations": [
+    {
+      "host": "github.com",
+      "necessity": "required",
+      "explanation": "git over HTTPS and web sign-in",
+      "intention": "fetch",
+      "ports": [
+        443
+      ],
+      "transport": "tcp"
+    },
+    {
+      "host": "api.github.com",
+      "necessity": "required",
+      "explanation": "REST/GraphQL API used by gh, git credential helpers and agents. An allowed API can also write data.",
+      "intention": "api",
+      "ports": [
+        443
+      ],
+      "transport": "tcp"
+    },
+    {
+      "host": "codeload.github.com",
+      "necessity": "optional",
+      "explanation": "Source archive downloads (tarball/zipball).",
+      "intention": "download",
+      "ports": [
+        443
+      ],
+      "transport": "tcp"
+    },
+    {
+      "host": "*.githubusercontent.com",
+      "necessity": "optional",
+      "explanation": "Raw files, release assets and avatars (objects/raw/release-assets).",
+      "intention": "download",
+      "ports": [
+        443
+      ],
+      "transport": "tcp"
+    },
+    {
+      "host": "uploads.github.com",
+      "necessity": "optional",
+      "explanation": "Release asset uploads. Publication intent; not separately enforceable from api.github.com by hostname alone.",
+      "intention": "publish",
+      "ports": [
+        443
+      ],
+      "transport": "tcp"
+    },
+    {
+      "host": "ghcr.io",
+      "necessity": "optional",
+      "explanation": "GitHub Container Registry pulls and pushes.",
+      "intention": "download",
+      "ports": [
+        443
+      ],
+      "transport": "tcp"
+    }
+  ]
+}

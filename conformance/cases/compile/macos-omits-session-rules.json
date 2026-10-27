@@ -1,0 +1,16 @@
+{
+  "schema": "moat.conformance.compile_case.v1",
+  "name": "macos-omits-session-rules",
+  "policy": "../../policies/home.toml",
+  "adapter": "macos",
+  "expect": {
+    "compiles": true,
+    "omitted_contains": [
+      "coding-allow-github",
+      "safety-workloads-never-reach-controller"
+    ],
+    "unavailable_profiles_contains": [
+      "coding-session"
+    ]
+  }
+}

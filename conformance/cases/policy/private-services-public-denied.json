@@ -1,0 +1,34 @@
+{
+  "schema": "moat.conformance.policy_case.v1",
+  "name": "private-services-public-denied",
+  "description": "Private services only blocks public destinations.",
+  "policy": "../../policies/home.toml",
+  "flow": {
+    "id": "c",
+    "device_id": "mbp-m1",
+    "user": "robert",
+    "app": {
+      "family": "python3",
+      "executable": "/usr/bin/python3"
+    },
+    "ancestry_complete": true,
+    "remote_ip": "198.51.100.9",
+    "remote_port": 443,
+    "transport": "tcp",
+    "at": "2026-10-26T12:00:00Z",
+    "hostname": {
+      "name": "example.com",
+      "source": "flow_api",
+      "confidence": "high"
+    },
+    "session": {
+      "id": "sess-1",
+      "profile": "private-services-only",
+      "boundary": "linux_cgroup",
+      "verified": true
+    }
+  },
+  "expect": {
+    "verdict": "deny"
+  }
+}

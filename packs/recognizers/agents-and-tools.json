@@ -1,0 +1,30 @@
+{
+  "schema": "moat.recognizer_pack.v1",
+  "id": "moat.agents-and-tools",
+  "version": "2026.10.1",
+  "description": "Coding agents, MCP servers, package managers, shells and network tools. Recognition recommends profiles; it never applies one by itself.",
+  "recognizers": [
+    { "family": "claude-code", "display_name": "Claude Code", "category": "coding_agent", "match": { "executables": ["claude"], "path_contains": ["/@anthropic-ai/claude-code/"] }, "profile_hint": "coding-session" },
+    { "family": "codex", "display_name": "Codex CLI", "category": "coding_agent", "match": { "executables": ["codex"], "path_contains": ["/@openai/codex/"] }, "profile_hint": "coding-session" },
+    { "family": "gemini-cli", "display_name": "Gemini CLI", "category": "coding_agent", "match": { "executables": ["gemini"], "path_contains": ["/@google/gemini-cli/"] }, "profile_hint": "coding-session" },
+    { "family": "aider", "display_name": "Aider", "category": "coding_agent", "match": { "executables": ["aider"], "entrypoints": ["aider"] }, "profile_hint": "coding-session" },
+    { "family": "opencode", "display_name": "opencode", "category": "coding_agent", "match": { "executables": ["opencode"] }, "profile_hint": "coding-session" },
+    { "family": "cursor-agent", "display_name": "Cursor Agent", "category": "coding_agent", "match": { "executables": ["cursor-agent"], "path_contains": ["/Cursor.app/"] }, "profile_hint": "coding-session" },
+    { "family": "mcp-server", "display_name": "MCP server", "category": "mcp_server", "match": { "path_contains": ["/@modelcontextprotocol/server-", "/mcp-server-"], "entrypoints": ["mcp-server", "mcp_server"] }, "profile_hint": "coding-session", "notes": "An MCP server can act as a broker: the socket belongs to it, not to the agent that asked." },
+    { "family": "npm", "display_name": "npm", "category": "package_manager", "match": { "executables": ["npm", "npx"] }, "notes": "Install scripts run code; download and publish share registry.npmjs.org." },
+    { "family": "pnpm", "display_name": "pnpm", "category": "package_manager", "match": { "executables": ["pnpm", "pnpx"] } },
+    { "family": "yarn", "display_name": "Yarn", "category": "package_manager", "match": { "executables": ["yarn"] } },
+    { "family": "bun", "display_name": "Bun", "category": "package_manager", "match": { "executables": ["bun", "bunx"] } },
+    { "family": "pip", "display_name": "pip", "category": "package_manager", "match": { "executables": ["pip", "pip3"], "entrypoints": ["pip"] } },
+    { "family": "uv", "display_name": "uv", "category": "package_manager", "match": { "executables": ["uv", "uvx"] } },
+    { "family": "cargo", "display_name": "Cargo", "category": "package_manager", "match": { "executables": ["cargo", "rustup"] } },
+    { "family": "homebrew", "display_name": "Homebrew", "category": "package_manager", "match": { "executables": ["brew"] } },
+    { "family": "git", "display_name": "git", "category": "network_tool", "match": { "executables": ["git", "git-remote-https"] } },
+    { "family": "curl", "display_name": "curl", "category": "network_tool", "match": { "executables": ["curl", "wget"] } },
+    { "family": "ssh", "display_name": "ssh", "category": "broker", "match": { "executables": ["ssh", "scp", "sftp"] }, "notes": "An existing SSH session can forward traffic for other processes." },
+    { "family": "shell", "display_name": "shell", "category": "shell", "match": { "executables": ["zsh", "bash", "sh", "fish", "dash"] } },
+    { "family": "python", "display_name": "Python", "category": "interpreter", "match": { "executables": ["python", "python3", "python3.11", "python3.12", "python3.13"] } },
+    { "family": "node", "display_name": "Node.js", "category": "interpreter", "match": { "executables": ["node"] } },
+    { "family": "docker", "display_name": "Docker", "category": "broker", "match": { "executables": ["docker", "com.docker.backend", "dockerd"] }, "notes": "Containers egress through the Docker daemon/VM; ancestry does not reveal the requesting process." }
+  ]
+}

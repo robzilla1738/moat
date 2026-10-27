@@ -1,0 +1,40 @@
+{
+  "schema": "moat.service_pack.v1",
+  "id": "pypi",
+  "version": "2026.10.1",
+  "name": "PyPI",
+  "description": "Python packages.",
+  "reviewed_against": "vendor documentation, October 2026. Verify on device; pack updates produce reviewable diffs, never silent trust expansion.",
+  "destinations": [
+    {
+      "host": "pypi.org",
+      "necessity": "required",
+      "explanation": "Package index (simple/JSON API).",
+      "intention": "download",
+      "ports": [
+        443
+      ],
+      "transport": "tcp"
+    },
+    {
+      "host": "files.pythonhosted.org",
+      "necessity": "required",
+      "explanation": "Package files (wheels, sdists).",
+      "intention": "download",
+      "ports": [
+        443
+      ],
+      "transport": "tcp"
+    },
+    {
+      "host": "upload.pypi.org",
+      "necessity": "optional",
+      "explanation": "Package publication. Keep out of coding sessions unless publishing.",
+      "intention": "publish",
+      "ports": [
+        443
+      ],
+      "transport": "tcp"
+    }
+  ]
+}

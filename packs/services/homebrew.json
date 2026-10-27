@@ -1,0 +1,40 @@
+{
+  "schema": "moat.service_pack.v1",
+  "id": "homebrew",
+  "version": "2026.10.1",
+  "name": "Homebrew",
+  "description": "macOS packages.",
+  "reviewed_against": "vendor documentation, October 2026. Verify on device; pack updates produce reviewable diffs, never silent trust expansion.",
+  "destinations": [
+    {
+      "host": "formulae.brew.sh",
+      "necessity": "required",
+      "explanation": "Formula/cask JSON API.",
+      "intention": "download",
+      "ports": [
+        443
+      ],
+      "transport": "tcp"
+    },
+    {
+      "host": "ghcr.io",
+      "necessity": "required",
+      "explanation": "Bottle downloads.",
+      "intention": "download",
+      "ports": [
+        443
+      ],
+      "transport": "tcp"
+    },
+    {
+      "host": "github.com",
+      "necessity": "optional",
+      "explanation": "Casks downloaded from GitHub releases.",
+      "intention": "download",
+      "ports": [
+        443
+      ],
+      "transport": "tcp"
+    }
+  ]
+}

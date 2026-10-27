@@ -1,0 +1,17 @@
+[package]
+name = "moat-ffi"
+description = "C ABI over moat-core for the macOS app and Network Extension (JSON in, JSON out)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lib]
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+moat-core = { path = "../moat-core" }
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true

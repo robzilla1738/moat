@@ -1,0 +1,10 @@
+{
+  "schema": "moat.conformance.compile_case.v1",
+  "name": "linux-rejects-strict-hostname-rules",
+  "policy": "../../policies/home-strict.toml",
+  "adapter": "linux",
+  "expect": {
+    "compiles": false,
+    "error_contains": "hostname enforcement"
+  }
+}

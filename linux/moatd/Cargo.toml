@@ -1,0 +1,31 @@
+[package]
+name = "moatd"
+description = "Moat Linux endpoint: nftables enforcement, cgroup v2 protected sessions, event spool"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "moatd"
+path = "src/main.rs"
+
+[[bin]]
+name = "moat-launch"
+path = "src/bin/moat-launch.rs"
+
+[dependencies]
+moat-core = { path = "../../core/moat-core" }
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+clap.workspace = true
+thiserror.workspace = true
+ipnet.workspace = true
+hex.workspace = true
+sha2.workspace = true
+libc = "0.2"
+
+[dev-dependencies]
+tempfile.workspace = true

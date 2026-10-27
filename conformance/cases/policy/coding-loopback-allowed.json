@@ -1,0 +1,30 @@
+{
+  "schema": "moat.conformance.policy_case.v1",
+  "name": "coding-loopback-allowed",
+  "description": "Local test servers on loopback are allowed in a coding session.",
+  "policy": "../../policies/home.toml",
+  "flow": {
+    "id": "c",
+    "device_id": "mbp-m1",
+    "user": "robert",
+    "app": {
+      "family": "node",
+      "executable": "/usr/bin/node"
+    },
+    "ancestry_complete": true,
+    "remote_ip": "127.0.0.1",
+    "remote_port": 3000,
+    "transport": "tcp",
+    "at": "2026-10-26T12:00:00Z",
+    "session": {
+      "id": "sess-1",
+      "profile": "coding-session",
+      "boundary": "linux_cgroup",
+      "verified": true
+    }
+  },
+  "expect": {
+    "verdict": "allow",
+    "winner": "rule:coding-allow-loopback"
+  }
+}

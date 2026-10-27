@@ -1,0 +1,14 @@
+{
+  "schema": "moat.recognizer_pack.v1",
+  "id": "moat.local-inference",
+  "version": "2026.10.1",
+  "description": "Local model runtimes. Names and paths are hints; signing identity binds. Separate install/download, inference, updates and remote API usage in policy.",
+  "recognizers": [
+    { "family": "ollama", "display_name": "Ollama", "category": "local_inference", "match": { "executables": ["ollama", "Ollama"], "path_contains": ["/Ollama.app/", "/.ollama/"] }, "profile_hint": "local-inference", "notes": "Model pulls contact the Ollama registry; keep them in a model-install profile." },
+    { "family": "lm-studio", "display_name": "LM Studio", "category": "local_inference", "match": { "executables": ["LM Studio", "lms"], "path_contains": ["/LM Studio.app/", "/.lmstudio/"] }, "profile_hint": "local-inference" },
+    { "family": "llama.cpp", "display_name": "llama.cpp", "category": "local_inference", "match": { "executables": ["llama-server", "llama-cli", "llama-run", "llama-simple"] }, "profile_hint": "local-inference" },
+    { "family": "mlx-lm", "display_name": "MLX LM", "category": "local_inference", "match": { "executables": ["mlx_lm.server", "mlx_lm.generate"], "entrypoints": ["mlx_lm.server", "mlx_lm.generate", "mlx_lm.chat"] }, "profile_hint": "local-inference", "notes": "Usually runs under python3; identified by entrypoint, which is a hint." },
+    { "family": "vllm", "display_name": "vLLM", "category": "local_inference", "match": { "executables": ["vllm"], "entrypoints": ["vllm.entrypoints.openai.api_server", "vllm"] }, "profile_hint": "local-inference" },
+    { "family": "jan", "display_name": "Jan", "category": "local_inference", "match": { "path_contains": ["/Jan.app/"] }, "profile_hint": "local-inference" }
+  ]
+}

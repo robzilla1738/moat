@@ -1,0 +1,40 @@
+{
+  "schema": "moat.service_pack.v1",
+  "id": "huggingface",
+  "version": "2026.10.1",
+  "name": "Hugging Face",
+  "description": "Model downloads. Keep in a model-install profile, separate from inference.",
+  "reviewed_against": "vendor documentation, October 2026. Verify on device; pack updates produce reviewable diffs, never silent trust expansion.",
+  "destinations": [
+    {
+      "host": "huggingface.co",
+      "necessity": "required",
+      "explanation": "Hub API and model files.",
+      "intention": "download",
+      "ports": [
+        443
+      ],
+      "transport": "tcp"
+    },
+    {
+      "host": "cdn-lfs.huggingface.co",
+      "necessity": "optional",
+      "explanation": "Large file storage CDN.",
+      "intention": "download",
+      "ports": [
+        443
+      ],
+      "transport": "tcp"
+    },
+    {
+      "host": "*.hf.co",
+      "necessity": "optional",
+      "explanation": "Newer storage/CDN hosts; verify against current Hub behavior.",
+      "intention": "download",
+      "ports": [
+        443
+      ],
+      "transport": "tcp"
+    }
+  ]
+}

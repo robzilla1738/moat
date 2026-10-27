@@ -1,0 +1,12 @@
+{
+  "schema": "moat.conformance.compile_case.v1",
+  "name": "dns-resolver-cannot-enforce-sessions",
+  "policy": "../../policies/home.toml",
+  "adapter": "dns_resolver",
+  "expect": {
+    "compiles": true,
+    "unavailable_profiles_contains": [
+      "coding-session"
+    ]
+  }
+}

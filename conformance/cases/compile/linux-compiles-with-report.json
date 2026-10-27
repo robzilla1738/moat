@@ -1,0 +1,14 @@
+{
+  "schema": "moat.conformance.compile_case.v1",
+  "name": "linux-compiles-with-report",
+  "policy": "../../policies/home.toml",
+  "adapter": "linux",
+  "expect": {
+    "compiles": true,
+    "omitted_contains": [
+      "coding-allow-github",
+      "coding-allow-npm",
+      "coding-allow-anthropic"
+    ]
+  }
+}

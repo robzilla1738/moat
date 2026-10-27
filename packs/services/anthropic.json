@@ -1,0 +1,40 @@
+{
+  "schema": "moat.service_pack.v1",
+  "id": "anthropic",
+  "version": "2026.10.1",
+  "name": "Anthropic API",
+  "description": "Model provider for Claude Code and the Anthropic SDKs. A permitted provider request can carry secrets.",
+  "reviewed_against": "vendor documentation, October 2026. Verify on device; pack updates produce reviewable diffs, never silent trust expansion.",
+  "destinations": [
+    {
+      "host": "api.anthropic.com",
+      "necessity": "required",
+      "explanation": "Messages API.",
+      "intention": "inference",
+      "ports": [
+        443
+      ],
+      "transport": "tcp"
+    },
+    {
+      "host": "console.anthropic.com",
+      "necessity": "optional",
+      "explanation": "Console sign-in for API keys.",
+      "intention": "auth",
+      "ports": [
+        443
+      ],
+      "transport": "tcp"
+    },
+    {
+      "host": "claude.ai",
+      "necessity": "optional",
+      "explanation": "Claude account sign-in used by Claude Code subscriptions.",
+      "intention": "auth",
+      "ports": [
+        443
+      ],
+      "transport": "tcp"
+    }
+  ]
+}
