@@ -15,7 +15,8 @@
     "unit": "cargo test on any host; no OS hooks.",
     "omarchy-installed": "Robert's Omarchy (Arch) machine with the packaged moatd systemd unit. No result recorded yet.",
     "mac-signed-installed": "A signed, notarized install on a real Mac with the system extension approved. No result recorded yet.",
-    "ci-ubuntu-installed-unit": "GitHub-hosted ubuntu-latest runner with the packaged moatd.service installed and started by systemd, a real non-root user and home (linux/tests/installed-unit.sh). An installed unit on Ubuntu, not the Arch package on Omarchy."
+    "ci-ubuntu-installed-unit": "GitHub-hosted ubuntu-latest runner with the packaged moatd.service installed and started by systemd, a real non-root user and home (linux/tests/installed-unit.sh). An installed unit on Ubuntu, not the Arch package on Omarchy.",
+    "ci-release": "GitHub-hosted ubuntu-latest runner in the release workflow. Signing uses Sigstore's public-good Fulcio/Rekor with the workflow's GitHub Actions OIDC identity and GitHub's artifact attestation store; verification by cosign and gh on the same runner."
   },
   "claims": [
     {
@@ -369,6 +370,103 @@
         "D-WEB-DEMO-SUCCESS",
         "D-INCIDENT-ROUTING"
       ]
+    },
+    {
+      "id": "fleet.sync.acks-reconcile",
+      "capability": "fleet sync: contiguous acks with declared gaps, reconciliation that never shows a device current without a receipt, staged rollout, offline local changes held for the owner",
+      "backend": "controller (Node 22) + moatd sync-state/spool outbox",
+      "evidence_level": "component",
+      "disposition": "implemented_unproven",
+      "tests": [
+        "controller/test/fleet.test.ts",
+        "controller/test/agent-sync.test.ts"
+      ],
+      "environment": "ci-node-22",
+      "last_result": {
+        "result": "pass",
+        "run": "controller 40565815980",
+        "commit": "7b31e81",
+        "date": "2026-10-27"
+      },
+      "limits": "Component tests against moatd's sync-state and spool files; no two real endpoints, no 24-hour controller outage, no reboot or key-rotation exercise (G3).",
+      "open_defects": []
+    },
+    {
+      "id": "learning.reviewed-baselines",
+      "capability": "bounded, identity-bound capture; immutable reviewed baselines; drift as new candidates; enforcing a baseline is an owner-authorized broadening proposal; three maintained workflow packs",
+      "backend": "controller (Node 22) learning + packs/",
+      "evidence_level": "component",
+      "disposition": "implemented_unproven",
+      "tests": [
+        "controller/test/learning.test.ts"
+      ],
+      "environment": "ci-node-22",
+      "last_result": {
+        "result": "pass",
+        "run": "controller 40565815980",
+        "commit": "7b31e81",
+        "date": "2026-10-27"
+      },
+      "limits": "Unit and integration tests only; no capture from a real device, no measured alert volume, packs not exercised against the real tools they describe.",
+      "open_defects": []
+    },
+    {
+      "id": "dns.adapters.adguard-pihole",
+      "capability": "AdGuard Home and Pi-hole v6 adapters: version checks, checkpoints, restart without duplicates, gaps and health; DNS-only presentation; Digital Kingdom cannot attest enforcement",
+      "backend": "controller resolvers (AdGuard Home, Pi-hole v6)",
+      "evidence_level": "component",
+      "disposition": "implemented_unproven",
+      "tests": [
+        "controller/test/resolvers.test.ts"
+      ],
+      "environment": "ci-node-22",
+      "last_result": {
+        "result": "pass",
+        "run": "controller 40565815980",
+        "commit": "7b31e81",
+        "date": "2026-10-27"
+      },
+      "limits": "Against recorded API responses and mocks, not a live AdGuard Home or Pi-hole instance; phones and TV are DNS-only coverage (issues #9, #10).",
+      "open_defects": []
+    },
+    {
+      "id": "release.integrity",
+      "capability": "release assets carry SHA256SUMS, CycloneDX SBOMs covering every locked dependency, a keyless Sigstore signature over SHA256SUMS and a build-provenance attestation per asset; tampered assets fail verification",
+      "backend": ".github/workflows/release.yml (cosign 3, actions/attest-build-provenance v4.2.2, cargo-cyclonedx 0.5.9, npm sbom)",
+      "evidence_level": "component",
+      "disposition": "implemented_unproven",
+      "tests": [
+        "release/recovery-drill.sh integrity",
+        "release/sbom-check.py --self-test"
+      ],
+      "environment": "ci-release",
+      "last_result": {
+        "result": "pass",
+        "run": "release 40569608036 (job 122420741784, sign + integrity drill 8/8)",
+        "commit": "ae2fe41",
+        "date": "2026-10-27"
+      },
+      "limits": "Says which workflow built which bytes from which commit; it is not policy authority. The owner policy key is a separate trust domain and is not used. No Apple Developer ID signing, notarization or signed Arch package; no TUF-style updater metadata.",
+      "open_defects": []
+    },
+    {
+      "id": "linux.recovery.local-drill",
+      "capability": "local recovery without the controller: isolation across daemon crash and restart, disable with the daemon stopped, trial auto-revert and local rollback, corrupt journal, newer-schema state after an update rollback, untrusted signer refused",
+      "backend": "moatd + moatctl (release/recovery-drill.sh local)",
+      "evidence_level": "native_ci",
+      "disposition": "implemented_unproven",
+      "tests": [
+        "release/recovery-drill.sh local"
+      ],
+      "environment": "ci-ubuntu-26.04-x86_64",
+      "last_result": {
+        "result": "pass",
+        "run": "release 40569608036 (job 122420002245, local drill)",
+        "commit": "ae2fe41",
+        "date": "2026-10-27"
+      },
+      "limits": "Real moatd in a CI netns with a temporary state directory, not the installed unit on Omarchy; no reboot, no package downgrade on a device (docs/recovery-drill.md lists the device-only steps).",
+      "open_defects": []
     },
     {
       "id": "vpn.coexistence",

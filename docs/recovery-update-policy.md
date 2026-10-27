@@ -1,6 +1,6 @@
 # Recovery and update policy (MASTER_ROADMAP §17.2)
 
-Status: **policy for the first releases; there are no releases yet.** Items marked *not built* are requirements,
+Status: **policy for the first releases; only experimental prereleases exist.** Items marked *not built* are requirements,
 not features.
 
 ## Principles
@@ -26,12 +26,16 @@ not features.
 | --- | --- |
 | macOS: Developer ID signing and notarization (`macos/scripts/release.sh`), cask with sha256 | scripted, never run (needs Robert's Apple credentials) |
 | Linux: Arch `PKGBUILD` with checksums | present, not published |
-| Signed release metadata (hashes, compatibility declarations) | *not built*; evaluate a maintained TUF implementation rather than a custom protocol |
-| Dependency licence report and release manifest | generated in CI on every push (`release-engineering` workflow, artifacts) |
+| Release integrity: `SHA256SUMS`, keyless Sigstore signature over it (GitHub OIDC identity of `release.yml`), GitHub build-provenance attestation per asset | built in CI (`release` workflow) on main and `v*` tags, verified by `release/recovery-drill.sh integrity` with negative controls. Not policy authority; the owner policy key is a separate trust domain and is not used |
+| CycloneDX SBOMs (each Rust workspace crate, each npm workspace) | generated in CI on every PR and push, with a coverage gate (`release/sbom-check.py`) |
+| Updater metadata with role separation, freshness and rollback/freeze protection | *not built*; evaluate a maintained TUF implementation rather than a custom protocol |
+| Dependency licence report and release manifest | generated in CI on every push (`release-engineering` and `release` workflows) and attached to each release |
 | GitHub Actions pinned to commit SHAs | enforced in CI (`release/check-actions-pinned.py`) |
 | Private mirror / offline import for self-hosted operation | *not built* |
 
 ## Local recovery (today)
+
+Scripted drill with the CI-runnable part run on every PR: [recovery-drill.md](recovery-drill.md).
 
 * **Linux:** `moatd recover isolate | clear-isolation | confirm | disable | resume` on the local socket (owner-only);
   an unconfirmed trial reverts on its own; a corrupt or unknown journal reports recovery-required and keeps the

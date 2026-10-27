@@ -5,6 +5,9 @@
 platforms are targeted, what has been exercised where, and what end of support will mean, so that nothing is
 assumed supported because it builds.
 
+Prereleases (`v0.1.0-alpha.*`) ship Linux x86_64 binaries as an archive (not a signed package), source and web
+tarballs, SBOMs and the release manifest. No macOS build is published until Developer ID signing exists.
+
 A row becomes **supported** only when its claims are `supported_installed`: installed or real-workflow evidence,
 dated, on that exact environment, with no open defect. The release manifest
 ([release/manifest.py](../release/manifest.py)) lists, per build, which claims were tested at which commit.
