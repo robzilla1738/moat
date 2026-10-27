@@ -1,0 +1,69 @@
+{
+  "schema": "moat.workflow_pack.v1",
+  "id": "home-services",
+  "version": "2026.10.1",
+  "name": "Home services",
+  "description": "Management transport and the explicitly tested media paths on the mini. Rehearse and canary before enforcing.",
+  "profile": "private-services-only",
+  "modules": [
+    {
+      "id": "management",
+      "name": "Management (SSH, Tailscale)",
+      "optional": false,
+      "rationale": "Owner management over the LAN and tailnet. Replies to permitted inbound connections must keep working without a blanket established-connection bypass.",
+      "required_capabilities": [
+        "session_enforcement",
+        "udp_enforcement"
+      ],
+      "compatible_versions": {
+        "tailscale": ">=1.60",
+        "openssh": ">=9"
+      },
+      "expected_breakage_if_omitted": "remote administration of the mini is lost; recover at the console.",
+      "provenance": "moat maintainers, tested on the reference mini 2026-10",
+      "rules": "action = \"allow\"\nselector = { session = { profiles = [\"private-services-only\"] } }\ndestinations = { scopes = [\"lan\", \"tailnet\"] }\ntransport = \"tcp\"\nports = [22]",
+      "test_recipe": [
+        "ssh mini.local true  # from a LAN client, expect success",
+        "tailscale ping mini  # expect pong",
+        "keep a console open; trial apply with a 5-minute rollback"
+      ]
+    },
+    {
+      "id": "plex",
+      "name": "Plex media server",
+      "optional": false,
+      "rationale": "Plex clients on the LAN; remote access through the tailnet. plex.tv sign-in is optional and separate.",
+      "required_capabilities": [
+        "session_enforcement"
+      ],
+      "compatible_versions": {
+        "plex-media-server": ">=1.40"
+      },
+      "expected_breakage_if_omitted": "LAN clients cannot browse or stream.",
+      "provenance": "moat maintainers, LAN streaming test 2026-10",
+      "rules": "action = \"allow\"\nselector = { session = { profiles = [\"private-services-only\"] } }\ndestinations = { scopes = [\"lan\", \"tailnet\"] }\ntransport = \"tcp\"\nports = [32400]",
+      "test_recipe": [
+        "play a title on a LAN TV for 2 minutes; expect no blocked incident",
+        "seek and resume; expect no new destinations"
+      ]
+    },
+    {
+      "id": "bluebubbles",
+      "name": "BlueBubbles relay",
+      "optional": true,
+      "rationale": "Message relay for the owner's phone over the tailnet.",
+      "required_capabilities": [
+        "session_enforcement"
+      ],
+      "compatible_versions": {
+        "bluebubbles-server": ">=1.9"
+      },
+      "expected_breakage_if_omitted": "phone messaging through the mini stops.",
+      "provenance": "moat maintainers, tailnet relay test 2026-10",
+      "rules": "action = \"allow\"\nselector = { session = { profiles = [\"private-services-only\"] } }\ndestinations = { scopes = [\"tailnet\"] }\ntransport = \"tcp\"\nports = [1234]",
+      "test_recipe": [
+        "send and receive one message from the phone over the tailnet"
+      ]
+    }
+  ]
+}

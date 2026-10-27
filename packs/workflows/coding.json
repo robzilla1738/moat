@@ -1,0 +1,71 @@
+{
+  "schema": "moat.workflow_pack.v1",
+  "id": "coding",
+  "version": "2026.10.1",
+  "name": "Basic coding",
+  "description": "Repository access, package acquisition and the selected model API as separate modules for a protected coding session.",
+  "profile": "coding-session",
+  "modules": [
+    {
+      "id": "repository",
+      "name": "Repository access (GitHub)",
+      "optional": false,
+      "rationale": "git fetch/push and the GitHub API over HTTPS. An allowed API can also write data.",
+      "required_capabilities": [
+        "session_enforcement",
+        "session_hostname_proxy"
+      ],
+      "compatible_versions": {
+        "git": ">=2.30",
+        "gh": ">=2.0"
+      },
+      "expected_breakage_if_omitted": "git clone/fetch/push and gh fail inside the session.",
+      "provenance": "packs/services/github.json@2026.10.1",
+      "rules": "action = \"allow\"\non_unsupported = \"skip_with_report\"\nselector = { session = { profiles = [\"coding-session\"] } }\ndestinations = { hosts = [\"github.com\", \"api.github.com\", \"codeload.github.com\"] }\ntransport = \"tcp\"\nports = [443]",
+      "test_recipe": [
+        "moat-launch --profile coding-session -- git ls-remote https://github.com/robzilla1738/moat  # expect success",
+        "moat-launch --profile coding-session -- curl -sS https://example.com  # expect refusal",
+        "check the spool: flow decision allowed by pack rule coding/repository"
+      ]
+    },
+    {
+      "id": "packages",
+      "name": "Package acquisition (npm)",
+      "optional": false,
+      "rationale": "Dependency downloads. Download and publish share registry.npmjs.org; publication is not separately enforced.",
+      "required_capabilities": [
+        "session_enforcement",
+        "session_hostname_proxy"
+      ],
+      "compatible_versions": {
+        "npm": ">=9"
+      },
+      "expected_breakage_if_omitted": "npm install fails inside the session; lockfile installs too.",
+      "provenance": "packs/services/npm.json@2026.10.1",
+      "rules": "action = \"allow\"\non_unsupported = \"skip_with_report\"\nselector = { session = { profiles = [\"coding-session\"] } }\ndestinations = { hosts = [\"registry.npmjs.org\"] }\ntransport = \"tcp\"\nports = [443]",
+      "test_recipe": [
+        "moat-launch --profile coding-session -- npm view left-pad version  # expect success",
+        "remove the module, re-run: expect refusal and a blocked incident"
+      ]
+    },
+    {
+      "id": "model-api",
+      "name": "Selected model API (Anthropic)",
+      "optional": true,
+      "rationale": "The model API the agent uses. Separate from repository and packages so it can be dropped for offline work.",
+      "required_capabilities": [
+        "session_enforcement",
+        "session_hostname_proxy"
+      ],
+      "compatible_versions": {
+        "claude-code": ">=1.0"
+      },
+      "expected_breakage_if_omitted": "the coding agent cannot reach its model.",
+      "provenance": "packs/services/anthropic.json@2026.10.1",
+      "rules": "action = \"allow\"\non_unsupported = \"skip_with_report\"\nselector = { session = { profiles = [\"coding-session\"] } }\ndestinations = { hosts = [\"api.anthropic.com\"] }\ntransport = \"tcp\"\nports = [443]",
+      "test_recipe": [
+        "moat-launch --profile coding-session -- curl -sS -o /dev/null -w '%{http_code}' https://api.anthropic.com/  # expect a TLS answer (any HTTP code)"
+      ]
+    }
+  ]
+}

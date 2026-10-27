@@ -1,0 +1,49 @@
+{
+  "schema": "moat.workflow_pack.v1",
+  "id": "local-inference",
+  "version": "2026.10.1",
+  "name": "Local inference",
+  "description": "Model acquisition/update separated from running already-downloaded artifacts. Inference stays local.",
+  "profile": "local-inference",
+  "modules": [
+    {
+      "id": "inference",
+      "name": "Run downloaded models (loopback only)",
+      "optional": false,
+      "rationale": "Client/server on loopback; no external network during inference.",
+      "required_capabilities": [
+        "session_enforcement"
+      ],
+      "compatible_versions": {
+        "ollama": ">=0.3"
+      },
+      "expected_breakage_if_omitted": "the client cannot reach the local server.",
+      "provenance": "packs/recognizers/local-inference.json@2026.10.1",
+      "rules": "action = \"allow\"\nselector = { session = { profiles = [\"local-inference\"] } }\ndestinations = { scopes = [\"loopback\"] }\ntransport = \"tcp\"",
+      "test_recipe": [
+        "moat-launch --profile local-inference -- ollama run <model> 'hi'  # expect an answer",
+        "moat-launch --profile local-inference -- curl -sS https://example.com  # expect refusal"
+      ]
+    },
+    {
+      "id": "acquisition",
+      "name": "Model download and update (time-limited)",
+      "optional": true,
+      "rationale": "Registry access only inside the separate model-install profile, so inference never keeps a download lease.",
+      "required_capabilities": [
+        "session_enforcement",
+        "session_hostname_proxy"
+      ],
+      "compatible_versions": {
+        "ollama": ">=0.3"
+      },
+      "expected_breakage_if_omitted": "ollama pull fails; already-downloaded models still run.",
+      "provenance": "packs/services/ollama-registry.json@2026.10.1",
+      "rules": "action = \"allow\"\non_unsupported = \"skip_with_report\"\nselector = { session = { profiles = [\"model-install\"] } }\ndestinations = { hosts = [\"registry.ollama.ai\"] }\ntransport = \"tcp\"\nports = [443]",
+      "test_recipe": [
+        "moat-launch --profile model-install -- ollama pull <small model>  # expect success",
+        "end the session; moat-launch --profile local-inference -- ollama pull <model>  # expect refusal (no leftover download lease)"
+      ]
+    }
+  ]
+}
