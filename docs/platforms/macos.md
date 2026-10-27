@@ -22,8 +22,8 @@ macos/
     MoatCoreBridge    Swift wrapper over the Rust moat-core C ABI (core/moat-ffi): verify + evaluate
     MoatUI            SwiftUI: Apps-first main window (sidebar: Apps, Activity, Tasks, Rules, This computer
                       [diagnostics], Coverage & Recovery; app detail and What changed? from Apps; Learning,
-                      candidate review and Packs from Rules), menu bar panel, first-run onboarding;
-                      Liquid Glass on macOS 26 with fallbacks; dark/light
+                      review and Rule packs from Rules), menu bar panel, first-run onboarding;
+                      bento cards on shared tokens, light/dark, no translucency
   Moat/               XcodeGen project: App/ (Moat.app), Extension/ (MoatFilter system extension)
   scripts/            build-ffi.sh, release.sh (Developer ID required), render-cask.sh,
                       capture-screenshots.sh (CI: real window captures in demo mode)
@@ -32,26 +32,28 @@ macos/
 
 ## The app
 
-Requires **macOS 14 or later**. On **macOS 26** it uses Apple's Liquid Glass; on macOS 14 and 15 it falls back to system
-materials and the standard bordered controls. Built with Xcode 26 (CI: `macos-26` runner).
+Requires **macOS 14 or later**; the look is the same on every supported version. Built with Xcode 26 (CI: `macos-26`
+runner).
 
-* **Main window.** A `NavigationSplitView` whose sidebar is the system's floating glass sidebar on macOS 26. The
-  toolbar holds the coverage status, Refresh and Isolate (Isolate always asks first). Content leads: cards and lists
-  are opaque surfaces, and glass is reserved for navigation and controls, as Apple's HIG asks. Apps, the primary workspace (W12), opens with a
-  status hero whose artwork extends under the sidebar (`backgroundExtensionEffect`). Scroll views use the soft
-  scroll-edge effect. Primary actions use `.glassProminent`, secondary ones `.glass`. The Activity filter is a glass
-  capsule, and its clear button morphs out of it (`GlassEffectContainer` + `glassEffectID`).
+* **Look.** Moat's bento design (see [design](../design.md)): opaque cards with hairline borders on the shared
+  colour, type and spacing tokens (`Theme.swift`, generated colour sets), light and dark, and no translucency in
+  Moat's own surfaces. The sidebar, toolbar and menu bar stay native.
+* **Main window.** A `NavigationSplitView` with six sidebar items: Apps, Activity, Tasks, Rules, Devices ("This
+  computer" on a standalone Mac) and Coverage & recovery. The toolbar holds the coverage status, Refresh and Lock down
+  (emergency isolation; it always asks first). Apps, the primary workspace (W12), answers "what needs me now"; app detail and What
+  changed? open from it, and Learn, Review and Rule packs open from Rules. Primary actions are bordered prominent
+  buttons on `accentStrong`, secondary ones bordered. The Activity filter is a segmented control.
 * **Menu bar extra** (`MenuBarExtra`, window style): coverage, the installed revision, recent blocks, Open Moat,
-  Refresh, and **Isolate this Mac…**. Isolating takes a second explicit click: the button morphs into *Cancel* /
-  *Isolate now*. Turning isolation off is only possible in Recovery with the typed phrase.
+  Refresh, and **Lock down this Mac…** (emergency isolation). Locking down takes a second explicit click: the button
+  turns into *Cancel* / *Lock down now*. Turning it off is only possible in Coverage & recovery with the typed phrase.
 * **First-run onboarding** (also under Moat › Set Up Moat… and in Settings): what Moat can and cannot claim on this
   Mac (per-app decisions *untested*, no process ancestry, no protected sessions on macOS, no fail-closed or VPN
   claim, phones and TV DNS-only), installing and approving the system extension, turning on the content filter, and
   adding the signer key yourself with `sudo` (the app shows the command and reads back the trusted key ids; it never
   adds or promotes a key).
-* **Accessibility.** Reduce Transparency turns every glass surface into an opaque fill with a border; Increase
-  Contrast drops tinted glass and adds stronger borders; Reduce Motion turns off morphing, slides and symbol
-  animation. Text uses system text styles. Icon-only controls have labels, and status pills read as one element.
+* **Accessibility.** There is no translucency to reduce, so Reduce Transparency needs no fallback; Increase Contrast
+  strengthens borders and secondary text; Reduce Motion turns off slides and symbol animation. Text uses the shared
+  type scale. Icon-only controls have labels, and status chips pair a symbol with their label and read as one element.
 * **Demo and screenshots:** `Moat.app/Contents/MacOS/Moat --demo [--screen apps|activity|tasks|rules|devices|coverage|appDetail|whatChanged|learning|candidate|packs|menubar|onboarding] [--isolated] [--appearance dark|light]`.
   CI captures the real window this way (`scripts/capture-screenshots.sh`); the menu bar panel is shown in a window
   for its screenshot.

@@ -126,8 +126,8 @@ Everything here is implemented and tested on GitHub CI runners or in unit tests,
 * **Linux ordinary apps (W09–W10).** Observe-only inventory (socket tables, optional bpftrace connect attribution) with
   counted loss. OpenSnitch was measured and not adopted; app rules stay rejected because no enforcing hook is proven.
   [W09](docs/decisions/W09-linux-ordinary-apps.md) · [W10](docs/decisions/W10-enforcement.md)
-* **macOS app and filter (W07, W12, W14).** Apps-first app in Liquid Glass (with macOS 14/15 fallbacks and
-  accessibility settings), menu bar extra and honest onboarding. The engine is generation-bound, its cache never
+* **macOS app and filter (W07, W12, W14).** Apps-first app in Moat's bento design (opaque cards on shared
+  tokens, light and dark, no translucency; see [design](docs/design.md)), menu bar extra and honest onboarding. The engine is generation-bound, its cache never
   outlives a timed permission, restored state is re-verified, trust reloads live, and a first canary is refused.
   Standalone rules are compiled by moat-core and signed by the Keychain owner key behind user presence. Unsigned CI
   builds only; never checked by eye or run as a signed extension on a real Mac. [macOS](docs/platforms/macos.md)
