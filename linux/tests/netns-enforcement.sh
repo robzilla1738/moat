@@ -385,7 +385,7 @@ A "$BIN/moatd" --state "$S" recover isolate >/dev/null
 A nft list table inet moat_local_emergency >/dev/null 2>&1 && ok "W05: isolation table is in the kernel before moatd ends the stream" \
   || bad "W05: isolation table installed by recover isolate"
 sleep 0.5
-kill -CONT "$DAEMON_PID"; T0=$(now)
+T0=$(now); kill -CONT "$DAEMON_PID"
 E=$(ended_at "$CLIENTLOG" iso1 6)
 if [[ -n "$E" ]]; then
   D=$(sub "$E" "$T0"); info "isolation: client saw EOF ${D}s after moatd resumed with the table already in place (tick 1 s)"
