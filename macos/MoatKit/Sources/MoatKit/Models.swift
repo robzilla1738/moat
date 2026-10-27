@@ -210,7 +210,20 @@ public enum CoverageLevel: String, Codable, Sendable {
     case enforced
     case degraded
     case isolated
+    /// State could not be reconciled after a restart or failed activation; the owner must recover at the device.
+    case recoveryRequired = "recovery-required"
+    /// A trial rollback could not reinstall the fallback; the trial revision is still the one in force.
+    case rollbackPending = "rollback-pending"
     case unknown
+
+    /// An unrecognised label is shown as unknown, never as the closest-looking healthy state.
+    public init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = CoverageLevel(rawValue: raw) ?? .unknown
+    }
+
+    /// Needs the owner at this device; no remote action or waiting clears it.
+    public var needsOwnerAtDevice: Bool { self == .recoveryRequired || self == .rollbackPending }
 
     public var label: String {
         switch self {
@@ -218,6 +231,8 @@ public enum CoverageLevel: String, Codable, Sendable {
         case .enforced: return "Enforcing"
         case .degraded: return "Degraded"
         case .isolated: return "Isolated"
+        case .recoveryRequired: return "Recovery required"
+        case .rollbackPending: return "Rollback pending"
         case .unknown: return "Unknown"
         }
     }
@@ -229,6 +244,8 @@ public enum CoverageLevel: String, Codable, Sendable {
         case .enforced: return "App rules from your signed policy are enforced by the content filter."
         case .degraded: return "Coverage is reduced. See what is wrong below."
         case .isolated: return "Emergency isolation: new outbound connections except loopback are blocked until you turn it off here. Connections already open are not cut."
+        case .recoveryRequired: return "Moat could not reconcile its saved state. Recover here with owner authentication; nothing is guessed or reinstalled on its own."
+        case .rollbackPending: return "A rollback could not reinstall the previous revision, so the trial revision is still enforced. Recover here with owner authentication."
         case .unknown: return "The filter has not reported. Moat cannot say what is covered."
         }
     }
@@ -385,4 +402,85 @@ public struct GapMarker: Codable, Sendable, Equatable {
         self.toSeq = toSeq
         self.reason = reason
     }
+}
+
+/// Lifecycle events other Moat endpoints report (Linux moatd, W05/W06), as the fleet companion shows them. This Mac
+/// does not emit them itself; they arrive from the controller's activity for enrolled devices. Every field is the
+/// endpoint's own report: nothing here is inferred, and none of these events is an "allowed" or "protected" claim.
+public struct EndpointLifecycleEvent: Codable, Sendable, Equatable, Identifiable {
+    public enum Kind: String, Codable, Sendable {
+        /// The session egress proxy ended an admitted stream (grant expiry, revocation, session end).
+        case streamTerminated = "stream_terminated"
+        /// The session proxy refused a connection at a resource limit (refused, never bypassed).
+        case proxyLimit = "proxy_limit"
+        /// The activation journal reconciled state after a restart or failed activation.
+        case activationRecovery = "activation_recovery"
+        /// A protected session could not be re-adopted after a daemon restart and was stopped.
+        case sessionNotAdopted = "session_not_adopted"
+        case other
+
+        public init(from decoder: Decoder) throws {
+            self = Kind(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .other
+        }
+    }
+
+    public var kind: Kind
+    public var deviceID: String
+    public var seq: UInt64
+    public var sessionID: String?
+    /// Reason / phase / resource text exactly as the endpoint reported it.
+    public var detail: String
+    /// `activation_recovery` phase (e.g. `recovery_required`, `rolled_back`), when reported.
+    public var phase: String?
+    public var id: String { "\(deviceID)#\(seq)" }
+
+    public init(kind: Kind, deviceID: String, seq: UInt64, sessionID: String? = nil, detail: String, phase: String? = nil) {
+        self.kind = kind
+        self.deviceID = deviceID
+        self.seq = seq
+        self.sessionID = sessionID
+        self.detail = detail
+        self.phase = phase
+    }
+
+    /// Build from one endpoint spool record's `event` object; nil for event types this view does not show.
+    public static func from(event e: [String: Any], deviceID: String, seq: UInt64) -> EndpointLifecycleEvent? {
+        guard let t = e["type"] as? String, let kind = Kind(rawValue: t) else { return nil }
+        let s = { (k: String) in e[k].map { "\($0)" } }
+        switch kind {
+        case .streamTerminated:
+            return .init(kind: kind, deviceID: deviceID, seq: seq, sessionID: s("session_id"), detail: [s("hostname") ?? s("destination"), s("reason")].compactMap { $0 }.joined(separator: ": "))
+        case .proxyLimit:
+            return .init(kind: kind, deviceID: deviceID, seq: seq, sessionID: s("session_id"), detail: "\(s("resource") ?? "resource") limit \(s("limit") ?? "?")")
+        case .activationRecovery:
+            return .init(kind: kind, deviceID: deviceID, seq: seq, detail: s("detail") ?? "", phase: s("phase"))
+        case .sessionNotAdopted:
+            return .init(kind: kind, deviceID: deviceID, seq: seq, sessionID: s("session_id"), detail: [s("profile"), s("reason")].compactMap { $0 }.joined(separator: ": "))
+        case .other:
+            return nil
+        }
+    }
+
+    public var title: String {
+        switch kind {
+        case .streamTerminated: return "Stream ended by the session proxy"
+        case .proxyLimit: return "Connection refused at a proxy limit"
+        case .activationRecovery: return phase == "recovery_required" ? "Recovery required at the device" : "Activation recovered after a restart"
+        case .sessionNotAdopted: return "Protected session stopped after a restart"
+        case .other: return "Endpoint event"
+        }
+    }
+
+    /// What the event does and does not mean, in one line.
+    public var meaning: String {
+        switch kind {
+        case .streamTerminated: return "An admitted stream was closed when its permission ended. Other open connections are not implied closed."
+        case .proxyLimit: return "Refused, not bypassed: the session could not open more connections."
+        case .activationRecovery: return phase == "recovery_required" ? "The endpoint keeps its last verified policy and needs the owner at the device." : "The endpoint reconciled its activation journal; the revision it reports is in force."
+        case .sessionNotAdopted: return "The session's boundary could not be re-established, so the session was stopped rather than left unprotected."
+        case .other: return ""
+        }
+    }
+
+    public var needsOwnerAtDevice: Bool { kind == .activationRecovery && phase == "recovery_required" }
 }

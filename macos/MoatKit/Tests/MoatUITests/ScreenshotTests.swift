@@ -49,6 +49,30 @@ final class ScreenshotTests: XCTestCase {
         try render(ScreenContent(model: model(.coverage, isolated: true)).padding(28), .light, width: 1040, height: 900, name: "coverage-isolated-light")
     }
 
+    /// rollback-pending on this Mac plus lifecycle events from Linux endpoints (render check of the recovery cards).
+    func testRecoveryLabelsAndFleetEventsRender() throws {
+        let m = model(.coverage)
+        m.status?.coverage = .rollbackPending
+        m.status?.coverageNotes.insert("The canary rollback to revision 6 could not load; the trial revision 7 is still enforced.", at: 0)
+        m.fleetEvents = [
+            EndpointLifecycleEvent.from(event: ["type": "activation_recovery", "phase": "recovery_required", "detail": "journal could not reconcile"], deviceID: "omarchy", seq: 41)!,
+            EndpointLifecycleEvent.from(event: ["type": "proxy_limit", "session_id": "s-1", "resource": "connections", "limit": 256], deviceID: "omarchy", seq: 42)!,
+            EndpointLifecycleEvent.from(event: ["type": "stream_terminated", "session_id": "s-1", "hostname": "api.github.com", "reason": "grant expired"], deviceID: "omarchy", seq: 43)!,
+            EndpointLifecycleEvent.from(event: ["type": "session_not_adopted", "session_id": "s-2", "profile": "coding-session", "reason": "cgroup missing"], deviceID: "mini", seq: 7)!,
+        ]
+        XCTAssertEqual(OverviewHero.headline(m.status!), "Rollback pending.")
+        try render(ScreenContent(model: m).padding(28), .dark, width: 1040, height: 1400, name: "coverage-rollback-pending-dark")
+    }
+
+    func testLifecycleEventsAreReportedNotInferred() {
+        XCTAssertNil(EndpointLifecycleEvent.from(event: ["type": "flow"], deviceID: "d", seq: 1), "only lifecycle events are shown here")
+        let r = EndpointLifecycleEvent.from(event: ["type": "activation_recovery", "phase": "rolled_back", "detail": "x"], deviceID: "d", seq: 2)!
+        XCTAssertFalse(r.needsOwnerAtDevice)
+        let p = EndpointLifecycleEvent.from(event: ["type": "proxy_limit", "session_id": "s", "resource": "streams", "limit": 64], deviceID: "d", seq: 3)!
+        XCTAssertEqual(p.detail, "streams limit 64")
+        XCTAssertTrue(p.meaning.contains("not bypassed"))
+    }
+
     func testMenuBarPanelRenders() throws {
         try render(MenuBarContent(model: model(.apps), openMain: {}), .dark, width: 348, height: 520, name: "menubar-dark")
         try render(MenuBarContent(model: model(.apps, isolated: true), openMain: {}), .light, width: 348, height: 520, name: "menubar-isolated-light")

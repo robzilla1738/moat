@@ -284,8 +284,10 @@ struct CoverageRecoveryScreen: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 28) {
+            if let s = model.status, s.coverage.needsOwnerAtDevice { NeedsOwnerCard(status: s) }
             CoverageScreen(model: model)
             RecoveryScreen(model: model)
+            if !model.fleetEvents.isEmpty { FleetEventsCard(events: model.fleetEvents) }
         }
         .onAppear { model.sawRecoveryCard = true }
     }
@@ -324,3 +326,48 @@ struct FirstTenMinutesCard: View {
         }
     }
 }
+
+/// recovery-required / rollback-pending on this Mac: say exactly what is enforced and what the owner must do here.
+struct NeedsOwnerCard: View {
+    let status: StatusReport
+    @Environment(\.palette) private var p
+
+    var body: some View {
+        Card {
+            HStack(spacing: 8) {
+                Image(systemName: status.coverage.symbol).foregroundStyle(p.red)
+                SectionTitle(text: status.coverage.label)
+            }
+            Text(status.coverage.claim).font(.callout).foregroundStyle(p.text)
+            if let r = status.installed {
+                Text("Enforced now: revision \(r.revision)").font(.system(.callout, design: .monospaced)).foregroundStyle(p.text2)
+            }
+            ForEach(status.coverageNotes.prefix(3), id: \.self) { n in Text(n).font(.caption).foregroundStyle(p.text2) }
+            Text("Use Recovery below. Nothing is reinstalled, and no remote command clears this.").font(.caption).foregroundStyle(p.muted)
+        }
+    }
+}
+
+/// Lifecycle events reported by other enrolled endpoints (Linux moatd), shown as the endpoint reported them.
+struct FleetEventsCard: View {
+    let events: [EndpointLifecycleEvent]
+    @Environment(\.palette) private var p
+
+    var body: some View {
+        Card {
+            SectionTitle(text: "Other devices", trailing: "\(events.count)")
+            ForEach(events.prefix(12)) { e in
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 6) {
+                        Pill(text: e.deviceID, tone: e.needsOwnerAtDevice ? .red : .neutral)
+                        Text(e.title).font(.callout.weight(.semibold)).foregroundStyle(p.text)
+                    }
+                    if !e.detail.isEmpty { Text(e.detail).font(.system(.caption, design: .monospaced)).foregroundStyle(p.text2).lineLimit(2) }
+                    Text(e.meaning).font(.caption).foregroundStyle(p.muted)
+                }
+            }
+            Text("Reported by each endpoint; this Mac does not verify another device's state.").font(.caption).foregroundStyle(p.muted)
+        }
+    }
+}
+
