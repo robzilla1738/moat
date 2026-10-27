@@ -16,6 +16,7 @@
 //! * [`authority`]: which producer may assert what
 
 pub mod authority;
+pub mod backend_ids;
 pub mod capability;
 pub mod compile;
 pub mod contracts;

@@ -75,15 +75,9 @@ impl CgroupLayout {
     }
 }
 
-/// Lowercase alphanumerics and dashes only. Profile ids are validated upstream; this is defense in depth because
-/// the value is spliced into an nftables string literal and a filesystem path.
-pub fn sanitize(s: &str) -> String {
-    s.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' { c.to_ascii_lowercase() } else { '-' }).collect()
-}
-
-fn chain_name(profile: &str) -> String {
-    format!("s_{}", sanitize(profile).replace('-', "_"))
-}
+/// Lowercase alphanumerics and dashes only (defense in depth: spliced into nftables literals and paths). The core
+/// compiler rejects policies whose ids collide under this mapping (`moat_core::backend_ids`).
+pub use moat_core::backend_ids::{chain_name, sanitize};
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
 pub struct RenderReport {
