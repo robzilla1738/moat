@@ -12,6 +12,10 @@ const KIND: Record<Incident["kind"], { label: string; icon: "lock" | "alert" | "
   policy_rolled_back: { label: "Trial rolled back", icon: "clock" },
   dns_blocked: { label: "DNS block", icon: "globe" },
   new_destination: { label: "New destination", icon: "spark" },
+  recovery_required: { label: "Recovery required", icon: "alert" },
+  rollback_pending: { label: "Rollback pending", icon: "alert" },
+  session_not_adopted: { label: "Task stopped after restart", icon: "clock" },
+  proxy_limit: { label: "Proxy limit reached", icon: "alert" },
 };
 
 /** Why an allow-once cannot be offered for this incident, or null when the controller could accept it. */
@@ -157,7 +161,7 @@ export function Activity({ go }: { go: (to: string) => void }) {
   const data = useData();
   const { actions } = useStore();
   const [filter, setFilter] = useState<"all" | "open" | "blocked" | "gaps">("open");
-  const list = data.incidents.filter((i) => (filter === "all" ? true : filter === "open" ? i.state === "open" : filter === "blocked" ? i.kind === "blocked_connection" || i.kind === "dns_blocked" : i.kind === "telemetry_gap" || i.kind === "coverage_lost"));
+  const list = data.incidents.filter((i) => (filter === "all" ? true : filter === "open" ? i.state === "open" : filter === "blocked" ? i.kind === "blocked_connection" || i.kind === "dns_blocked" : i.kind === "telemetry_gap" || i.kind === "coverage_lost" || i.kind === "recovery_required" || i.kind === "rollback_pending" || i.kind === "session_not_adopted" || i.kind === "proxy_limit"));
   return (
     <div className="page">
       <div className="page-head">

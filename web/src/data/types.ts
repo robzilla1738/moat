@@ -1,4 +1,4 @@
-export type Coverage = "protected-session" | "enforced" | "monitoring" | "dns-only" | "degraded" | "isolated" | "unknown";
+export type Coverage = "protected-session" | "enforced" | "monitoring" | "dns-only" | "degraded" | "recovery-required" | "rollback-pending" | "isolated" | "unknown";
 export type Support = "supported" | "partial" | "untested" | "unsupported";
 export type Platform = "macos" | "linux" | "ios" | "android-tv";
 export type RevisionState = "approved" | "distributed" | "received" | "applied" | "verified" | "rejected" | "trial" | "confirmed" | "rolled_back" | "not_targeted";
@@ -30,7 +30,7 @@ export interface ChainNode { name: string; exe: string; pid?: number; signed?: s
 export interface Incident {
   id: string;
   revision: number;
-  kind: "blocked_connection" | "coverage_lost" | "telemetry_gap" | "policy_rejected" | "policy_rolled_back" | "dns_blocked" | "new_destination";
+  kind: "blocked_connection" | "coverage_lost" | "telemetry_gap" | "policy_rejected" | "policy_rolled_back" | "dns_blocked" | "new_destination" | "recovery_required" | "rollback_pending" | "session_not_adopted" | "proxy_limit";
   urgency: "low" | "medium" | "high";
   state: "open" | "acknowledged" | "resolved";
   deviceId: string;

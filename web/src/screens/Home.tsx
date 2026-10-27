@@ -12,7 +12,7 @@ export function Home({ go }: { go: (to: string) => void }) {
   const fresh = useFreshness();
   const decisions = data.incidents.filter((i) => i.state === "open" && i.kind === "blocked_connection" && i.sessionId);
   const attention = data.incidents.filter((i) => i.state === "open" && i.kind !== "blocked_connection" && i.urgency !== "low");
-  const covered = data.devices.filter((d) => !["degraded", "unknown"].includes(fresh(d).coverage)).length;
+  const covered = data.devices.filter((d) => !["degraded", "unknown", "recovery-required", "rollback-pending"].includes(fresh(d).coverage)).length;
   const blocked = data.timeline.reduce((s, p) => s + p.blocked, 0);
   const latest = data.revisions[0];
   const applied = latest ? latest.devices.filter((d) => d.states.some((s) => s.state === "applied" || s.state === "confirmed")).length : 0;

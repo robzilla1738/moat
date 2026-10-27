@@ -3,7 +3,7 @@ import { useData, useFreshness } from "../data/store";
 import type { Coverage } from "../data/types";
 import { COVERAGE } from "../format";
 
-const ORDER: Coverage[] = ["protected-session", "enforced", "monitoring", "dns-only", "degraded", "isolated", "unknown"];
+const ORDER: Coverage[] = ["protected-session", "enforced", "monitoring", "dns-only", "degraded", "recovery-required", "rollback-pending", "isolated", "unknown"];
 const KEYS = ["session_enforcement", "app_enforcement", "process_identity", "ancestor_attribution", "hostname_enforcement", "session_hostname_proxy", "byte_counters", "existing_flow_revocation", "telemetry_completeness"];
 
 export function CoverageScreen({ go }: { go: (to: string) => void }) {
