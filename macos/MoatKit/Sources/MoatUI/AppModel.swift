@@ -134,7 +134,7 @@ public final class DemoControlClient: ControlClient, @unchecked Sendable {
     }
 
     static func seed(_ e: FilterEngine, now: Date) {
-        let flows: [(String?, String?, String, String, UInt16, Transport, TimeInterval)] = [
+        let flows: [(String?, String?, String?, String, UInt16, Transport, TimeInterval)] = [
             ("com.anthropic.claude-code", "Q6L2SF6YDW", "api.anthropic.com", "160.79.104.10", 443, .tcp, 3600),
             ("com.github.GitHubClient", "VEKTX9H2N7", "api.github.com", "140.82.112.6", 443, .tcp, 3300),
             ("com.apple.Safari", "APPLECOMPUTER", "www.apple.com", "17.253.144.10", 443, .tcp, 2900),
