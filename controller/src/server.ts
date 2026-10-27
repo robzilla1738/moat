@@ -4,8 +4,8 @@
  * localhost is not treated as trusted — every route authenticates.
  */
 import { apps, appDetail, diagnostics, whatChanged } from "./standalone.ts";
-import { approveCandidate, baseline, candidate, closeCapture, driftReview, importCandidate, muteIncident, proposeBaseline, retireBaseline, startCapture } from "./learning.ts";
-import { loadPacks, packProblems, proposePack, type WorkflowPack } from "./packs.ts";
+import { approveCandidate, baseline, candidate, closeCapture, discardCandidate, driftReview, importCandidate, learningOverview, muteIncident, permissionDiff, proposeBaseline, retireBaseline, startCapture } from "./learning.ts";
+import { loadPacks, packDelta, packProblems, proposePack, type WorkflowPack } from "./packs.ts";
 import { fileURLToPath } from "node:url";
 let packCache: WorkflowPack[] | null = null;
 const workflowPacks = () => (packCache ??= loadPacks(join(fileURLToPath(new URL("../../packs/workflows", import.meta.url)))));
@@ -97,7 +97,9 @@ r("POST", "/v1/devices/:id/local-change/resolve", ({ c, p, params, json }) => re
 // W14 learning: bounded capture → candidate → owner review → immutable baseline → drift (a new candidate) → proposal.
 r("POST", "/v1/learning/captures", ({ c, p, json }) => startCapture(c, c.require(p, "owner"), json));
 r("POST", "/v1/learning/captures/:id/close", ({ c, p, params }) => closeCapture(c, c.require(p, "owner"), params[0]!));
-r("GET", "/v1/learning/candidates/:id", ({ c, p, params }) => (c.require(p, "owner", "viewer"), candidate(c, params[0]!)));
+r("GET", "/v1/learning", ({ c, p }) => (c.require(p, "owner", "viewer"), learningOverview(c)));
+r("GET", "/v1/learning/candidates/:id", ({ c, p, params }) => (c.require(p, "owner", "viewer"), ((v) => ({ ...v, permission_diff: permissionDiff(c, v) }))(candidate(c, params[0]!))));
+r("POST", "/v1/learning/candidates/:id/discard", ({ c, p, params }) => discardCandidate(c, c.require(p, "owner"), params[0]!));
 r("POST", "/v1/learning/candidates/:id/approve", ({ c, p, params, json }) => approveCandidate(c, c.require(p, "owner"), params[0]!, json));
 r("POST", "/v1/learning/import", ({ c, p, json }) => importCandidate(c, c.require(p, "owner"), json));
 r("GET", "/v1/learning/baselines/:id", ({ c, p, params }) => (c.require(p, "owner", "viewer"), baseline(c, params[0]!)));
@@ -105,6 +107,12 @@ r("POST", "/v1/learning/baselines/:id/drift", ({ c, p, params }) => driftReview(
 r("POST", "/v1/learning/baselines/:id/propose", ({ c, p, params }) => proposeBaseline(c, c.require(p, "owner"), params[0]!));
 r("POST", "/v1/learning/baselines/:id/retire", ({ c, p, params, json }) => retireBaseline(c, c.require(p, "owner"), params[0]!, json.reason));
 r("GET", "/v1/packs", ({ c, p }) => (c.require(p, "owner", "viewer"), workflowPacks().map((x) => ({ ...x, problems: packProblems(x) }))));
+r("GET", "/v1/packs/:id/delta", ({ c, p, params }) => {
+  c.require(p, "owner", "viewer");
+  const pk = workflowPacks().find((x) => x.id === params[0]);
+  if (!pk) throw new HttpError(404, "no such pack");
+  return packDelta(c, pk);
+});
 r("POST", "/v1/packs/propose", ({ c, p, json }) => proposePack(c, c.require(p, "owner"), workflowPacks(), json));
 r("POST", "/v1/incidents/:id/mute", ({ c, p, params, json }) => muteIncident(c, c.require(p, "owner"), params[0]!, json.minutes));
 r("GET", "/v1/dns/clients", ({ c, p }) => (c.require(p, "owner", "viewer"), dnsClients(c.db, c.now())));

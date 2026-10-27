@@ -102,6 +102,32 @@ final class ScreenshotTests: XCTestCase {
         try render(LocalRuleSheet(model: model(.appDetail)), .light, width: 620, height: 900, name: "localrule-light")
     }
 
+    /// W14: learning (captures, candidates, drift, baselines), candidate review and packs, from the demo flows.
+    func testLearningScreensRender() throws {
+        let m = model(.learning)
+        m.seedDemoLearning()
+        XCTAssertFalse(m.learning.candidates.isEmpty, "demo flows produce a capture candidate")
+        XCTAssertNil(m.ownerSigner, "a demo run has no owner key")
+        try render(ScreenContent(model: m).padding(28), .dark, width: 1040, height: 1600, name: "learning-dark")
+        m.open(candidate: "cand-demo")
+        XCTAssertNotNil(m.selectedCandidate)
+        try render(ScreenContent(model: m).padding(28), .light, width: 1040, height: 1400, name: "candidate-light")
+        m.screen = .packs
+        XCTAssertEqual(m.packs.count, 3)
+        try render(ScreenContent(model: m).padding(28), .dark, width: 1040, height: 1800, name: "packs-dark")
+    }
+
+    func testAcceptingWithoutAnOwnerKeyIsRefusedNotFaked() async {
+        let m = model(.learning)
+        m.seedDemoLearning()
+        guard let c = m.learning.candidates.first, !c.entries.isEmpty else { return XCTFail("no demo candidate") }
+        await m.acceptCandidate(c, accepting: [0], acknowledgeIncomplete: true)
+        XCTAssertTrue(m.learning.baselines.allSatisfy { $0.id == "base-demo" }, "no baseline without the owner key")
+        XCTAssertNotNil(m.lastError)
+        await m.acceptCandidate(c, accepting: [], acknowledgeIncomplete: true)
+        XCTAssertTrue(m.lastError?.contains("Nothing is accepted by default") ?? false)
+    }
+
     func testSidebarIsAppsFirstAndSaysThisComputer() {
         XCTAssertEqual(Screen.sidebar, [.apps, .activity, .tasks, .rules, .devices, .coverage])
         XCTAssertEqual(Screen.devices.title(deviceCount: 1), "This computer")

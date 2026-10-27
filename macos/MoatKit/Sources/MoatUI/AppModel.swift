@@ -7,6 +7,8 @@ public enum Screen: String, CaseIterable, Identifiable {
     case apps, activity, tasks, rules, devices, coverage
     // Reached from those screens.
     case appDetail, whatChanged
+    // W14: learning and workflow packs, reached from Rules.
+    case learning, candidate, packs
     public var id: String { rawValue }
 
     public static let sidebar: [Screen] = [.apps, .activity, .tasks, .rules, .devices, .coverage]
@@ -31,6 +33,9 @@ public enum Screen: String, CaseIterable, Identifiable {
         case .coverage: return "Coverage & recovery"
         case .appDetail: return "App"
         case .whatChanged: return "What changed?"
+        case .learning: return "Learning"
+        case .candidate: return "Review candidate"
+        case .packs: return "Workflow packs"
         }
     }
 
@@ -46,6 +51,9 @@ public enum Screen: String, CaseIterable, Identifiable {
         case .coverage: return "lifepreserver"
         case .appDetail: return "app.badge"
         case .whatChanged: return "arrow.left.arrow.right"
+        case .learning: return "sparkles"
+        case .candidate: return "checklist"
+        case .packs: return "shippingbox"
         }
     }
 }
@@ -80,6 +88,14 @@ public final class AppModel: ObservableObject {
     /// Why apply is not available in this run when there is no applier (no compiler in this build, or a demo run that
     /// never touches the Keychain). Shown verbatim.
     public var applyUnavailableReason: String = AppModel.standaloneApplyUnavailable
+    /// W14 learning on this Mac: captures, candidates and immutable reviewed baselines (saved to `learningURL`).
+    @Published public var learning = LearningBook()
+    /// The candidate shown by `.candidate` (a capture candidate id, or a drift candidate id `drift-<baseline>`).
+    @Published public var selectedCandidateID: String?
+    public var learningURL: URL? {
+        didSet { loadLearning() }
+    }
+    public lazy var packs: [WorkflowPack] = WorkflowPack.bundled()
     public let client: ControlClient
     public let isDemo: Bool
 
@@ -141,6 +157,121 @@ public final class AppModel: ObservableObject {
         }
     }
 
+    // MARK: W14 learning
+
+    private func loadLearning() {
+        guard let url = learningURL, let data = try? Data(contentsOf: url), let book = try? JSONDecoder().decode(LearningBook.self, from: data) else { return }
+        learning = book
+    }
+
+    private func saveLearning() {
+        guard let url = learningURL, let data = try? JSONEncoder().encode(learning) else { return }
+        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? data.write(to: url, options: .atomic)
+    }
+
+    /// Start a bounded capture for one app identity. It only reads what the filter records; rules stay enforced.
+    public func startCapture(app: AppSummary, workflow: String, networkContext: String, hours: Double, now: Date = Date()) {
+        guard app.identityKnown else {
+            lastError = "macOS reported no identity for this app. A capture is bound to an exact identity."
+            return
+        }
+        let scope = CaptureScope(id: "cap-\(Int(now.timeIntervalSince1970))", signingID: app.signingID, executable: app.executable, teamID: app.teamID, appName: app.name, workflow: workflow, networkContext: networkContext, start: now, end: now.addingTimeInterval(hours * 3600))
+        do {
+            try Learning.validate(scope)
+            learning.captures.insert(scope, at: 0)
+            notice = "Capturing \(app.name) for \(workflow). Existing rules stay enforced; nothing seen is trusted until you review it."
+            lastError = nil
+            saveLearning()
+        } catch {
+            lastError = "\(error)"
+        }
+    }
+
+    /// Close a capture (early, or after its window) into a candidate for review.
+    public func closeCapture(_ id: String, now: Date = Date()) {
+        guard let i = learning.captures.firstIndex(where: { $0.id == id }) else { return }
+        let scope = learning.captures.remove(at: i)
+        let c = Learning.candidate(id: "cand-\(scope.id)", scope: scope, records: flows, gaps: status?.telemetryGaps ?? [], now: now)
+        learning.candidates.insert(c, at: 0)
+        selectedCandidateID = c.id
+        screen = .candidate
+        saveLearning()
+    }
+
+    /// Drift since approval, computed from the recorded flows: a new candidate per baseline; baselines never change.
+    public func driftQueue(now: Date = Date()) -> [LearningCandidate] {
+        learning.active.compactMap { Learning.drift($0, records: flows, gaps: status?.telemetryGaps ?? [], now: now, id: "drift-\($0.id)") }
+    }
+
+    public var selectedCandidate: LearningCandidate? {
+        learning.candidates.first { $0.id == selectedCandidateID } ?? driftQueue().first { $0.id == selectedCandidateID }
+    }
+
+    public func open(candidate id: String) {
+        selectedCandidateID = id
+        screen = .candidate
+    }
+
+    /// Accept exactly the selected entries. The owner key signs the exact plan behind Touch ID or the password; a demo
+    /// or screenshot run has no key and is refused rather than pretending.
+    public func acceptCandidate(_ c: LearningCandidate, accepting: [Int], acknowledgeIncomplete: Bool, now: Date = Date()) async {
+        let problems = Learning.acceptProblems(c, accepting: accepting, acknowledgeIncomplete: acknowledgeIncomplete)
+        guard problems.isEmpty else {
+            lastError = problems.joined(separator: " ")
+            return
+        }
+        guard let signer = ownerSigner else {
+            lastError = isDemo ? "Demo: no owner key is used, so nothing is accepted. In the real app, macOS asks for Touch ID or your password and shows this exact plan." : "No local owner key is available in this run."
+            return
+        }
+        do {
+            if signer.keyID == nil { _ = try signer.createKey() }
+            let auth = try await signer.authorize(Learning.ownerPlan(c, accepting: accepting))
+            let previous = learning.current(for: c.scope)
+            let b = try Learning.accept(c, accepting: accepting, acknowledgeIncomplete: acknowledgeIncomplete, previous: previous, authorization: auth, id: "base-\(Int(now.timeIntervalSince1970))", now: now)
+            try learning.record(b)
+            notice = "Reviewed baseline recorded (\(b.entries.count) entries), authorized with your owner key \(auth.keyID). It is not enforced by being recorded."
+            lastError = nil
+            screen = .learning
+            saveLearning()
+        } catch {
+            lastError = "\(error)"
+        }
+    }
+
+    public func discardCandidate(_ id: String) {
+        learning.candidates.removeAll { $0.id == id }
+        notice = "Discarded. Nothing was accepted; capture again for more evidence."
+        screen = .learning
+        saveLearning()
+    }
+
+    public func retire(_ b: LearningBaseline, now: Date = Date()) {
+        learning.retired[b.id] = ISO8601DateFormatter().string(from: now)
+        saveLearning()
+    }
+
+    /// Demo runs: one capture candidate and one reviewed baseline built from the demo client's recorded flows.
+    public func seedDemoLearning(now: Date = Date()) {
+        guard isDemo, learning.captures.isEmpty, learning.candidates.isEmpty, learning.baselines.isEmpty else { return }
+        let known = apps.filter { $0.identityKnown }
+        guard let first = known.first else { return }
+        let start = (flows.map(\.facts.at).min() ?? now).addingTimeInterval(-60)
+        let scope = CaptureScope(id: "cap-demo", signingID: first.signingID, executable: first.executable, teamID: first.teamID, appName: first.name, workflow: "coding session", networkContext: "home LAN", start: start, end: min(now, start.addingTimeInterval(8 * 3600)))
+        learning.candidates = [Learning.candidate(id: "cand-demo", scope: scope, records: flows, gaps: status?.telemetryGaps ?? [], now: now)]
+        if known.count > 1, let second = known.dropFirst().first(where: { $0.destinations.count > 1 }) ?? known.dropFirst().first {
+            let s2 = CaptureScope(id: "cap-demo-0", signingID: second.signingID, executable: second.executable, teamID: second.teamID, appName: second.name, workflow: "daily use", networkContext: "home LAN", start: start.addingTimeInterval(-7200), end: start.addingTimeInterval(-3600))
+            let seen = Learning.candidate(id: "cand-demo-0", scope: s2, records: flows, gaps: [], now: start)
+            // a reviewed baseline from before the recorded window, so the recorded activity shows up as drift
+            let entries = Array(Learning.entries(flows.filter { Learning.matches($0.facts, s2) }).prefix(1))
+            let b = LearningBaseline(id: "base-demo", candidateID: seen.id, scope: s2, entries: entries, digest: PlanDigest.of("demo"), complete: true, approvedAt: start, authorizedBy: "demo (no key)", supersedes: nil)
+            try? learning.record(b)
+        }
+        if screen == .candidate, selectedCandidateID == nil { selectedCandidateID = "cand-demo" }
+        learning.captures = [CaptureScope(id: "cap-demo-live", signingID: first.signingID, executable: first.executable, teamID: first.teamID, appName: first.name, workflow: "npm install", networkContext: "home LAN", start: now.addingTimeInterval(-600), end: now.addingTimeInterval(3000))]
+    }
+
     /// Shown only when this build has no policy compiler (no applier): never replaced by a pretend success.
     public static let standaloneApplyUnavailable = "This build has no policy compiler, so the rule is authorized but not applied from this Mac; apply it through your controller or with moatctl."
 
@@ -170,6 +301,7 @@ public final class AppModel: ObservableObject {
             status = s
             lastGoodStatus = s
             flows = f
+            if isDemo { seedDemoLearning(now: now) }
             lastContact = now
             contactLostSince = nil
             if errorIsConnection {

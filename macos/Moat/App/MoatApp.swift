@@ -69,6 +69,10 @@ struct MoatApp: App {
         }
         let m = AppModel(client: client, isDemo: launch.demo, screen: launch.screen, ownerSigner: signer, applier: applier)
         if launch.demo || launch.screenshotMode { m.applyUnavailableReason = AppModel.demoApplyNote }
+        // Reviewed learning baselines live with the user's Moat data; demo and screenshot runs keep them in memory.
+        if !launch.demo && !launch.screenshotMode {
+            m.learningURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Moat/learning.json")
+        }
         _model = StateObject(wrappedValue: m)
         if launch.screenshotMode {
             NotificationCenter.default.addObserver(forName: NSApplication.didFinishLaunchingNotification, object: nil, queue: .main) { _ in

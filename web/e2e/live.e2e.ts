@@ -22,7 +22,10 @@ async function shot(page: Page, name: string) {
   // capture the settled screen, never a frame of the page-enter animation
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.evaluate(() => Promise.all(document.getAnimations().map((a) => a.finished.catch(() => undefined))));
+  // a transient toast would cover the content under review: hide it for the capture only, then restore it
+  await page.addStyleTag({ content: ".toast { visibility: hidden !important; }" }).then((h) => h.evaluate((el) => el.setAttribute("data-shot", "1")));
   await page.screenshot({ path: `${SHOTS}/${name}.png` });
+  await page.evaluate(() => document.querySelectorAll("style[data-shot]").forEach((el) => el.remove()));
 }
 
 const at = () => new Date().toISOString();
@@ -231,4 +234,65 @@ test("W16 DNS-only: a Pi-hole client shows resolver health and evidence age, nev
   } finally {
     await pi.close();
   }
+});
+
+function learnedFlow(host: string, exe: string | null, verdict: "allow" | "deny" = "allow") {
+  return { seq: ++seq, at: at(), event: { type: "flow", attempt: { id: `f${seq}`, device_id: "omarchy", app: exe ? { family: "curl", executable: exe } : { family: "curl" }, remote_ip: "198.51.100.20", remote_port: 443, transport: "tcp", at: at(), hostname: { name: host }, process: { device_id: "omarchy", boot_id: "b", pid: 5000 + seq, start_generation: seq } }, decision: { verdict, profile: "default", policy_revision: 1 }, chain: ["zsh", "curl"] } };
+}
+
+test("W14 learning: bounded capture, candidate review with the permission diff and gaps, accept (owner), enforce needs the owner key", async () => {
+  const page = await signedIn(h.ownerToken);
+  await page.goto(`${h.url}/#/learning`);
+  await page.getByRole("heading", { name: "Capture a workflow" }).waitFor();
+  await page.getByLabel("Executable (exact path)").fill("/usr/bin/curl");
+  await page.getByLabel("Workflow").fill("npm install");
+  await page.getByLabel("Network context").fill("home LAN");
+  await page.getByRole("button", { name: "Start capture" }).click();
+  await page.getByText("capturing", { exact: true }).waitFor();
+  await h.sync({ events: [learnedFlow("registry.npmjs.org", "/usr/bin/curl"), learnedFlow("registry.npmjs.org", "/usr/bin/curl"), learnedFlow("evil.example", "/usr/bin/curl", "deny"), learnedFlow("who.example", null)] });
+  await page.getByRole("button", { name: "Close and review" }).click();
+  await page.getByRole("heading", { name: "Permission diff" }).waitFor();
+  await page.getByText("2 would broaden").waitFor();
+  await page.getByText("unknown identity").first().waitFor();
+  await page.getByText(/Only ever refused/).waitFor();
+  const accept = page.getByRole("button", { name: /^Accept/ });
+  assert.equal(await accept.isDisabled(), true, "nothing is selected by default");
+  await page.getByLabel("Accept registry.npmjs.org:443").check();
+  await shot(page, "live-learning-candidate");
+  await accept.click();
+  await page.getByText(/acknowledge the gaps|incomplete/i).first().waitFor();
+  await page.getByText("I reviewed the gaps above").click();
+  await accept.click();
+  await page.getByRole("heading", { name: "Accepted entries" }).waitFor();
+  await page.getByText("immutable", { exact: true }).waitFor();
+  assert.equal(await page.getByText("evil.example").count(), 0, "a connection seen during capture is not in the baseline unless accepted");
+  await page.getByRole("button", { name: "Enforce with owner key" }).click();
+  await page.getByText("Prepared, not signed").waitFor();
+  await page.getByText(/moat-controller owner-authorize/).waitFor();
+  assert.equal(await page.getByRole("button", { name: "Ask the signer to sign" }).isDisabled(), true, "broadening waits for the owner key's authorization");
+  await shot(page, "live-learning-enforce");
+  // drift: new activity after approval is a new candidate in its own queue; the baseline does not change
+  await h.sync({ events: [learnedFlow("cdn.example", "/usr/bin/curl")] });
+  await page.getByRole("button", { name: "Review drift" }).click();
+  await page.getByText("drift since approval", { exact: false }).first().waitFor();
+  await page.getByText("cdn.example:443").waitFor();
+  await page.goto(`${h.url}/#/learning`);
+  await page.getByText("1 in queue").waitFor();
+  await shot(page, "live-learning-queues");
+  await page.close();
+});
+
+test("W14 packs: effective delta per module and unsupported cells per device; a viewer cannot start a capture", async () => {
+  const viewer = await signedIn(h.viewerToken);
+  await viewer.goto(`${h.url}/#/learning`);
+  assert.equal(await viewer.getByRole("button", { name: "Start capture" }).isDisabled(), true);
+  await viewer.close();
+  const page = await signedIn(h.ownerToken);
+  await page.goto(`${h.url}/#/learning/packs`);
+  await page.getByRole("heading", { name: "Basic coding" }).waitFor();
+  await page.getByText("unsupported cells").first().waitFor();
+  await page.getByText(/skipped with a report/).first().waitFor();
+  assert.equal(await page.getByRole("button", { name: /^Propose/ }).first().isDisabled(), true, "nothing is enabled by default");
+  await shot(page, "live-packs");
+  await page.close();
 });

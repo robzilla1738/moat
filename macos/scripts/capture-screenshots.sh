@@ -14,6 +14,7 @@ BIN="$APP/Contents/MacOS/Moat"
 shots=(
   "apps dark" "apps light" "activity dark" "activity light" "rules dark" "coverage light"
   "devices dark" "whatChanged light" "apps-isolated light" "menubar dark" "menubar light" "onboarding dark" "onboarding light" "localrule dark" "localrule light"
+  "learning dark" "candidate light" "packs dark"
 )
 captured=0
 for s in "${shots[@]}"; do

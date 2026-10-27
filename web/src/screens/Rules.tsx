@@ -1,3 +1,4 @@
+import { LearningNav } from "./Learning";
 import { useState } from "react";
 import { Badge, Card, Icon, Ident, SectionTitle } from "../components/ui";
 import type { WireProposal } from "../data/api";
@@ -9,8 +10,8 @@ const STATES: RevisionState[] = ["approved", "distributed", "received", "applied
 
 const AUTH: Record<string, [string, string]> = { owner_key: ["blue", "owner key"], narrowing: ["neutral", "narrowing"], temporary_grant_overlay: ["green", "grant overlay"], delegated_issuer: ["green", "delegated approval"] };
 
-/** A prepared rollback: a new proposal with an older revision's rules. Broadening needs an owner-key signature made off this page. */
-function ProposalPanel({ p, onDone }: { p: WireProposal; onDone: () => void }) {
+/** A prepared proposal (a rollback, a reviewed baseline or pack modules). Broadening needs an owner-key signature made off this page. */
+export function ProposalPanel({ p, onDone }: { p: WireProposal; onDone: () => void }) {
   const { approve, canAct } = useStore();
   const [auth, setAuth] = useState("");
   const [err, setErr] = useState<string | null>(null);
@@ -42,7 +43,7 @@ function ProposalPanel({ p, onDone }: { p: WireProposal; onDone: () => void }) {
     <Card className="proposal">
       <SectionTitle action={<Badge tone={p.broadening ? "amber" : "neutral"}>{p.broadening ? "broadens access" : "narrowing"}</Badge>}>Prepared, not signed</SectionTitle>
       <div className="small">
-        Proposal <Ident value={p.id} mono /> restores revision {p.rollback_of}'s rules as a new revision on top of {p.base_revision}. Nothing changes on any device until it is signed and each device reports it applied.
+        Proposal <Ident value={p.id} mono /> {p.rollback_of != null ? <>restores revision {p.rollback_of}'s rules as a new revision on top of {p.base_revision}.</> : <>({p.message}) builds on revision {p.base_revision}.</>} Nothing changes on any device until it is signed and each device reports it applied.
       </div>
       {p.broadening ? (
         <>
@@ -78,6 +79,7 @@ export function Rules({ go }: { go: (to: string) => void }) {
   const sim = data.simulation;
   return (
     <div className="page">
+      <LearningNav active="rules" />
       <div className="page-head">
         <h1>Rules</h1>
         <p className="lede">Policy lives in Git and is signed by a separate signer. Broadening changes need your owner key; agents can prepare a diff but never authorize one.</p>

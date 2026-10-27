@@ -58,3 +58,47 @@ export async function proposePack(c: Controller, actor: Principal, packs: Workfl
   const prop = await c.propose(actor, cur.source + packRules(p, ids), `Enable ${p.id}@${p.version}: ${ids.join(", ")}`);
   return { proposal: prop, omitted_modules: omitted, test_recipes: p.modules.filter((m) => ids.includes(m.id)).map((m) => ({ module: m.id, steps: m.test_recipe })), note: "Replay of recorded traffic is an estimate; canary on one device and run each module's test recipe before relying on it." };
 }
+
+export type CellSupport = "supported" | "untested" | "unsupported" | "unknown";
+
+/** Hosts, CIDRs and ports a module's rule material names (for the delta view; the compiler stays authoritative). */
+export function moduleDestinations(m: PackModule) {
+  const list = (k: string) => [...(m.rules.match(new RegExp(`\\b${k}\\s*=\\s*\\[([^\\]]*)\\]`))?.[1]?.matchAll(/"([^"]+)"/g) ?? [])].map((x) => x[1]!);
+  const ports = (m.rules.match(/\bports\s*=\s*\[([^\]]*)\]/)?.[1] ?? "").split(",").map((s) => Number(s.trim())).filter((n) => Number.isInteger(n) && n > 0);
+  const transport = m.rules.match(/\btransport\s*=\s*"([^"]+)"/)?.[1] ?? null;
+  return { hosts: list("hosts"), cidrs: list("cidrs"), ports, transport };
+}
+
+/**
+ * A pack's effective delta against the current policy and the enrolled devices: per module, whether it is already
+ * enabled, which destinations it would newly allow, and per device whether its required capabilities are supported
+ * there. A cell that is not `supported` is skipped on that device with a report (`on_unsupported = skip_with_report`),
+ * so the module would not take effect there.
+ */
+export function packDelta(c: Controller, p: WorkflowPack) {
+  const cur = c.currentRevision();
+  const source = cur?.source ?? "";
+  const devices = (c.db.prepare("SELECT id, name, platform, capabilities FROM devices WHERE revoked_at IS NULL ORDER BY id").all() as { id: string; name: string; platform: string; capabilities: string | null }[]).filter((d) => d.platform !== "dns");
+  const modules = p.modules.map((m) => {
+    const enabled = source.includes(`id = "pack-${p.id}-${m.id}"`);
+    const dest = moduleDestinations(m);
+    const named = [...dest.hosts, ...dest.cidrs];
+    const newly = enabled ? [] : named.filter((h) => !source.includes(`"${h}"`));
+    const cells = devices.map((d) => {
+      const caps = d.capabilities ? ((JSON.parse(d.capabilities) as { capabilities?: Record<string, { support?: string }> }).capabilities ?? {}) : {};
+      const per = m.required_capabilities.map((k) => ({ capability: k, support: (["supported", "untested", "unsupported"].includes(caps[k]?.support ?? "") ? caps[k]!.support : "unknown") as CellSupport }));
+      const support: CellSupport = per.every((x) => x.support === "supported") ? "supported" : per.some((x) => x.support === "unsupported") ? "unsupported" : per.some((x) => x.support === "unknown") ? "unknown" : "untested";
+      return { device_id: d.id, device: d.name, platform: d.platform, support, missing: per.filter((x) => x.support !== "supported"), takes_effect: support === "supported" };
+    });
+    return { id: m.id, name: m.name, optional: m.optional, rationale: m.rationale, required_capabilities: m.required_capabilities, enabled, destinations: dest, newly_allowed: newly, expected_breakage_if_omitted: m.expected_breakage_if_omitted, provenance: m.provenance, compatible_versions: m.compatible_versions, test_recipe: m.test_recipe, cells, unsupported_cells: cells.filter((x) => !x.takes_effect).length };
+  });
+  return {
+    pack: { id: p.id, version: p.version, name: p.name, description: p.description, profile: p.profile },
+    revision: cur?.revision ?? null,
+    problems: packProblems(p),
+    devices: devices.map((d) => ({ id: d.id, name: d.name, platform: d.platform })),
+    modules,
+    effective: { modules_to_enable: modules.filter((m) => !m.enabled).length, newly_allowed: [...new Set(modules.flatMap((m) => m.newly_allowed))], unsupported_cells: modules.reduce((n, m) => n + m.unsupported_cells, 0) },
+    note: "The delta is computed from the pack's rule material and the devices' advertised capabilities. Enabling modules is an owner-authorized broadening proposal; replay of recorded traffic is an estimate.",
+  };
+}
