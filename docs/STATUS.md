@@ -82,7 +82,7 @@ above is updated with the run that proves it.
 
 | Package | Owner | State |
 | --- | --- | --- |
-| W01 contracts and ledger | Lane A | ledger landed; schemas and fixtures in progress |
+| W01 contracts and ledger | Lane A | ledger, six versioned schemas, canonical rules, 38 shared fixtures; Rust + JS consumers in CI. Swift/TS app consumers: Lane B |
 | W02 semantics and broadening | Lane A | not started |
 | W03 exact grants (core side) | Lane A | not started |
 | W04 Linux launch authority | Lane A | not started |

@@ -1,0 +1,24 @@
+{
+  "schema": "moat.activation.v1",
+  "device_id": "arch-desk",
+  "boot_id": "6f1c2a8e-boot",
+  "phase": "restored",
+  "desired": {
+    "revision": 12,
+    "effective_digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+  },
+  "received": {
+    "revision": 12,
+    "effective_digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+  },
+  "verified_candidate": {
+    "revision": 12,
+    "effective_digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+  },
+  "active": {
+    "revision": 11,
+    "effective_digest": "sha256:4444444444444444444444444444444444444444444444444444444444444444"
+  },
+  "replay_high_water": 12,
+  "durability": "durable"
+}

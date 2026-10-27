@@ -1,0 +1,14 @@
+{
+  "schema": "moat.subject.v1",
+  "device_id": "arch-desk",
+  "boot_id": "6f1c2a8e-boot",
+  "process": {
+    "pid": 4242,
+    "start_generation": 918273
+  },
+  "executable": {
+    "path": "/usr/bin/curl",
+    "digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+  },
+  "user": "robert"
+}

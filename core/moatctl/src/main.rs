@@ -138,11 +138,52 @@ enum Cmd {
     },
     /// Print the validated policy as normalized JSON (for tools that must not re-implement TOML parsing).
     Normalize { policy: PathBuf },
+    /// Validate a W01 contract object (contracts/schemas) and print its canonical form and digest.
+    Contract {
+        /// Schema id, e.g. moat.grant.v1. Defaults to the object's own `schema` field.
+        #[arg(long)]
+        schema: Option<String>,
+        file: PathBuf,
+    },
     /// Run the implementation-independent conformance cases in a directory.
     Conformance {
         #[arg(default_value = "conformance")]
         dir: PathBuf,
     },
+}
+
+fn contract(schema: Option<String>, file: &Path, o: &mut Out) -> Result<(), String> {
+    use moat_core::contracts::{self as c, ActivationState, CapabilityDispositions, Contract, Event, Grant, Receipt, Subject};
+    let text = fs::read_to_string(file).map_err(|e| format!("{}: {e}", file.display()))?;
+    let v: Value = serde_json::from_str(&text).map_err(|e| format!("invalid JSON: {e}"))?;
+    let schema = schema.or_else(|| v.get("schema").and_then(Value::as_str).map(str::to_string)).ok_or("no schema id")?;
+    fn go<T: Contract>(v: Value) -> Result<String, Vec<c::ContractError>> {
+        c::from_value::<T>(v).map(|t| c::to_canonical_string(&t))
+    }
+    let r = match schema.as_str() {
+        "moat.subject.v1" => go::<Subject>(v),
+        "moat.grant.v1" => go::<Grant>(v),
+        "moat.capability_dispositions.v1" => go::<CapabilityDispositions>(v),
+        "moat.activation.v1" => go::<ActivationState>(v),
+        "moat.receipt.v1" => go::<Receipt>(v),
+        "moat.event.v1" => go::<Event>(v),
+        other => return Err(format!("unknown contract schema {other}")),
+    };
+    match r {
+        Ok(canon) => {
+            let d = c::digest_bytes(canon.as_bytes());
+            if o.json {
+                println!("{}", json!({"valid": true, "schema": schema, "canonical": canon, "digest": d}));
+            } else {
+                println!("{d}\n{canon}");
+            }
+            Ok(())
+        }
+        Err(errs) => {
+            o.code = 2;
+            Err(errs.iter().map(|e| e.to_string()).collect::<Vec<_>>().join("; "))
+        }
+    }
 }
 
 struct Out {
@@ -467,6 +508,7 @@ fn run(cmd: Cmd, o: &mut Out) -> Result<(), String> {
             Ok(())
         }
         Cmd::Conformance { dir } => conformance(&dir, o),
+        Cmd::Contract { schema, file } => contract(schema, &file, o),
     }
 }
 

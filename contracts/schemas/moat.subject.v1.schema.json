@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/robzilla1738/moat/contracts/schemas/moat.subject.v1.schema.json",
+  "title": "moat.subject.v1",
+  "description": "Who a decision, grant or event is about, at the precision the producer can prove. Absent = unknown, never 'any'. boot_id is required when process or task_id is present.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "device_id",
+    "schema"
+  ],
+  "properties": {
+    "schema": {
+      "const": "moat.subject.v1"
+    },
+    "device_id": {
+      "type": "string",
+      "description": "[A-Za-z0-9-_.:@/]{1,128}"
+    },
+    "boot_id": {
+      "type": "string",
+      "description": "[A-Za-z0-9-_.:@/]{1,128}"
+    },
+    "process": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "pid",
+        "start_generation"
+      ],
+      "properties": {
+        "pid": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "start_generation": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      }
+    },
+    "task_id": {
+      "type": "string",
+      "description": "[A-Za-z0-9-_.:@/]{1,128}"
+    },
+    "executable": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {
+        "team_id": {
+          "type": "string"
+        },
+        "signing_id": {
+          "type": "string"
+        },
+        "bundle_id": {
+          "type": "string"
+        },
+        "digest": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      }
+    },
+    "user": {
+      "type": "string"
+    }
+  }
+}

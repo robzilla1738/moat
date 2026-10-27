@@ -1,0 +1,137 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/robzilla1738/moat/contracts/schemas/moat.capability_dispositions.v1.schema.json",
+  "title": "moat.capability_dispositions.v1",
+  "description": "Per-endpoint capability cells and per-item (profile/rule) dispositions. A restrictive item is never omitted_accepted; supported_installed needs evidence_ref.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "backend",
+    "backend_version",
+    "capability_generation",
+    "cells",
+    "device_id",
+    "schema"
+  ],
+  "properties": {
+    "schema": {
+      "const": "moat.capability_dispositions.v1"
+    },
+    "device_id": {
+      "type": "string",
+      "description": "[A-Za-z0-9-_.:@/]{1,128}"
+    },
+    "backend": {
+      "type": "string",
+      "description": "[A-Za-z0-9-_.:@/]{1,128}"
+    },
+    "backend_version": {
+      "type": "string"
+    },
+    "capability_generation": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "cells": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "capability",
+          "destination_evidence",
+          "disposition",
+          "lifecycle",
+          "mode",
+          "subject",
+          "transport"
+        ],
+        "properties": {
+          "capability": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "subject": {
+            "type": "string"
+          },
+          "destination_evidence": {
+            "type": "string"
+          },
+          "transport": {
+            "type": "string",
+            "enum": [
+              "tcp",
+              "udp",
+              "any"
+            ]
+          },
+          "lifecycle": {
+            "type": "string"
+          },
+          "disposition": {
+            "type": "string",
+            "enum": [
+              "supported_installed",
+              "implemented_unproven",
+              "unsupported_rejected",
+              "omitted_accepted",
+              "unknown_degraded"
+            ]
+          },
+          "evidence_ref": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "policy_digest": {
+      "type": "string",
+      "description": "sha256: + 64 lowercase hex"
+    },
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "disposition",
+          "item",
+          "restrictive"
+        ],
+        "properties": {
+          "item": {
+            "type": "string"
+          },
+          "restrictive": {
+            "type": "boolean"
+          },
+          "disposition": {
+            "type": "string",
+            "enum": [
+              "supported_installed",
+              "implemented_unproven",
+              "unsupported_rejected",
+              "omitted_accepted",
+              "unknown_degraded"
+            ]
+          },
+          "missing": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "note": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}
