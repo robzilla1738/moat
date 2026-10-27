@@ -22,7 +22,10 @@ async function shot(page: Page, name: string) {
   // capture the settled screen, never a frame of the page-enter animation
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.evaluate(() => Promise.all(document.getAnimations().map((a) => a.finished.catch(() => undefined))));
+  // a transient toast would cover the content under review: hide it for the capture only, then restore it
+  await page.addStyleTag({ content: ".toast { visibility: hidden !important; }" }).then((h) => h.evaluate((el) => el.setAttribute("data-shot", "1")));
   await page.screenshot({ path: `${SHOTS}/${name}.png` });
+  await page.evaluate(() => document.querySelectorAll("style[data-shot]").forEach((el) => el.remove()));
 }
 
 const at = () => new Date().toISOString();

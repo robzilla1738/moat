@@ -24,7 +24,7 @@ struct LearningScreen: View {
                                 Text(c.workflow).font(.callout.weight(.semibold))
                                 Pill(text: Date() < c.end ? "capturing" : "window ended", tone: Date() < c.end ? .blue : .amber, dot: Date() < c.end)
                             }
-                            Text("\(c.appName) · \(c.networkContext) · ends \(TimeText.ago(c.end))").font(.caption).foregroundStyle(p.muted).lineLimit(1)
+                            Text("\(c.appName) · \(c.networkContext) · \(TimeText.windowEnd(c.end))").font(.caption).foregroundStyle(p.muted).lineLimit(1)
                             Text(c.identityLabel).font(.system(.caption, design: .monospaced)).foregroundStyle(p.text2).lineLimit(1).truncationMode(.middle)
                         }
                         Spacer()

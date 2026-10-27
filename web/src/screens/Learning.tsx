@@ -273,7 +273,7 @@ export function CandidateReview({ id, go }: { id: string; go: (to: string) => vo
     if (mode === "demo") return say(`Demo: nothing was sent. Accepting ${b.accept.length} of ${c.entries.length} entries makes a new immutable baseline; it is enforced only after your owner key signs it.`);
     try {
       const base = await postLive<Baseline>(`/v1/learning/candidates/${encodeURIComponent(c.id)}/approve`, b);
-      say(`Reviewed baseline recorded with ${base.entries.length} entries. Not enforced until you sign it with your owner key.`);
+      say(`Reviewed baseline recorded with ${base.entries.length} ${base.entries.length === 1 ? "entry" : "entries"}. Not enforced until you sign it with your owner key.`);
       go(`learning/b/${encodeURIComponent(base.id)}`);
     } catch (e) {
       setErr((e as Error).message);

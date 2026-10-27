@@ -236,4 +236,18 @@ enum TimeText {
         if s < 86400 { return "\(s / 3600)h ago" }
         return "\(s / 86400)d ago"
     }
+
+    /// "in 50m" for a future time; used for windows that have not ended yet.
+    static func until(_ d: Date, now: Date = Date()) -> String {
+        let s = max(0, Int(d.timeIntervalSince(now)))
+        if s < 60 { return "in \(s)s" }
+        if s < 3600 { return "in \(s / 60)m" }
+        if s < 86400 { return "in \(s / 3600)h" }
+        return "in \(s / 86400)d"
+    }
+
+    /// A capture window's end, worded for whether it has passed.
+    static func windowEnd(_ d: Date, now: Date = Date()) -> String {
+        d > now ? "ends \(until(d, now: now))" : "ended \(ago(d, now: now))"
+    }
 }
