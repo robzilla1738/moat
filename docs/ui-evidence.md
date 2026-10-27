@@ -75,3 +75,24 @@ punycode names are flagged, and absurd lengths are shortened with a note.
 Later surfaces follow the same rules: the Apps-first standalone views (W12), reconciliation and recovery states from
 W05/W06 events (#36), learning review (W14, [learning.md](learning.md)) and DNS-only devices (W16,
 [integrations.md](integrations.md)).
+
+## Screenshots
+
+Every image in [`docs/screenshots`](screenshots) is a CI capture on demo data, not a real device. Light and dark are
+captured for the same screens so the README can follow the reader's GitHub theme.
+
+| Surface | Light | Dark | Source |
+|---|---|---|---|
+| Desktop web, Apps (landing) | [desktop-home-light](screenshots/desktop-home-light.png) | [desktop-home-dark](screenshots/desktop-home-dark.png) | `web/scripts/screenshots.mjs` (demo build, Chromium, axe-core AA check) |
+| Desktop web, Overview (full page) | [desktop-overview-light](screenshots/desktop-overview-light.png) | [desktop-overview-dark](screenshots/desktop-overview-dark.png) | same |
+| Desktop web, Activity / Rules / Devices / Packs | [activity](screenshots/desktop-activity-light.png) · [rules](screenshots/desktop-rules-light.png) · [devices](screenshots/desktop-devices-light.png) · [packs](screenshots/desktop-packs-light.png) | [activity](screenshots/desktop-activity-dark.png) · [rules](screenshots/desktop-rules-dark.png) · [devices](screenshots/desktop-devices-dark.png) · [packs](screenshots/desktop-packs-dark.png) | same |
+| Phone, Apps / Overview | [home](screenshots/mobile-home-light.png) · [overview](screenshots/mobile-overview-light.png) | [home](screenshots/mobile-home-dark.png) · [overview](screenshots/mobile-overview-dark.png) | same, 390 × 844 at 3× |
+| Phone, Activity / Allow once / Coverage / DNS device | [activity](screenshots/mobile-activity-light.png) · [allow once](screenshots/mobile-allow-once-light.png) · [coverage](screenshots/mobile-coverage-light.png) · [DNS device](screenshots/mobile-device-dns-light.png) | [activity](screenshots/mobile-activity-dark.png) · [allow once](screenshots/mobile-allow-once-dark.png) · [coverage](screenshots/mobile-coverage-dark.png) · [DNS device](screenshots/mobile-device-dns-dark.png) | same |
+| Phone, Learning | [learning](screenshots/mobile-learning-light.png) | [candidate](screenshots/mobile-learning-candidate-dark.png) | same |
+| Reduced transparency | [mobile-home-reduced-transparency-light](screenshots/mobile-home-reduced-transparency-light.png) | | same, `prefers-reduced-transparency: reduce` |
+| Live UI against a real controller | `live-*.png` | | `web/e2e/live.e2e.ts` (CI job `live-e2e`; a controller on the CI runner, not a fleet) |
+| macOS app window | [apps](screenshots/macos-apps-light.png) · [activity](screenshots/macos-activity-light.png) · [coverage](screenshots/macos-coverage-light.png) · [what changed](screenshots/macos-whatChanged-light.png) | [apps](screenshots/macos-apps-dark.png) · [activity](screenshots/macos-activity-dark.png) · [rules](screenshots/macos-rules-dark.png) · [this computer](screenshots/macos-devices-dark.png) | `macos/scripts/capture-screenshots.sh` on the `macos-26` runner, unsigned build, `--demo` |
+| macOS menu bar panel, onboarding, local rule | [menubar](screenshots/macos-menubar-light.png) · [onboarding](screenshots/macos-onboarding-light.png) · [local rule](screenshots/macos-localrule-light.png) | [menubar](screenshots/macos-menubar-dark.png) · [onboarding](screenshots/macos-onboarding-dark.png) · [local rule](screenshots/macos-localrule-dark.png) | same |
+
+The design rules these screens follow, including that every chart is drawn from recorded fields and demo charts are
+tagged "Sample data", are in [design.md](design.md).
