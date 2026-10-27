@@ -86,7 +86,8 @@ public final class ControlHandler: @unchecked Sendable {
     private var restoration: String?
     /// A due canary rollback whose fallback could not be loaded: the trial revision is still in force.
     private var rollbackPending: String?
-    /// Start-up restoration found nothing it could verify and load: the owner must recover at this Mac.
+    /// Reserved for a Mac activation journal that cannot reconcile (none exists yet). A failed restoration stays
+    /// `degraded` (W07): the owner can fix trust and reload without a recovery ceremony.
     private var recoveryRequired: String?
 
     private func setLoadError(_ e: String?) {
@@ -132,7 +133,6 @@ public final class ControlHandler: @unchecked Sendable {
         })
         lock.lock()
         restoration = outcome.label
-        if case .failed = outcome { recoveryRequired = outcome.label } else { recoveryRequired = nil }
         lock.unlock()
         if let entry, let b = built, b.0 == entry.policyJSON {
             engine.install(entry.summary, evaluator: b.1, expiries: PolicyExpiries.from(policyJSON: entry.policyJSON), trustGeneration: trustGeneration)
