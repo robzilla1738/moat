@@ -8,6 +8,7 @@ import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium, type Browser, type Page } from "playwright";
 import { startHarness, type Harness } from "../../controller/test/live-harness.ts";
+import { mockPihole } from "../../controller/test/resolver-mocks.ts";
 
 const WEB = resolve(dirname(fileURLToPath(import.meta.url)), "../build/live");
 let h: Harness;
@@ -17,7 +18,11 @@ const dialogs: string[] = [];
 const SHOTS = process.env.MOAT_SCREENSHOT_DIR;
 /** Evidence screenshots of the real live UI (CI uploads them; docs/screenshots keeps reviewed copies). */
 async function shot(page: Page, name: string) {
-  if (SHOTS) await page.screenshot({ path: `${SHOTS}/${name}.png` });
+  if (!SHOTS) return;
+  // capture the settled screen, never a frame of the page-enter animation
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.evaluate(() => Promise.all(document.getAnimations().map((a) => a.finished.catch(() => undefined))));
+  await page.screenshot({ path: `${SHOTS}/${name}.png` });
 }
 
 const at = () => new Date().toISOString();
@@ -172,8 +177,9 @@ test("hostile names and destinations render as inert text with a visible warning
 
 test("W12 standalone: Apps-first landing, app detail with four evidence sections, diagnostics and What changed?", async () => {
   const page = await signedIn(h.ownerToken);
-  // one enrolled device: the fleet section reads "This computer", not empty fleet administration
-  await page.locator(".tabbar").getByText("This computer").waitFor();
+  // one enrolled device: the fleet section reads "Computer" in the phone tab bar ("This computer" elsewhere), not
+  // empty fleet administration
+  await page.locator(".tabbar").getByText("Computer", { exact: true }).waitFor();
   await page.getByRole("heading", { name: "Apps", exact: true }).waitFor();
   // the app card (decision cards above it also mention curl, as the blocked process)
   await page.locator("button.app-card").filter({ hasText: "/usr/bin/curl" }).first().click();
@@ -203,4 +209,26 @@ test("controller outage: the page says it is not current and pauses actions; no 
   if (await btn.count()) assert.equal(await btn.isDisabled(), true);
   assert.equal(await page.getByText("Living room TV").count(), 0);
   await page.close();
+});
+
+test("W16 DNS-only: a Pi-hole client shows resolver health and evidence age, never flows, processes or bytes", async () => {
+  const pi = await mockPihole();
+  try {
+    h.c.integrations.configureResolvers([{ id: "pihole", kind: "pihole", url: pi.url, password: "pw" }], (u, i) => fetch(u, i) as never);
+    const r = await h.c.integrations.pollResolver("pihole");
+    assert.equal(r.health, "ok");
+    const page = await signedIn(h.ownerToken);
+    await page.goto(`${h.url}/#/devices/${encodeURIComponent("dns:pihole:192.168.1.50")}`);
+    await page.getByText("Evidence age").waitFor();
+    await page.getByText(/via Pi-hole \(pihole\)/).first().waitFor();
+    await page.getByText("History gaps").waitFor();
+    assert.equal(await page.getByText("Flows today").count(), 0);
+    assert.equal(await page.getByText(/bytes? (out|in)/i).count(), 0);
+    await shot(page, "live-dns-device");
+    await page.goto(`${h.url}/#/devices`);
+    await page.getByText(/resolver ok · polled/).first().waitFor();
+    await page.close();
+  } finally {
+    await pi.close();
+  }
 });

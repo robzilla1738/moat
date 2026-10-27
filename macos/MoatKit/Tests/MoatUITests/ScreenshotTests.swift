@@ -20,8 +20,10 @@ final class ScreenshotTests: XCTestCase {
     }
 
     func render<V: View>(_ view: V, _ scheme: ColorScheme, width: CGFloat, height: CGFloat, name: String) throws {
+        // The window's RootView supplies the palette; a bare render must too, or light renders draw dark cards.
         let framed = view
             .environment(\.colorScheme, scheme)
+            .environment(\.palette, Palette.of(scheme))
             .frame(width: width, height: height, alignment: .topLeading)
             .background(scheme == .dark ? Color.black : Color.white)
         let r = ImageRenderer(content: framed)
@@ -92,6 +94,12 @@ final class ScreenshotTests: XCTestCase {
         try render(ScreenContent(model: m).padding(28), .dark, width: 1040, height: 1400, name: "appDetail-selected-dark")
         m.screen = .whatChanged
         try render(ScreenContent(model: m).padding(28), .light, width: 1040, height: 900, name: "whatChanged-light")
+    }
+
+    /// The narrow temporary rule card on its own (window capture: `--screen localrule`).
+    func testLocalRuleSheetRenders() throws {
+        try render(LocalRuleSheet(model: model(.appDetail)), .dark, width: 620, height: 900, name: "localrule-dark")
+        try render(LocalRuleSheet(model: model(.appDetail)), .light, width: 620, height: 900, name: "localrule-light")
     }
 
     func testSidebarIsAppsFirstAndSaysThisComputer() {

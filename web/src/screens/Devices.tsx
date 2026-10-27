@@ -65,7 +65,7 @@ export function DeviceDetail({ id, go }: { id: string; go: (to: string) => void 
               {d.sync.desired ? ` · wants rev ${d.sync.desired}` : ""}
             </Badge>
           )}
-          <span className="muted small">seen {ago(d.lastSeen)}</span>
+          <span className="muted small">{d.dns ? `resolver polled ${ago(d.lastSeen)}` : `seen ${ago(d.lastSeen)}`}</span>
         </div>
       </div>
       {d.awaitingRetarget && <RetargetCard />}
@@ -122,6 +122,8 @@ sudo moatd recover isolate --keep 100.100.1.2/32`}</pre>
   );
 }
 
+const resolverLabel = (dns: NonNullable<Device["dns"]>) => `via ${dns.resolverKind === "pihole" ? "Pi-hole" : dns.resolverKind === "adguard" ? "AdGuard Home" : "resolver"} (${dns.resolver})`;
+
 /**
  * W16 DNS-only presentation: resolver health and evidence age (the adapter's last good poll), the client's last query
  * and declared history gaps. No flows, processes or bytes: DNS cannot establish them.
@@ -134,7 +136,7 @@ function DnsEvidence({ d, ageMs }: { d: Device; ageMs: number | null }) {
         <Card>
           <div className="stat-label">Resolver</div>
           <div className={`stat-value ${dns.resolverHealth === "ok" ? "" : "bad"}`}>{dns.resolverHealth.replace(/_/g, " ")}</div>
-          <div className="muted small">{d.model}</div>
+          <div className="muted small">{resolverLabel(dns)}</div>
         </Card>
         <Card>
           <div className="stat-label">Evidence age</div>

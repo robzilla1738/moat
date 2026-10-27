@@ -163,6 +163,8 @@ struct RuleAuthoringCard: View {
             Picker("Destination", selection: $host) {
                 ForEach(app.destinations.prefix(10), id: \.host) { d in Text("\(d.host):\(d.port)").tag(d.host) }
             }
+            // The picker shows the destination the plan uses (the most frequent one until the owner picks another).
+            .onAppear { if host.isEmpty { host = app.destinations.first?.host ?? "" } }
             Stepper("For \(minutes) minutes", value: $minutes, in: 5 ... 480, step: 5)
             Text(plan.ownerPlan(id: "preview").display).font(.system(.callout, design: .monospaced))
             ForEach(plan.problems(), id: \.self) { pr in Text(pr).font(.caption).foregroundStyle(p.red) }
@@ -372,3 +374,31 @@ struct FleetEventsCard: View {
     }
 }
 
+
+/// The local-rule authoring surface on its own (Apps → app → "Narrow temporary rule"), for the docs screenshot of
+/// the plan the owner authorizes. It shows the first app with a reported identity, exactly as the app detail does.
+public struct LocalRuleSheet: View {
+    @ObservedObject var model: AppModel
+    @Environment(\.colorScheme) private var scheme
+
+    public init(model: AppModel) {
+        self.model = model
+    }
+
+    public var body: some View {
+        let p = Palette.of(scheme)
+        VStack(alignment: .leading, spacing: 14) {
+            if let app = model.apps.first(where: { $0.identityKnown }) {
+                ScreenHeader(eyebrow: app.teamID.map { "Team \($0)" } ?? "Unsigned or ad-hoc", title: app.name, dim: app.executable ?? app.signingID ?? "")
+                RuleAuthoringCard(model: model, app: app)
+            } else {
+                EmptyStateView(symbol: "app.dashed", title: "No app with a reported identity", text: "A rule is authored for an app macOS identified. A name alone is never identity.")
+            }
+        }
+        .padding(24)
+        .frame(width: 620, alignment: .topLeading)
+        .background(p.bg)
+        .environment(\.palette, p)
+        .tint(p.accent)
+    }
+}
