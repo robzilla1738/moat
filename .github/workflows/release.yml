@@ -10,7 +10,7 @@ name: release
 # passed.
 on:
   push:
-    branches: [main, w15-sbom-attest] # TEMP: exercise signing before merge
+    branches: [main]
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
