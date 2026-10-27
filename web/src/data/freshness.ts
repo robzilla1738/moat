@@ -6,6 +6,7 @@
  * the snapshot, so a skewed browser clock neither freshens nor ages evidence.
  */
 import type { Coverage, Device, Snapshot } from "./types";
+import { COVERAGE } from "../format";
 
 /** Matches the controller's STALE_AFTER_MS; a device silent for longer no longer supports a coverage claim. */
 export const STALE_AFTER_MS = 10 * 60_000;
@@ -34,13 +35,13 @@ export function deviceFreshness(d: Pick<Device, "coverage" | "lastSeen" | "platf
   const ageMs = evidenceAgeMs(d.lastSeen, snap, now);
   if (d.dns) {
     // DNS-only: the evidence is the resolver adapter's last good poll. A failing adapter means nothing is current.
-    if (d.dns.resolverHealth !== "ok") return { coverage: "unknown", stale: true, ageMs, note: `Resolver ${d.dns.resolver}: ${d.dns.resolverHealth.replace(/_/g, " ")}. Its last good poll was ${ageMs === null ? "never" : `${Math.round(ageMs / 60_000)} min ago`}; nothing about this client is current.` };
-    if (ageMs === null) return { coverage: "unknown", stale: true, ageMs, note: `Resolver ${d.dns.resolver} has not been polled yet.` };
+    if (d.dns.resolverHealth !== "ok") return { coverage: "unknown", stale: true, ageMs, note: `The web filter (${d.dns.resolver}) reports “${d.dns.resolverHealth.replace(/_/g, " ")}”. It last answered ${ageMs === null ? "never" : `${Math.round(ageMs / 60_000)} min ago`}, so nothing about this device is current.` };
+    if (ageMs === null) return { coverage: "unknown", stale: true, ageMs, note: `Moat hasn't heard from the web filter (${d.dns.resolver}) yet.` };
   }
-  if (ageMs === null) return { coverage: "unknown", stale: true, ageMs, note: "This device has never reported. Moat cannot say what it enforces." };
+  if (ageMs === null) return { coverage: "unknown", stale: true, ageMs, note: "This device has never reported, so we can't say what it protects." };
   if (ageMs > STALE_AFTER_MS) {
     const min = Math.round(ageMs / 60_000);
-    return { coverage: "unknown", stale: true, ageMs, note: `Last report ${min} min ago. It said “${d.coverage}”; that may still be enforced locally, but it is not current evidence.` };
+    return { coverage: "unknown", stale: true, ageMs, note: `Last heard from ${min} min ago, when it said “${COVERAGE[d.coverage].label}”. That may still be true on the device, but it isn't current.` };
   }
   return { coverage: d.coverage, stale: false, ageMs, note: null };
 }

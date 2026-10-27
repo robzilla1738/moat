@@ -1,9 +1,9 @@
 import SwiftUI
 
-// Control surfaces in the bento design (docs/design.md). Moat's own controls are opaque: a solid fill with a hairline
-// border, so text always sits on a known colour and Reduce Transparency needs no special case. The system still draws
-// its own chrome (the sidebar, toolbar and menu bar) the native way. The helpers keep their names so call sites stay
-// small:
+// Control surfaces (docs/design.md). Moat's own controls are opaque: a solid fill with a hairline border, so text
+// always sits on a known colour and Reduce Transparency needs no special case. The system still draws its own chrome
+// (the sidebar, toolbar and menu bar) the native way. The `moatGlass*` names are historical; nothing here is
+// translucent:
 //
 // * `moatGlass` draws a solid surface (tinted for prominent controls) with a border; Increase Contrast strengthens it;
 // * `moatButtonStyle` uses the bordered button styles;
@@ -45,9 +45,9 @@ extension View {
     /// Primary / secondary control buttons: bordered prominent / bordered.
     @ViewBuilder func moatButtonStyle(prominent: Bool = false, destructive: Bool = false) -> some View {
         if prominent {
-            buttonStyle(.borderedProminent).tint(destructive ? Color.red : nil)
+            buttonStyle(.borderedProminent).tint(destructive ? BrandColor.destructive : nil)
         } else {
-            buttonStyle(.bordered).tint(destructive ? Color.red : nil)
+            buttonStyle(.bordered).tint(destructive ? BrandColor.destructive : nil)
         }
     }
 
@@ -86,13 +86,5 @@ struct MoatGlassContainer<Content: View>: View {
         } else {
             content
         }
-    }
-}
-
-/// True when the native Liquid Glass APIs are available at runtime (shown in Settings and the About text).
-enum LiquidGlass {
-    static var available: Bool {
-        if #available(macOS 26.0, *) { return true }
-        return false
     }
 }

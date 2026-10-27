@@ -1,33 +1,43 @@
+/**
+ * Activity ("What happened, and is any of it a problem?") and the decision card ("Should I allow this?").
+ * Plain words first; hostnames stay visible because they are what you decide on, and everything else technical
+ * (task id, port, rule and alert versions, the program chain) sits under Details.
+ */
 import { useState } from "react";
-import { Badge, Card, Chain, Empty, Icon, Ident, SectionTitle, Steps } from "../components/ui";
+import { Actions, Button, Card, Chain, Details, EmptyState, Facts, Fine, Icon, Ident, Page, StatusChip, Steps, type IconName, type Tone } from "../components/ui";
 import { useData, useStore } from "../data/store";
 import type { ActionState, Incident } from "../data/types";
 import { ago, until } from "../format";
 
-const KIND: Record<Incident["kind"], { label: string; icon: "lock" | "alert" | "clock" | "globe" | "spark" }> = {
-  blocked_connection: { label: "Blocked", icon: "lock" },
-  coverage_lost: { label: "Coverage lost", icon: "alert" },
-  telemetry_gap: { label: "Activity gap", icon: "clock" },
-  policy_rejected: { label: "Policy rejected", icon: "alert" },
-  policy_rolled_back: { label: "Trial rolled back", icon: "clock" },
-  dns_blocked: { label: "DNS block", icon: "globe" },
-  new_destination: { label: "New destination", icon: "spark" },
-  recovery_required: { label: "Recovery required", icon: "alert" },
-  rollback_pending: { label: "Rollback pending", icon: "alert" },
-  session_not_adopted: { label: "Task stopped after restart", icon: "clock" },
-  proxy_limit: { label: "Proxy limit reached", icon: "alert" },
+export const KIND: Record<Incident["kind"], { label: string; icon: IconName; tone: Tone }> = {
+  blocked_connection: { label: "Blocked", icon: "lock", tone: "red" },
+  coverage_lost: { label: "Protection lost", icon: "alert", tone: "red" },
+  telemetry_gap: { label: "Gap in reports", icon: "clock", tone: "amber" },
+  policy_rejected: { label: "Rule change refused", icon: "alert", tone: "amber" },
+  policy_rolled_back: { label: "Trial change undone", icon: "undo", tone: "amber" },
+  dns_blocked: { label: "Blocked by web filter", icon: "globe", tone: "violet" },
+  new_destination: { label: "New place", icon: "spark", tone: "blue" },
+  recovery_required: { label: "Needs you at the device", icon: "wrench", tone: "red" },
+  rollback_pending: { label: "Undo didn't finish", icon: "undo", tone: "red" },
+  session_not_adopted: { label: "Task stopped after restart", icon: "clock", tone: "amber" },
+  proxy_limit: { label: "Limit reached", icon: "alert", tone: "amber" },
 };
 
-/** Why an allow-once cannot be offered for this incident, or null when the controller could accept it. */
+/** The app a person would recognise: the start of the program chain ("Claude Code"), else the app the device named. */
+export function appOf(i: Incident): string {
+  return i.chain?.[0]?.name ?? i.app ?? "an unknown app";
+}
+
+/** Why an allow-once cannot be offered for this alert, or null when the controller could accept it. */
 export function allowOnceUnavailable(i: Incident): string | null {
   if (i.kind !== "blocked_connection") return "Only a blocked connection can be allowed once.";
-  if (!i.sessionId) return "Allow once is bound to a verified protected session. Ordinary-app grants stay unavailable until device-scoped app identity is proven (roadmap W03/W07).";
-  if (!i.port || i.destination === "rule-scoped" || i.destination === "-") return "This platform recorded a rule-scoped counter, not a destination. Make a reviewed policy change instead.";
-  if (i.state === "resolved") return "This incident is resolved.";
+  if (!i.sessionId) return "Allow once only works inside a protected task for now. For other apps it stays off until Moat can prove the app on the device (roadmap W03/W07).";
+  if (!i.port || i.destination === "rule-scoped" || i.destination === "-") return "This device only recorded which rule matched (rule-scoped), not the address. Change your rules instead.";
+  if (i.state === "resolved") return "This is already resolved.";
   return null;
 }
 
-/** The exact permission, rendered from the controller's canonical plan (not from explanatory text). */
+/** The exact permission, rendered from the controller's canonical plan (not from explanatory text). Always visible. */
 function PlanReview({ i, a }: { i: Incident; a: ActionState }) {
   const { approvePlan, cancelPlan, issuer, canAct } = useStore();
   const data = useData();
@@ -36,67 +46,66 @@ function PlanReview({ i, a }: { i: Incident; a: ActionState }) {
   const delegated = !!issuer && p.issuer.role === "delegated" && p.issuer.key_id === issuer.keyId;
   return (
     <div className="plan" aria-label="Exact permission to approve">
-      <dl className="facts plan-facts">
-        <div>
-          <dt>Device</dt>
-          <dd>
-            <Ident value={dev?.name ?? p.scope.device_id} /> <span className="muted small">(<Ident value={p.scope.device_id} mono />)</span>
-          </dd>
-        </div>
-        <div>
-          <dt>{p.scope.kind === "task" ? "Session" : "App"}</dt>
-          <dd>{p.scope.kind === "task" ? <Ident value={p.scope.task_id} mono /> : <Ident value={p.scope.executable.path} mono />}</dd>
-        </div>
-        <div>
-          <dt>Destination</dt>
-          <dd>
-            <Ident value={p.destination.kind === "address" ? p.destination.address : p.destination.hostname} kind="host" mono /> · {p.transport.toUpperCase()} {p.port}
-          </dd>
-        </div>
-        <div>
-          <dt>New connections until</dt>
-          <dd>
-            {new Date(p.admission_until).toLocaleString()} <span className="muted small">({until(p.admission_until)}; retries keep this deadline)</span>
-          </dd>
-        </div>
-        <div>
-          <dt>Open connections</dt>
-          <dd>{p.stream_policy === "admission_only" ? "Not cut at the deadline (admission only)" : p.stream_policy}</dd>
-        </div>
-      </dl>
-      <div className="small muted">
-        {delegated ? <>Signed on this device with its delegated approval key <Ident value={issuer!.keyId} mono />. The signer checks the delegation and this exact plan.</> : "This browser has no delegated approval key for this device; the signer decides whether an owner session may approve."}
-      </div>
-      <div className="decision-actions">
-        <button type="button" className="btn btn-primary" disabled={!canAct.ok} onClick={() => approvePlan(i)}>
-          <Icon name="check" size={16} /> Approve exactly this
-        </button>
-        <button type="button" className="btn btn-quiet" onClick={() => cancelPlan(i)}>
+      <Facts
+        rows={[
+          [
+            "Device",
+            <>
+              <Ident value={dev?.name ?? p.scope.device_id} /> <span className="muted">(<Ident value={p.scope.device_id} mono />)</span>
+            </>,
+          ],
+          [p.scope.kind === "task" ? "Task" : "App", p.scope.kind === "task" ? <Ident value={p.scope.task_id} mono /> : <Ident value={p.scope.executable.path} mono />],
+          [
+            "Address",
+            <>
+              <Ident value={p.destination.kind === "address" ? p.destination.address : p.destination.hostname} kind="host" mono /> · {p.transport.toUpperCase()} {p.port}
+            </>,
+          ],
+          [
+            "New connections until",
+            <>
+              {new Date(p.admission_until).toLocaleString()} <span className="muted">({until(p.admission_until)}; trying again doesn&apos;t extend it)</span>
+            </>,
+          ],
+          ["Already open", p.stream_policy === "admission_only" ? "Connections already open stay open after this time" : p.stream_policy],
+        ]}
+      />
+      <Fine>
+        {delegated ? (
+          <>
+            Signed on this device with its approval key <Ident value={issuer!.keyId} mono />. The controller checks the key and this exact permission.
+          </>
+        ) : (
+          "This browser has no approval key for this device; the controller decides whether your sign-in may approve."
+        )}
+      </Fine>
+      <Actions>
+        <Button kind="primary" icon="check" disabled={!canAct.ok} onClick={() => approvePlan(i)}>
+          Approve exactly this
+        </Button>
+        <Button kind="quiet" onClick={() => cancelPlan(i)}>
           Cancel
-        </button>
-      </div>
+        </Button>
+      </Actions>
     </div>
   );
 }
 
-function phaseBadge(a: ActionState) {
-  const map: Record<ActionState["phase"], [string, string]> = {
-    planning: ["blue", "preparing"],
-    review: ["amber", "review: not approved yet"],
-    sending: ["blue", "sending"],
-    pending: ["amber", "pending: no endpoint receipt yet"],
-    active: ["green", "active on the endpoint"],
-    rejected: ["red", "rejected"],
-    failed: ["red", "not sent"],
-    expired: ["neutral", "expired"],
-    revoked: ["neutral", "revoked"],
-    done: ["neutral", "recorded"],
-    simulated: ["violet", "demo: simulated"],
-  };
-  const [tone, label] = map[a.phase];
-  return <Badge tone={tone}>{label}</Badge>;
-}
+const PHASE: Record<ActionState["phase"], [Tone, string]> = {
+  planning: ["blue", "Preparing"],
+  review: ["amber", "Not approved yet"],
+  sending: ["blue", "Sending"],
+  pending: ["amber", "Waiting for the device to confirm"],
+  active: ["green", "Active on the device"],
+  rejected: ["red", "Refused"],
+  failed: ["red", "Not sent"],
+  expired: ["neutral", "Expired"],
+  revoked: ["neutral", "Withdrawn"],
+  done: ["neutral", "Saved"],
+  simulated: ["violet", "Demo: nothing sent"],
+};
 
+/** "Should I allow this?" One decision, two buttons, the exact scope in one sentence; the rest under Details. */
 export function DecisionCard({ incident: i, go, detailed = false }: { incident: Incident; go: (to: string) => void; detailed?: boolean }) {
   const { allowOnce, keepBlocked, actions, canAct } = useStore();
   const data = useData();
@@ -105,55 +114,100 @@ export function DecisionCard({ incident: i, go, detailed = false }: { incident: 
   const unavailable = allowOnceUnavailable(i);
   const busy = action?.phase === "sending" || action?.phase === "pending" || action?.phase === "planning";
   const settled = action && !["failed", "rejected"].includes(action.phase);
-  return (
-    <Card className={`decision ${action ? "decision-acted" : ""}`}>
-      <button type="button" className="decision-head" onClick={() => go(`activity/${encodeURIComponent(i.id)}`)}>
-        <div className="decision-icon">
-          <Icon name="lock" size={18} />
-        </div>
-        <div className="decision-meta">
-          <div className="decision-chain">{i.chain ? <Chain nodes={i.chain} compact complete={i.chainComplete} /> : <Ident value={i.app ?? "unknown app"} />}</div>
-          <div className="muted small">
-            <Ident value={device?.name ?? i.deviceId} /> · {i.sessionId ? <>session <Ident value={i.sessionId.slice(-6)} mono /></> : "no session"} · {ago(i.lastAt)}
-            {i.occurrences > 1 ? ` · ${i.occurrences}×` : ""}
-          </div>
-        </div>
-        {!detailed && <Icon name="chevron" size={16} className="row-chevron" />}
-      </button>
-      <div className="decision-dest">
-        <Ident value={i.destination} kind="host" mono className="dest" />
-        <span className="muted">
-          {i.protocol ?? (i.port ? `port ${i.port}` : "port not recorded")}
-          {i.destinationLabel ? ` · ${i.destinationLabel}` : ""}
+  const head = (
+    <>
+      <span className="decision-icon" aria-hidden>
+        <Icon name="lock" size={18} />
+      </span>
+      <span className="decision-meta">
+        <span className="decision-title">
+          Blocked <Ident value={appOf(i)} /> from connecting
         </span>
+        <span className="row-sub">
+          <Ident value={device?.name ?? i.deviceId} /> · {ago(i.lastAt)}
+          {i.occurrences > 1 ? ` · ${i.occurrences} times` : ""}
+        </span>
+      </span>
+    </>
+  );
+  return (
+    <Card className={`decision ${detailed ? "" : "decision-summary"} ${action ? "decision-acted" : ""}`}>
+      {detailed ? (
+        <div className="decision-head">{head}</div>
+      ) : (
+        <button type="button" className="decision-head decision-head-link" onClick={() => go(`activity/${encodeURIComponent(i.id)}`)}>
+          {head}
+          <Icon name="chevron" size={16} className="row-chevron" />
+        </button>
+      )}
+      <div className="decision-dest">
+        <span className="muted">To</span> <Ident value={i.destination} kind="host" mono className="dest" />
+        {i.destinationLabel && (
+          <span className="muted">
+            {" "}
+            · <Ident value={i.destinationLabel} kind="text" />
+          </span>
+        )}
       </div>
       <p className="decision-text">
         <Ident value={i.explanation} kind="text" />
       </p>
       {action && (
         <div className="decision-progress" aria-live="polite">
-          <div className="decision-phase">{phaseBadge(action)}</div>
+          <StatusChip tone={PHASE[action.phase][0]}>{PHASE[action.phase][1]}</StatusChip>
           {action.phase === "review" && action.plan ? <PlanReview i={i} a={action} /> : <Steps action={action} />}
-          {action.error && <div className="small bad">{action.error}</div>}
-          {action.kind === "allow_once" && action.expiresAt && action.phase === "active" && <div className="small muted">Expires at its original deadline · {until(action.expiresAt)}. Retries never extend it.</div>}
+          {action.error && <p className="error">{action.error}</p>}
+          {action.kind === "allow_once" && action.expiresAt && action.phase === "active" && <Fine>Ends on its own at the original time · {until(action.expiresAt)}. Trying again never extends it.</Fine>}
         </div>
       )}
       {!settled && (
-        <div className="decision-actions">
-          <button type="button" className="btn btn-primary" disabled={!!unavailable || !canAct.ok || busy} onClick={() => allowOnce(i)} aria-describedby={`why-${i.id}`}>
-            <Icon name="check" size={16} /> Allow once for this session
-          </button>
-          <button type="button" className="btn btn-quiet" disabled={!canAct.ok || busy} onClick={() => keepBlocked(i)}>
-            Keep blocked
-          </button>
-        </div>
+        <>
+          <Actions>
+            <Button kind="primary" icon="check" disabled={!!unavailable || !canAct.ok || busy} onClick={() => allowOnce(i)} describedBy={`why-${i.id}`}>
+              Allow once for this task
+            </Button>
+            <Button kind="secondary" disabled={!canAct.ok || busy} onClick={() => keepBlocked(i)}>
+              Keep blocking
+            </Button>
+          </Actions>
+          <Fine id={`why-${i.id}`}>{unavailable ?? canAct.reason ?? `Only this task on ${device?.name ?? i.deviceId}, only this address, for 1 hour. If your rules change first, Moat refuses it as out of date.`}</Fine>
+        </>
       )}
-      {!settled && (
-        <div className="decision-fine" id={`why-${i.id}`}>
-          {unavailable ?? canAct.reason ?? `Only this session on ${device?.name ?? i.deviceId}, this destination, ${i.protocol ?? "this port"}, for 1 hour. Bound to incident revision ${i.revision} and policy revision ${data.policyRevision}; if either changes, the controller refuses it as stale.`}
-        </div>
-      )}
+      <Details summary="Technical details">
+        <Facts
+          rows={[
+            ...(i.chain ? ([["Started by", <Chain key="c" nodes={i.chain} compact complete={i.chainComplete} />]] as [string, JSX.Element][]) : []),
+            ["Task", i.sessionId ? <Ident value={i.sessionId} mono /> : "none"],
+            ["Connection", i.protocol ?? (i.port ? `port ${i.port}` : "port not recorded")],
+            ["Why it was blocked", <Ident key="r" value={i.reason} kind="text" />],
+            ["Bound to", `alert version ${i.revision} and rule version ${data.policyRevision}`],
+          ]}
+        />
+      </Details>
     </Card>
+  );
+}
+
+const GAP_KINDS: Incident["kind"][] = ["telemetry_gap", "coverage_lost", "recovery_required", "rollback_pending", "session_not_adopted", "proxy_limit"];
+
+/** One alert as a sentence. Hostnames and app names go through Ident (untrusted); the rest is Moat's own words. */
+export function AlertTitle({ i, deviceName }: { i: Incident; deviceName: string }) {
+  if (i.kind === "blocked_connection")
+    return (
+      <>
+        Blocked <Ident value={appOf(i)} /> from connecting
+      </>
+    );
+  if (i.kind === "dns_blocked")
+    return (
+      <>
+        Blocked a website on <Ident value={deviceName} />
+      </>
+    );
+  return (
+    <>
+      {KIND[i.kind].label} on <Ident value={deviceName} />
+    </>
   );
 }
 
@@ -161,67 +215,63 @@ export function Activity({ go }: { go: (to: string) => void }) {
   const data = useData();
   const { actions } = useStore();
   const [filter, setFilter] = useState<"all" | "open" | "blocked" | "gaps">("open");
-  const list = data.incidents.filter((i) => (filter === "all" ? true : filter === "open" ? i.state === "open" : filter === "blocked" ? i.kind === "blocked_connection" || i.kind === "dns_blocked" : i.kind === "telemetry_gap" || i.kind === "coverage_lost" || i.kind === "recovery_required" || i.kind === "rollback_pending" || i.kind === "session_not_adopted" || i.kind === "proxy_limit"));
+  const list = data.incidents.filter((i) => (filter === "all" ? true : filter === "open" ? i.state === "open" : filter === "blocked" ? i.kind === "blocked_connection" || i.kind === "dns_blocked" : GAP_KINDS.includes(i.kind)));
   return (
-    <div className="page">
-      <div className="page-head">
-        <h1>Activity</h1>
-        <p className="lede">Repeated attempts are grouped into one incident by session or app, destination and rule. Notification limits never change what is blocked.</p>
-      </div>
-      <div className="segmented" role="tablist">
+    <Page title="Activity" lede="What Moat blocked or noticed, newest first. Repeats are grouped into one line.">
+      <div className="segmented" role="tablist" aria-label="Show">
         {(["open", "blocked", "gaps", "all"] as const).map((f) => (
           <button key={f} type="button" role="tab" aria-selected={filter === f} className={filter === f ? "seg active" : "seg"} onClick={() => setFilter(f)}>
-            {f === "open" ? "Open" : f === "blocked" ? "Blocked" : f === "gaps" ? "Gaps" : "All"}
+            {f === "open" ? "Needs a look" : f === "blocked" ? "Blocked" : f === "gaps" ? "Gaps" : "All"}
           </button>
         ))}
       </div>
-      <div className="timeline">
-        {list.map((i) => {
-          const k = KIND[i.kind];
-          const device = data.devices.find((d) => d.id === i.deviceId);
-          return (
-            <button key={i.id} type="button" className={`tl-item urg-${i.urgency} ${i.state !== "open" ? "tl-quiet" : ""}`} onClick={() => go(`activity/${encodeURIComponent(i.id)}`)}>
-              <span className="tl-rail">
-                <span className={`tl-icon kind-${i.kind}`}>
-                  <Icon name={k.icon} size={14} />
+      {list.length ? (
+        <div className="card list-card">
+          {list.map((i) => {
+            const k = KIND[i.kind];
+            const device = data.devices.find((d) => d.id === i.deviceId);
+            const a = actions[i.id];
+            return (
+              <button key={i.id} type="button" className={`row row-link ${i.state !== "open" ? "row-quiet" : ""}`} onClick={() => go(`activity/${encodeURIComponent(i.id)}`)}>
+                <span className={`row-icon tone-${k.tone}`} aria-hidden>
+                  <Icon name={k.icon} size={16} />
                 </span>
-              </span>
-              <span className="tl-body">
-                <span className="tl-top">
-                  <span className="tl-kind">{k.label}</span>
-                  <span className="muted small">{ago(i.lastAt)}</span>
-                </span>
-                <span className="tl-title">
-                  {i.chain ? <Chain nodes={i.chain} compact /> : <Ident value={device?.name ?? i.deviceId} />}
-                  {i.destination !== "-" && (
-                    <>
-                      {" "}
-                      <span className="muted">→</span> <Ident value={i.destination} kind="host" mono />
-                    </>
+                <span className="row-main">
+                  <span className="row-title">
+                    <AlertTitle i={i} deviceName={device?.name ?? i.deviceId} />
+                  </span>
+                  <span className="row-sub">
+                    {i.destination !== "-" ? (
+                      <>
+                        to <Ident value={i.destination} kind="host" mono /> · <Ident value={device?.name ?? i.deviceId} /> · {ago(i.lastAt)}
+                      </>
+                    ) : (
+                      <>
+                        <Ident value={i.reason} kind="text" /> · {ago(i.lastAt)}
+                      </>
+                    )}
+                  </span>
+                  {(i.occurrences > 1 || i.state !== "open" || (a && a.kind === "allow_once")) && (
+                    <span className="row-chips">
+                      {i.occurrences > 1 && <StatusChip>{i.occurrences} times</StatusChip>}
+                      {i.state === "acknowledged" && <StatusChip>Seen</StatusChip>}
+                      {i.state === "resolved" && <StatusChip>Resolved</StatusChip>}
+                      {a && a.kind === "allow_once" && a.phase === "active" && <StatusChip tone="green">Allowed once</StatusChip>}
+                      {a && a.kind === "allow_once" && a.phase === "pending" && <StatusChip tone="amber">Allow waiting</StatusChip>}
+                    </span>
                   )}
                 </span>
-                <span className="tl-sub muted small">
-                  <Ident value={device?.name ?? i.deviceId} /> · <Ident value={i.reason} kind="text" />
-                </span>
-                <span className="tl-badges">
-                  {i.occurrences > 1 && <Badge>{i.occurrences}×</Badge>}
-                  {i.state === "acknowledged" && <Badge tone="neutral">acknowledged</Badge>}
-                  {i.state === "resolved" && <Badge tone="neutral">resolved</Badge>}
-                  {i.kind === "dns_blocked" && <Badge tone="violet">DNS only</Badge>}
-                  {actions[i.id] && actions[i.id]!.kind === "allow_once" && actions[i.id]!.phase === "active" && <Badge tone="green">allowed once</Badge>}
-                  {actions[i.id] && actions[i.id]!.kind === "allow_once" && actions[i.id]!.phase === "pending" && <Badge tone="amber">allow pending</Badge>}
-                </span>
-              </span>
-            </button>
-          );
-        })}
-        {!list.length && (
-          <Empty title="Nothing in this view" icon="activity">
-            Blocked connections, coverage changes, rollbacks and telemetry gaps appear here as devices report them.
-          </Empty>
-        )}
-      </div>
-    </div>
+                <Icon name="chevron" size={16} className="row-chevron" />
+              </button>
+            );
+          })}
+        </div>
+      ) : (
+        <EmptyState title={filter === "open" ? "Nothing needs a look" : "Nothing here"} icon="activity">
+          Blocked connections, gaps in reports and changes in protection show up here as your devices report them.
+        </EmptyState>
+      )}
+    </Page>
   );
 }
 
@@ -231,92 +281,81 @@ export function IncidentDetail({ id, go }: { id: string; go: (to: string) => voi
   const i = incidentById(id);
   if (!i)
     return (
-      <div className="page">
-        <button type="button" className="back" onClick={() => go("activity")}>
-          <Icon name="chevron" size={16} className="flip" /> Activity
-        </button>
-        <Empty title="No such incident" icon="alert">
-          Nothing with this reference exists in the data this page has. No other incident was opened in its place.
-        </Empty>
-      </div>
+      <Page title="Not found" back={{ label: "Activity", to: "activity" }}>
+        <EmptyState title="Nothing to show" icon="alert">
+          This alert isn&apos;t in what Moat has. Nothing else was opened in its place.
+        </EmptyState>
+      </Page>
     );
   const decision = i.kind === "blocked_connection" && i.sessionId && i.state !== "resolved";
   const action = actions[i.id];
+  const deviceName = data.devices.find((d) => d.id === i.deviceId)?.name ?? i.deviceId;
   return (
-    <div className="page">
-      <button type="button" className="back" onClick={() => go("activity")}>
-        <Icon name="chevron" size={16} className="flip" /> Activity
-      </button>
-      <div className="page-head">
-        <div className="eyebrow">
-          {KIND[i.kind].label} · <Ident value={data.devices.find((d) => d.id === i.deviceId)?.name ?? i.deviceId} /> · incident <Ident value={i.id} mono /> rev {i.revision}
-        </div>
-        <h1 className="detail-title">{i.destination !== "-" ? <Ident value={i.destination} kind="host" mono /> : <Ident value={i.reason} kind="text" />}</h1>
-      </div>
+    <Page
+      back={{ label: "Activity", to: "activity" }}
+      eyebrow={
+        <>
+          {KIND[i.kind].label} · <Ident value={deviceName} />
+        </>
+      }
+      title={i.destination !== "-" ? <Ident value={i.destination} kind="host" mono /> : <AlertTitle i={i} deviceName={deviceName} />}
+      titleMono={i.destination !== "-"}
+    >
       {decision ? (
         <DecisionCard incident={i} go={go} detailed />
       ) : (
-        <Card>
+        <Card title={<AlertTitle i={i} deviceName={deviceName} />}>
           <p className="decision-text">
             <Ident value={i.explanation} kind="text" />
           </p>
           {action && <Steps action={action} />}
-          {action?.error && <div className="small bad">{action.error}</div>}
+          {action?.error && <p className="error">{action.error}</p>}
           {i.state === "open" && (
             <>
-              <button type="button" className="btn btn-quiet" disabled={!canAct.ok || action?.phase === "sending"} onClick={() => acknowledge(i)}>
-                Acknowledge
-              </button>
-              <div className="muted small">{canAct.reason ?? "Acknowledge means seen. It never allows anything; a new occurrence reopens the incident."}</div>
+              <Actions>
+                <Button disabled={!canAct.ok || action?.phase === "sending"} onClick={() => acknowledge(i)}>
+                  Mark as seen
+                </Button>
+              </Actions>
+              <Fine>{canAct.reason ?? "Marking as seen never allows anything. If it happens again, it comes back."}</Fine>
             </>
           )}
         </Card>
       )}
-      <div className="grid-2">
-        {i.chain && (
-          <Card>
-            <SectionTitle action={<Badge tone={i.chainComplete ? "green" : "amber"}>{i.chainComplete ? "lifecycle intact" : "incomplete"}</Badge>}>Process chain</SectionTitle>
-            <Chain nodes={i.chain} complete={i.chainComplete} />
-          </Card>
-        )}
-        <Card>
-          <SectionTitle>Evidence</SectionTitle>
-          <dl className="facts">
-            <div>
-              <dt>Decision</dt>
-              <dd>
-                <Ident value={i.reason} kind="text" />
-              </dd>
-            </div>
-            {i.policyRevision && (
-              <div>
-                <dt>Policy</dt>
-                <dd>revision {i.policyRevision}</dd>
-              </div>
-            )}
-            <div>
-              <dt>Transfer</dt>
-              <dd>{i.measurement}</dd>
-            </div>
-            {i.facts.map((f) => (
-              <div key={f.label}>
-                <dt>{f.label}</dt>
-                <dd>
-                  <Ident value={f.value} kind="text" />
-                  {f.source && <span className="fact-src">{f.source}</span>}
-                </dd>
-              </div>
-            ))}
-            <div>
-              <dt>Seen</dt>
-              <dd>
-                {i.occurrences}× · first {ago(i.firstAt)} · last {ago(i.lastAt)}
-              </dd>
-            </div>
-          </dl>
-        </Card>
-      </div>
-      <p className="footnote">Explanations are deterministic templates over recorded fields. Region labels come from documented endpoint names and do not identify who operates a bucket.</p>
-    </div>
+      <Card title="What Moat recorded">
+        <Facts
+          rows={[
+            ["When", `${i.occurrences} ${i.occurrences === 1 ? "time" : "times"} · first ${ago(i.firstAt)} · last ${ago(i.lastAt)}`],
+            ["Data sent", <Ident key="m" value={i.measurement} kind="text" />],
+          ]}
+        />
+        <Details summary="Technical details">
+          {i.chain && (
+            <>
+              <div className="details-label">Program chain {i.chainComplete ? "" : "(incomplete)"}</div>
+              <Chain nodes={i.chain} complete={i.chainComplete} />
+            </>
+          )}
+          <Facts
+            rows={[
+              ["Decision", <Ident key="r" value={i.reason} kind="text" />],
+              ...(i.policyRevision ? ([["Rule version", String(i.policyRevision)]] as [string, string][]) : []),
+              ["Alert", <span key="a"><Ident value={i.id} mono /> · version {i.revision}</span>],
+              ...i.facts.map(
+                (f) =>
+                  [
+                    f.label,
+                    <span key={f.label}>
+                      <Ident value={f.value} kind="text" />
+                      {f.source && <span className="muted"> · {f.source}</span>}
+                    </span>,
+                  ] as [string, JSX.Element],
+              ),
+            ]}
+          />
+          <Fine>Explanations are fixed templates over what the device recorded. Region names come from the server&apos;s published name and don&apos;t say who runs it.</Fine>
+        </Details>
+      </Card>
+    </Page>
   );
 }

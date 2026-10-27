@@ -2,7 +2,7 @@ import MoatKit
 import SwiftUI
 
 /// The main window: a native NavigationSplitView sidebar, a unified toolbar carrying status and the two global
-/// actions, and the bento content on the calm canvas.
+/// actions, and the card content on a flat canvas.
 public struct RootView: View {
     @ObservedObject var model: AppModel
     @Environment(\.colorScheme) private var scheme
@@ -22,9 +22,9 @@ public struct RootView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     ScreenContent(model: model)
-                        .padding(.horizontal, 32)
-                        .padding(.top, 20)
-                        .padding(.bottom, 40)
+                        .padding(.horizontal, Space.s8)
+                        .padding(.top, Space.s5)
+                        .padding(.bottom, Space.s10)
                         .frame(maxWidth: 1120, alignment: .leading)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -36,11 +36,11 @@ public struct RootView: View {
         }
         .environment(\.palette, p)
         .tint(p.accentStrong)
-        .confirmationDialog("Isolate this Mac?", isPresented: $confirmIsolate) {
-            Button("Isolate now", role: .destructive) { Task { await model.enterIsolation(reason: "Turned on from the Moat toolbar") } }
+        .confirmationDialog("Lock down this Mac?", isPresented: $confirmIsolate) {
+            Button("Lock down now", role: .destructive) { Task { await model.enterIsolation(reason: "Turned on from the Moat toolbar") } }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("New outbound connections except loopback are blocked until you turn isolation off in Recovery. It does not reopen on its own. Connections already open are not cut.")
+            Text("New connections from this Mac are blocked, except to itself, until you turn lockdown off in Coverage & recovery. It never turns off on its own. Connections already open stay open.")
         }
     }
 
@@ -61,44 +61,41 @@ public struct RootView: View {
                 Button {
                     model.screen = .coverage
                 } label: {
-                    Label("Isolated", systemImage: "lock.shield.fill")
+                    Label("Locked down", systemImage: "lock.shield.fill")
                 }
-                .help("Emergency isolation is on. Open Recovery to turn it off.")
+                .help("Emergency lockdown is on. Open Coverage & recovery to turn it off.")
             } else {
                 Button(role: .destructive) {
                     confirmIsolate = true
                 } label: {
-                    Label("Isolate", systemImage: "lock.shield")
+                    Label("Lock down", systemImage: "lock.shield")
                 }
-                .help("Emergency isolation: block new outbound connections except loopback (asks first)")
+                .help("Emergency lockdown: block new connections from this Mac (asks first)")
             }
         }
     }
 }
 
-/// Coverage status shown in the toolbar (the toolbar supplies the glass on macOS 26).
+/// Coverage status shown in the toolbar (the system draws the toolbar itself).
 struct CoverageBadge: View {
     @Environment(\.palette) private var p
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let status: StatusReport
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: Space.s2) {
             Image(systemName: status.coverage.symbol)
                 .foregroundStyle(status.coverage.tone.color(p))
                 .moatPulse(status.coverage == .isolated || status.coverage == .degraded, reduceMotion: reduceMotion)
-            Text(status.coverage.label).font(.callout.weight(.semibold))
-            if let i = status.installed {
-                Text(verbatim: "r\(i.revision)").font(.callout.monospacedDigit()).foregroundStyle(p.muted)
-            }
+            Text(verbatim: status.coverage.label).font(.callout.weight(.semibold))
         }
-        .padding(.horizontal, 6)
+        .padding(.horizontal, Space.s2)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Coverage: \(status.coverage.label). \(status.coverage.claim)")
     }
 }
 
-/// The canvas behind the bento cards: one flat, cool tone (no gradients, no translucency).
+/// The canvas behind the cards: one flat, cool tone (no gradients, no translucency).
 struct Backdrop: View {
     @Environment(\.palette) private var p
 
@@ -119,7 +116,7 @@ public struct ScreenContent: View {
     }
 
     public var body: some View {
-        VStack(alignment: .leading, spacing: 22) {
+        VStack(alignment: .leading, spacing: Space.s6) {
             Banner(model: model)
             switch model.screen {
             case .apps: AppsScreen(model: model, heroShown: heroShown)
@@ -153,7 +150,7 @@ struct Sidebar: View {
         }
         .listStyle(.sidebar)
         .safeAreaInset(edge: .top, spacing: 0) {
-            HStack(spacing: 10) {
+            HStack(spacing: Space.s3) {
                 AppMark(size: 30)
                 VStack(alignment: .leading, spacing: 0) {
                     Text("Moat").font(.headline)
@@ -161,25 +158,25 @@ struct Sidebar: View {
                 }
                 Spacer()
             }
-            .padding(.horizontal, 18)
-            .padding(.vertical, 10)
+            .padding(.horizontal, Space.s5)
+            .padding(.vertical, Space.s3)
             .accessibilityElement(children: .combine)
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if let s = model.status {
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: Space.s2) {
                     Pill(text: s.coverage.label, tone: s.coverage.tone, dot: true)
-                    Text(s.installed.map { "Policy r\($0.revision) · \($0.policyName)" } ?? "No signed policy")
+                    Text(verbatim: s.installed.map { "Rules: \($0.policyName)" } ?? "No signed rules yet")
                         .font(.caption).foregroundStyle(p.text2).lineLimit(2)
                     if model.isDemo {
-                        Label("Demo data", systemImage: "theatermasks").font(.caption.weight(.semibold)).foregroundStyle(p.accent)
+                        Label("Sample data", systemImage: "info.circle").font(.caption.weight(.semibold)).foregroundStyle(p.accent)
                     }
                 }
-                .padding(12)
+                .padding(Space.s3)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(p.surface))
-                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(p.border, lineWidth: 1))
-                .padding(12)
+                .background(RoundedRectangle(cornerRadius: Radius.inner, style: .continuous).fill(p.surface))
+                .overlay(RoundedRectangle(cornerRadius: Radius.inner, style: .continuous).strokeBorder(p.border, lineWidth: 1))
+                .padding(Space.s3)
                 .accessibilityElement(children: .combine)
             }
         }
@@ -191,7 +188,7 @@ struct Sidebar: View {
                 Text(s.title(deviceCount: model.deviceCount))
                 Spacer()
                 if s == .coverage, model.status?.isolation.active == true {
-                    Circle().fill(p.red).frame(width: 7, height: 7).accessibilityLabel("isolation on")
+                    Circle().fill(p.red).frame(width: Space.s2, height: Space.s2).accessibilityLabel("lockdown on")
                 }
                 if s == .activity, let n = model.status?.flowsDenied, n > 0 {
                     Text("\(n)").font(.caption.monospacedDigit()).foregroundStyle(.secondary).accessibilityLabel("\(n) blocked")
@@ -217,9 +214,9 @@ struct Banner: View {
     }
 
     private func message(_ text: String, tone: Tone, symbol: String) -> some View {
-        HStack(alignment: .top, spacing: 10) {
+        HStack(alignment: .top, spacing: Space.s3) {
             Image(systemName: symbol).foregroundStyle(tone.color(p)).accessibilityHidden(true)
-            Text(text).font(.callout).foregroundStyle(p.text).fixedSize(horizontal: false, vertical: true)
+            Text(verbatim: text).font(.callout).foregroundStyle(p.text).fixedSize(horizontal: false, vertical: true)
             Spacer()
             Button {
                 model.lastError = nil
@@ -230,9 +227,9 @@ struct Banner: View {
             .buttonStyle(.plain)
             .accessibilityLabel("Dismiss")
         }
-        .padding(12)
-        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(tone.color(p).opacity(0.10)))
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(tone.color(p).opacity(0.3), lineWidth: 1))
+        .padding(Space.s3)
+        .background(RoundedRectangle(cornerRadius: Radius.inner, style: .continuous).fill(tone.color(p).opacity(0.10)))
+        .overlay(RoundedRectangle(cornerRadius: Radius.inner, style: .continuous).strokeBorder(tone.color(p).opacity(0.3), lineWidth: 1))
         .accessibilityElement(children: .combine)
     }
 }
@@ -244,9 +241,9 @@ struct ScreenHeader: View {
     var dim: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: Space.s2) {
             Text(eyebrow).font(.subheadline.weight(.semibold)).foregroundStyle(p.muted)
-            Text(title).font(.system(size: 30, weight: .bold)).foregroundStyle(p.text).fixedSize(horizontal: false, vertical: true)
+            Text(title).font(.system(size: TypeScale.x2l, weight: .bold)).foregroundStyle(p.text).fixedSize(horizontal: false, vertical: true)
                 .accessibilityAddTraits(.isHeader)
             if let dim {
                 Text(dim).font(.title3).foregroundStyle(p.text2).fixedSize(horizontal: false, vertical: true)
@@ -268,16 +265,16 @@ struct EmptyStateView: View {
     }
 
     var body: some View {
-        VStack(spacing: 10) {
-            Image(systemName: symbol).font(.system(size: 34, weight: .light)).foregroundStyle(p.muted).accessibilityHidden(true)
+        VStack(spacing: Space.s3) {
+            Image(systemName: symbol).font(.system(size: TypeScale.x3l, weight: .light)).foregroundStyle(p.muted).accessibilityHidden(true)
             Text(title).font(.title3.weight(.semibold))
             Text(text).font(.callout).foregroundStyle(p.text2).multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 36)
-        .padding(.horizontal, 24)
-        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(p.surface))
-        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(p.borderStrong, style: StrokeStyle(lineWidth: 1, dash: [5, 4])))
+        .padding(.vertical, Space.s10)
+        .padding(.horizontal, Space.s6)
+        .background(RoundedRectangle(cornerRadius: Radius.card, style: .continuous).fill(p.surface))
+        .overlay(RoundedRectangle(cornerRadius: Radius.card, style: .continuous).strokeBorder(p.borderStrong, style: StrokeStyle(lineWidth: 1, dash: [5, 4])))
         .accessibilityElement(children: .combine)
     }
 }

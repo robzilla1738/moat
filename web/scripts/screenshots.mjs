@@ -1,5 +1,5 @@
 // Render the demo build to PNGs and check every rendered page for horizontal overflow, clipped text and WCAG AA
-// colour contrast (axe-core), in dark and light, with and without reduced transparency.
+// colour contrast (axe-core), in dark and light. (Moat has no translucency, so Reduce Transparency changes nothing.)
 //
 //   npm run build:demo -w web && node web/scripts/screenshots.mjs <out-dir> [more out-dirs...]
 //
@@ -39,38 +39,30 @@ const base = `http://127.0.0.1:${server.address().port}/`;
 
 const phone = { width: 390, height: 844, deviceScaleFactor: 3, isMobile: true, hasTouch: true };
 const desktop = { width: 1440, height: 900, deviceScaleFactor: 2 };
-const shots = [
-  { name: "mobile-home-dark", hash: "", theme: "dark", vp: phone },
-  { name: "mobile-home-light", hash: "", theme: "light", vp: phone },
-  { name: "mobile-activity-light", hash: "activity", theme: "light", vp: phone },
-  { name: "mobile-allow-once-dark", hash: "activity/inc-8f2a", theme: "dark", vp: phone },
-  { name: "mobile-coverage-dark", hash: "coverage", theme: "dark", vp: phone },
-  { name: "mobile-device-dns-dark", hash: "devices/tcl-tv", theme: "dark", vp: phone },
-  { name: "mobile-home-reduced-transparency-light", hash: "", theme: "light", vp: phone, reduceTransparency: true },
-  { name: "desktop-home-light", hash: "", theme: "light", vp: desktop },
-  { name: "desktop-home-dark", hash: "", theme: "dark", vp: desktop },
-  { name: "desktop-rules-dark", hash: "rules", theme: "dark", vp: desktop },
-  { name: "desktop-activity-dark", hash: "activity", theme: "dark", vp: desktop },
-  { name: "mobile-learning-candidate-dark", hash: "learning/c/cand-demo-1", theme: "dark", vp: phone },
-  { name: "mobile-learning-light", hash: "learning", theme: "light", vp: phone },
-  { name: "desktop-packs-dark", hash: "learning/packs", theme: "dark", vp: desktop },
-  { name: "desktop-learning-drift-light", hash: "learning/c/cand-demo-2", theme: "light", vp: desktop },
-  { name: "desktop-overview-light", hash: "overview", theme: "light", vp: desktop, full: true },
-  { name: "desktop-overview-dark", hash: "overview", theme: "dark", vp: desktop, full: true },
-  { name: "mobile-overview-light", hash: "overview", theme: "light", vp: phone },
-  { name: "mobile-overview-dark", hash: "overview", theme: "dark", vp: phone },
-  { name: "desktop-activity-light", hash: "activity", theme: "light", vp: desktop },
-  { name: "desktop-rules-light", hash: "rules", theme: "light", vp: desktop },
-  { name: "desktop-devices-light", hash: "devices", theme: "light", vp: desktop },
-  { name: "desktop-devices-dark", hash: "devices", theme: "dark", vp: desktop },
-  { name: "mobile-activity-dark", hash: "activity", theme: "dark", vp: phone },
-  { name: "mobile-allow-once-light", hash: "activity/inc-8f2a", theme: "light", vp: phone },
-  { name: "mobile-coverage-light", hash: "coverage", theme: "light", vp: phone },
-  { name: "mobile-device-dns-light", hash: "devices/tcl-tv", theme: "light", vp: phone },
-  { name: "desktop-packs-light", hash: "learning/packs", theme: "light", vp: desktop },
+// Every view in both appearances (docs/screenshots). Desktop captures are the first screen unless `full` is set.
+const views = [
+  ["home", "", { full: true }],
+  ["overview", "overview", { full: true }],
+  ["activity", "activity"],
+  ["decision", "activity/inc-8f2a"],
+  ["devices", "devices"],
+  ["device-dns", "devices/tcl-tv"],
+  ["coverage", "coverage"],
+  ["tasks", "sessions"],
+  ["task", "sessions/20261026-7c1e9a"],
+  ["rules", "rules"],
+  ["learning", "learning"],
+  ["review", "learning/c/cand-demo-1"],
+  ["packs", "learning/packs"],
 ];
+const shots = [];
+for (const [name, hash, opts = {}] of views)
+  for (const theme of ["light", "dark"]) {
+    shots.push({ name: `desktop-${name}-${theme}`, hash, theme, vp: desktop, full: !!opts.full });
+    shots.push({ name: `mobile-${name}-${theme}`, hash, theme, vp: phone });
+  }
 // Every route is also checked (no screenshot) in both themes at phone size.
-const routes = ["", "overview", "activity", "activity/inc-8f2a", "activity/inc-7c31", "sessions", "rules", "devices", "devices/omarchy", "devices/tcl-tv", "apps", "coverage", "learning", "learning/c/cand-demo-1", "learning/c/cand-demo-2", "learning/b/base-demo-1", "learning/packs"];
+const routes = ["", "overview", "activity", "activity/inc-8f2a", "activity/inc-7c31", "sessions", "sessions/20261026-7c1e9a", "rules", "devices", "devices/omarchy", "devices/mini", "devices/tcl-tv", "apps", "apps/claude", "coverage", "changed", "diagnostics", "learning", "learning/c/cand-demo-1", "learning/c/cand-demo-2", "learning/b/base-demo-1", "learning/packs", "nope"];
 
 const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined, args: ["--font-render-hinting=none"] });
 const problems = [];
@@ -99,7 +91,7 @@ async function check(page, label) {
       if (cs.display === "none" || cs.visibility === "hidden" || !el.childNodes.length) continue;
       const hasText = [...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim());
       if (!hasText) continue;
-      const intended = cs.textOverflow === "ellipsis" || el.closest(".ellipsis, .matrix-scroll, .device-strip, .segmented, .subnav");
+      const intended = cs.textOverflow === "ellipsis" || el.closest(".ellipsis, .matrix-scroll, .deploy, .segmented, .subnav");
       if (!intended && (cs.overflowX === "hidden" || cs.overflow === "hidden") && el.scrollWidth > el.clientWidth + 1) {
         clipped.push(`${el.tagName.toLowerCase()}.${[...el.classList].join(".")}: "${el.textContent.trim().slice(0, 40)}"`);
       }

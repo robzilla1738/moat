@@ -45,7 +45,7 @@ async function signedIn(token: string): Promise<Page> {
   await page.goto(h.url + "/");
   await page.getByLabel("Access token").fill(token);
   await page.getByRole("button", { name: "Sign in" }).click();
-  await page.getByText("Needs a decision").or(page.getByText("All quiet.")).first().waitFor();
+  await page.getByText("Needs your decision").or(page.getByText("All clear")).first().waitFor();
   return page;
 }
 
@@ -76,45 +76,47 @@ test("signed out: the live UI asks for a sign-in and never shows sample data", a
 test("allow once: exact plan, phone approval with a delegated key, pending until the endpoint's receipt, then active", async () => {
   const page = await signedIn(h.ownerToken);
   let card = page.locator(".decision").filter({ hasText: "203.0.113.50" }).first();
-  await card.getByRole("button", { name: "Allow once for this session" }).click();
+  await card.getByRole("button", { name: "Allow once for this task" }).click();
   // the plan is rendered from the controller's canonical record
-  await card.getByText("review: not approved yet").waitFor();
-  await card.getByText("20261027-aaaa").waitFor();
-  await card.getByText("TCP 443").first().waitFor();
-  await card.getByText("retries keep this deadline").waitFor();
+  await card.getByText("Not approved yet").waitFor();
+  // the task id and port are part of the visible plan, not hidden under Technical details
+  const plan = card.locator(".plan");
+  await plan.getByText("20261027-aaaa").waitFor();
+  await plan.getByText("TCP 443").first().waitFor();
+  await card.getByText(/trying again doesn.t extend it/).waitFor();
   await shot(page, "live-allow-once-review");
   // an owner bearer token alone is not enough for this signer
   await card.getByRole("button", { name: "Approve exactly this" }).click();
-  await card.getByText(/only accepts phone approvals from a delegated key/).waitFor();
+  await card.getByText(/only accepts approvals from a phone or browser with its own approval key/).waitFor();
   assert.equal(((await h.owner("GET", "/v1/grants")).json as unknown as unknown[]).length, 0, "nothing was granted");
   // set up this browser as a delegated approver: its own key, an owner-signed delegation made off the page
   await page.goto(`${h.url}/#/devices`);
   await page.getByRole("button", { name: "Create an approval key for this device" }).click();
   const cmd = await page.locator(".approvals pre.code").textContent();
   const pub = /delegate-issuer <owner\.key> ([0-9a-f]{64})/.exec(cmd ?? "")![1]!;
-  await page.getByLabel("Paste the printed delegation").fill(h.delegate(pub, ["omarchy"]));
-  await page.getByRole("button", { name: "Use this delegation" }).click();
-  await page.locator(".approvals").getByText("delegated", { exact: true }).waitFor();
+  await page.getByLabel("Paste what it printed").fill(h.delegate(pub, ["omarchy"]));
+  await page.getByRole("button", { name: "Use this approval" }).click();
+  await page.locator(".approvals").getByText("Set up", { exact: true }).waitFor();
   await shot(page, "live-phone-approvals");
   await page.goto(`${h.url}/#/`);
   card = page.locator(".decision").filter({ hasText: "203.0.113.50" }).first();
-  await card.getByRole("button", { name: "Allow once for this session" }).click();
-  await card.getByText(/Signed on this device with its delegated approval key/).waitFor();
+  await card.getByRole("button", { name: "Allow once for this task" }).click();
+  await card.getByText(/Signed on this device with its approval key/).waitFor();
   await card.getByRole("button", { name: "Approve exactly this" }).click();
-  await card.getByText("pending: no endpoint receipt yet").waitFor();
-  await card.getByText("Signed as revision 2").waitFor();
-  await card.getByText("authorized by a delegated approval key").waitFor();
-  assert.equal(await card.getByText("active on the endpoint").count(), 0, "a signed revision is not an applied one");
+  await card.getByText("Waiting for the device to confirm").first().waitFor();
+  await card.getByText("Signed as rule version 2").waitFor();
+  await card.getByText("approved with an approval key (not your owner key)").waitFor();
+  assert.equal(await card.getByText("Active on the device").count(), 0, "a signed revision is not an applied one");
   await shot(page, "live-allow-once-pending");
   // the endpoint syncs: delivery, then still not applied
   await h.sync({ last_applied: 1 });
   await card.getByText("Delivered to omarchy").waitFor();
   await page.waitForTimeout(3500);
-  assert.equal(await card.getByText("active on the endpoint").count(), 0, "delivery is not application");
+  assert.equal(await card.getByText("Active on the device").count(), 0, "delivery is not application");
   // the endpoint applies revision 2 and says so
   await h.sync({ last_applied: 2, receipts: [{ revision: 2, state: "applied" }] });
-  await card.getByText("active on the endpoint").waitFor({ timeout: 10_000 });
-  await card.getByText("endpoint receipt for revision 2").waitFor();
+  await card.getByText("Active on the device").waitFor({ timeout: 10_000 });
+  await card.getByText("the device confirmed rule version 2").waitFor();
   await shot(page, "live-allow-once-active");
   const grants = (await h.owner("GET", "/v1/grants")).json as unknown as { state: string; device_id: string; authorized_by: string }[];
   assert.equal(grants[0]!.state, "active");
@@ -133,10 +135,10 @@ test("a stale view is refused, not applied: precondition on incident and policy 
   await h.c.revokeGrant(h.c.authenticate(h.ownerToken)!, (h.c.grants()[0] as { id: string }).id);
   // (the page still shows policy revision 2)
   void inc;
-  await card.getByRole("button", { name: "Allow once for this session" }).click();
-  await card.getByText(/Refused as stale/).first().waitFor();
+  await card.getByRole("button", { name: "Allow once for this task" }).click();
+  await card.getByText(/Refused as out of date/).first().waitFor();
   await shot(page, "live-stale-refused");
-  assert.equal(await card.getByText("active on the endpoint").count(), 0);
+  assert.equal(await card.getByText("Active on the device").count(), 0);
   await page.close();
 });
 
@@ -158,7 +160,7 @@ test("a notification reference opens exactly its incident, even after reordering
 
 test("a viewer sees disabled owner actions with the reason", async () => {
   const page = await signedIn(h.viewerToken);
-  const btn = page.getByRole("button", { name: "Allow once for this session" }).first();
+  const btn = page.getByRole("button", { name: "Allow once for this task" }).first();
   assert.equal(await btn.isDisabled(), true);
   await page.getByText(/Signed in as viewer: read only/).first().waitFor();
   await shot(page, "live-viewer-read-only");
@@ -185,8 +187,11 @@ test("W12 standalone: Apps-first landing, app detail with four evidence sections
   await page.locator(".tabbar").getByText("Computer", { exact: true }).waitFor();
   await page.getByRole("heading", { name: "Apps", exact: true }).waitFor();
   // the app card (decision cards above it also mention curl, as the blocked process)
-  await page.locator("button.app-card").filter({ hasText: "/usr/bin/curl" }).first().click();
-  for (const s of ["Current permissions", "Recent changes", "Activity", "Why the current rules apply"]) await page.getByRole("heading", { name: s }).waitFor();
+  await page.locator("button.app-card").filter({ hasText: "curl" }).first().click();
+  for (const s of ["What it's allowed to do", "Recent changes", "Recent activity", "Why it was allowed or blocked"]) await page.getByRole("heading", { name: s }).waitFor();
+  // plain identity first; the exact file and signer are one tap away under Technical details
+  await page.getByText("Not signed: Moat knows it by its file", { exact: false }).first().waitFor();
+  await page.getByText("Technical details").first().click();
   await page.getByText("/usr/bin/curl").first().waitFor();
   await page.getByText(/Recorded:/).first().waitFor();
   await page.getByText(/no signing identity reported/).first().waitFor();
@@ -197,7 +202,7 @@ test("W12 standalone: Apps-first landing, app detail with four evidence sections
   await shot(page, "live-diagnostics");
   await page.goto(`${h.url}/#/changed`);
   await page.getByRole("button", { name: "Compare" }).click();
-  await page.getByRole("heading", { name: "Observed differences" }).waitFor();
+  await page.getByRole("heading", { name: "What's different" }).waitFor();
   await page.getByText(/none is claimed as the cause/).waitFor();
   await shot(page, "live-what-changed");
   await page.close();
@@ -208,7 +213,7 @@ test("controller outage: the page says it is not current and pauses actions; no 
   await page.route("**/v1/**", (r) => r.abort("connectionrefused"));
   await page.getByText("Not current.").waitFor({ timeout: 20_000 });
   await shot(page, "live-controller-unreachable");
-  const btn = page.getByRole("button", { name: "Allow once for this session" }).first();
+  const btn = page.getByRole("button", { name: "Allow once for this task" }).first();
   if (await btn.count()) assert.equal(await btn.isDisabled(), true);
   assert.equal(await page.getByText("Living room TV").count(), 0);
   await page.close();
@@ -222,14 +227,14 @@ test("W16 DNS-only: a Pi-hole client shows resolver health and evidence age, nev
     assert.equal(r.health, "ok");
     const page = await signedIn(h.ownerToken);
     await page.goto(`${h.url}/#/devices/${encodeURIComponent("dns:pihole:192.168.1.50")}`);
-    await page.getByText("Evidence age").waitFor();
+    await page.getByText("Last checked").waitFor();
     await page.getByText(/via Pi-hole \(pihole\)/).first().waitFor();
-    await page.getByText("History gaps").waitFor();
-    assert.equal(await page.getByText("Flows today").count(), 0);
+    await page.getByText("Gaps in history").waitFor();
+    assert.equal(await page.getByText("Connections today").count(), 0);
     assert.equal(await page.getByText(/bytes? (out|in)/i).count(), 0);
     await shot(page, "live-dns-device");
     await page.goto(`${h.url}/#/devices`);
-    await page.getByText(/resolver ok · polled/).first().waitFor();
+    await page.getByText(/web filter OK · checked/).first().waitFor();
     await page.close();
   } finally {
     await pi.close();
@@ -243,18 +248,18 @@ function learnedFlow(host: string, exe: string | null, verdict: "allow" | "deny"
 test("W14 learning: bounded capture, candidate review with the permission diff and gaps, accept (owner), enforce needs the owner key", async () => {
   const page = await signedIn(h.ownerToken);
   await page.goto(`${h.url}/#/learning`);
-  await page.getByRole("heading", { name: "Capture a workflow" }).waitFor();
-  await page.getByLabel("Executable (exact path)").fill("/usr/bin/curl");
-  await page.getByLabel("Workflow").fill("npm install");
-  await page.getByLabel("Network context").fill("home LAN");
-  await page.getByRole("button", { name: "Start capture" }).click();
-  await page.getByText("capturing", { exact: true }).waitFor();
+  await page.getByRole("heading", { name: "Record an app" }).waitFor();
+  await page.getByLabel("App file (exact path)").fill("/usr/bin/curl");
+  await page.getByLabel("What it's doing").fill("npm install");
+  await page.getByLabel("Network").fill("home LAN");
+  await page.getByRole("button", { name: "Start recording" }).click();
+  await page.getByText("Recording", { exact: true }).waitFor();
   await h.sync({ events: [learnedFlow("registry.npmjs.org", "/usr/bin/curl"), learnedFlow("registry.npmjs.org", "/usr/bin/curl"), learnedFlow("evil.example", "/usr/bin/curl", "deny"), learnedFlow("who.example", null)] });
-  await page.getByRole("button", { name: "Close and review" }).click();
-  await page.getByRole("heading", { name: "Permission diff" }).waitFor();
-  await page.getByText("2 would broaden").waitFor();
-  await page.getByText("unknown identity").first().waitFor();
-  await page.getByText(/Only ever refused/).waitFor();
+  await page.getByRole("button", { name: "Stop and review" }).click();
+  await page.getByRole("heading", { name: "What it tried to reach" }).waitFor();
+  await page.getByText("2 would allow more").waitFor();
+  await page.getByText("Unknown app", { exact: true }).first().waitFor();
+  await page.getByText(/Only ever blocked/).waitFor();
   const accept = page.getByRole("button", { name: /^Accept/ });
   assert.equal(await accept.isDisabled(), true, "nothing is selected by default");
   await page.getByLabel("Accept registry.npmjs.org:443").check();
@@ -263,18 +268,18 @@ test("W14 learning: bounded capture, candidate review with the permission diff a
   await page.getByText(/acknowledge the gaps|incomplete/i).first().waitFor();
   await page.getByText("I reviewed the gaps above").click();
   await accept.click();
-  await page.getByRole("heading", { name: "Accepted entries" }).waitFor();
-  await page.getByText("immutable", { exact: true }).waitFor();
+  await page.getByRole("heading", { name: "Allowed places" }).waitFor();
+  await page.getByText("Never edited", { exact: true }).waitFor();
   assert.equal(await page.getByText("evil.example").count(), 0, "a connection seen during capture is not in the baseline unless accepted");
-  await page.getByRole("button", { name: "Enforce with owner key" }).click();
+  await page.getByRole("button", { name: "Turn on with owner key" }).click();
   await page.getByText("Prepared, not signed").waitFor();
   await page.getByText(/moat-controller owner-authorize/).waitFor();
-  assert.equal(await page.getByRole("button", { name: "Ask the signer to sign" }).isDisabled(), true, "broadening waits for the owner key's authorization");
+  assert.equal(await page.getByRole("button", { name: "Sign and send to devices" }).isDisabled(), true, "allowing more waits for the owner key's authorization");
   await shot(page, "live-learning-enforce");
   // drift: new activity after approval is a new candidate in its own queue; the baseline does not change
   await h.sync({ events: [learnedFlow("cdn.example", "/usr/bin/curl")] });
-  await page.getByRole("button", { name: "Review drift" }).click();
-  await page.getByText("drift since approval", { exact: false }).first().waitFor();
+  await page.getByRole("button", { name: "Check for new activity" }).click();
+  await page.getByText("new since approval", { exact: false }).first().waitFor();
   await page.getByText("cdn.example:443").waitFor();
   await page.goto(`${h.url}/#/learning`);
   await page.getByText("1 in queue").waitFor();
@@ -285,14 +290,15 @@ test("W14 learning: bounded capture, candidate review with the permission diff a
 test("W14 packs: effective delta per module and unsupported cells per device; a viewer cannot start a capture", async () => {
   const viewer = await signedIn(h.viewerToken);
   await viewer.goto(`${h.url}/#/learning`);
-  assert.equal(await viewer.getByRole("button", { name: "Start capture" }).isDisabled(), true);
+  assert.equal(await viewer.getByRole("button", { name: "Start recording" }).isDisabled(), true);
   await viewer.close();
   const page = await signedIn(h.ownerToken);
   await page.goto(`${h.url}/#/learning/packs`);
   await page.getByRole("heading", { name: "Basic coding" }).waitFor();
-  await page.getByText("unsupported cells").first().waitFor();
+  await page.getByText("Won't apply on a device").first().waitFor();
+  await page.getByText("Where it applies").first().click();
   await page.getByText(/skipped with a report/).first().waitFor();
-  assert.equal(await page.getByRole("button", { name: /^Propose/ }).first().isDisabled(), true, "nothing is enabled by default");
+  assert.equal(await page.getByRole("button", { name: /^Turn on/ }).first().isDisabled(), true, "nothing is enabled by default");
   await shot(page, "live-packs");
   await page.close();
 });

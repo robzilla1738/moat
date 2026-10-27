@@ -221,13 +221,13 @@ public struct FirstTenMinutes: Equatable, Sendable {
 
         public var title: String {
             switch self {
-            case .approve: return "Approve the system extension"
-            case .health: return "Confirm the filter is actually running"
-            case .choose: return "Choose: observe apps, enforce selected apps, or launch a restricted task"
+            case .approve: return "Allow Moat's filter in System Settings"
+            case .health: return "Check that the filter is running"
+            case .choose: return "Choose: just watch, or protect the apps you pick"
             case .seeConnection: return "See one real connection"
-            case .temporaryDeny: return "Create a narrow temporary deny"
-            case .verifyUndo: return "Verify the block, then undo it"
-            case .recoveryCard: return "Keep your local recovery card"
+            case .temporaryDeny: return "Make a temporary block for one app"
+            case .verifyUndo: return "Check the block works, then undo it"
+            case .recoveryCard: return "Look at Recovery, so you know the way back"
             case .fleet: return "Optional: connect other devices"
             }
         }

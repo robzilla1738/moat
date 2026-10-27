@@ -11,11 +11,11 @@ APP="${1:?Moat.app}"; OUT="${2:?out dir}"
 mkdir -p "$OUT"
 BIN="$APP/Contents/MacOS/Moat"
 [[ -x "$BIN" ]] || { echo "no executable at $BIN"; exit 1; }
-shots=(
-  "apps dark" "apps light" "activity dark" "activity light" "rules dark" "coverage light"
-  "devices dark" "whatChanged light" "apps-isolated light" "menubar dark" "menubar light" "onboarding dark" "onboarding light" "localrule dark" "localrule light"
-  "learning dark" "candidate light" "packs dark"
-)
+shots=()
+# Every screen, the menu bar panel, onboarding and the temporary-rule card, in both appearances.
+for name in apps activity tasks rules devices coverage whatChanged apps-isolated learning candidate packs menubar onboarding localrule; do
+  shots+=("$name dark" "$name light")
+done
 captured=0
 for s in "${shots[@]}"; do
   read -r name appearance <<<"$s"

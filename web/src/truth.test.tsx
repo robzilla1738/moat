@@ -84,7 +84,7 @@ describe("freshness is computed by the consumer", () => {
     const f = deviceFreshness(old, { serverTime: T0, fetchedAt: T0 }, Date.parse(T0));
     expect(f.coverage).toBe("unknown");
     expect(f.stale).toBe(true);
-    expect(f.note).toMatch(/not current evidence/);
+    expect(f.note).toMatch(/isn't current/);
   });
   it("a never-reporting device is unknown", () => {
     expect(deviceFreshness({ ...d, lastSeen: null }, { serverTime: T0, fetchedAt: T0 }).coverage).toBe("unknown");
@@ -110,7 +110,7 @@ describe("action states come from evidence", () => {
   it("active needs an endpoint receipt and names it", () => {
     const a = grantSteps({ ...base, state: "active", devices: [{ device_id: "omarchy", state: "applied", stale: false, evidence: { revision: 4, state: "applied", at: T0, detail: null } }] }, () => "Omarchy");
     expect(a.phase).toBe("active");
-    expect(a.steps.find((s) => s.label === "Applied by Omarchy")!.detail).toMatch(/receipt for revision 4/);
+    expect(a.steps.find((s) => s.label === "Applied by Omarchy")!.detail).toMatch(/device confirmed rule version 4/);
   });
   it("rejected shows the device's rejection", () => {
     const a = grantSteps({ ...base, state: "rejected", devices: [{ device_id: "omarchy", state: "rejected", stale: false, evidence: { revision: 4, state: "rejected", at: T0, detail: "compile failed" } }] }, () => "Omarchy");
@@ -240,10 +240,10 @@ describe("DNS-only devices (W16)", () => {
         <DeviceDetail id={d.id} go={() => {}} />
       </StoreProvider>,
     );
-    expect(html).toMatch(/Evidence age/);
-    expect(html).toMatch(/Resolver/);
+    expect(html).toMatch(/Last checked/);
+    expect(html).toMatch(/Web filter/);
     expect(html).toMatch(/database was reset/);
-    expect(html).not.toMatch(/Flows today/);
+    expect(html).not.toMatch(/Connections today|Flows today/);
     expect(html).not.toMatch(/bytes? (out|in)\b/i);
     expect(html).not.toMatch(/Process instance/);
   });

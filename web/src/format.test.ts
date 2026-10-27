@@ -23,7 +23,7 @@ describe("demo data honesty", () => {
     for (const d of demo.devices.filter((x) => x.coverage === "dns-only")) {
       expect(d.capabilities.map((c) => c.key)).toEqual(["dns_evidence"]);
     }
-    expect(COVERAGE["dns-only"].claim).toMatch(/No app, process/);
+    expect(COVERAGE["dns-only"].meaning).toMatch(/can't see apps or connections, or count data/);
   });
   it("macOS devices do not claim protected sessions or proven enforcement", () => {
     for (const d of demo.devices.filter((x) => x.platform === "macos")) {

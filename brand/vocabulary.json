@@ -1,0 +1,60 @@
+{
+  "$note": "Moat's words. One status vocabulary and one glossary for the web UI (web/src/format.ts reads this file) and macOS (MoatKit labels; web/src/copy.test.ts checks that the Swift labels match). Plain language first: a term that needs a technical word keeps that word under Details. docs/design.md explains the rules.",
+  "coverage": {
+    "protected-session": { "label": "Tasks protected", "tone": "green", "icon": "lock", "sf": "lock.shield.fill", "meaning": "Tasks you start through Moat run inside a tested boundary that exists before they launch." },
+    "enforced": { "label": "Protected", "tone": "green", "icon": "shield", "sf": "checkmark.shield.fill", "meaning": "Your rules decide which connections can leave this device, for the kinds of traffic it supports." },
+    "monitoring": { "label": "Watching only", "tone": "blue", "icon": "eye", "sf": "eye.fill", "meaning": "Moat records connections here but does not block them yet." },
+    "dns-only": { "label": "Web filter only", "tone": "violet", "icon": "globe", "sf": "globe", "meaning": "Moat only sees which websites this device looks up. It can't see apps or connections, or count data." },
+    "degraded": { "label": "Partly protected", "tone": "amber", "icon": "alert", "sf": "exclamationmark.triangle.fill", "meaning": "Something your rules need isn't working on this device. See why below." },
+    "recovery-required": { "label": "Needs you at the device", "tone": "red", "icon": "wrench", "sf": "wrench.and.screwdriver.fill", "meaning": "This device couldn't confirm its setup after a restart or update. It keeps its last checked rules and needs you at the device; nothing is reset or guessed." },
+    "rollback-pending": { "label": "Undo didn't finish", "tone": "red", "icon": "undo", "sf": "arrow.uturn.backward.circle.fill", "meaning": "Undoing a trial change didn't finish, so the trial rules are still in force. Fix it at the device." },
+    "isolated": { "label": "Locked down", "tone": "red", "icon": "lock", "sf": "lock.shield.fill", "meaning": "Emergency lockdown: only the recovery paths you chose are open." },
+    "unknown": { "label": "Can't confirm", "tone": "neutral", "icon": "help", "sf": "questionmark.circle.fill", "meaning": "We can't confirm this device is protected right now: it hasn't reported recently." }
+  },
+  "macCoverage": {
+    "$note": "macOS CoverageLevel raw values map onto the shared labels above.",
+    "observed": "monitoring",
+    "enforced": "enforced",
+    "degraded": "degraded",
+    "isolated": "isolated",
+    "recovery-required": "recovery-required",
+    "rollback-pending": "rollback-pending",
+    "unknown": "unknown"
+  },
+  "support": {
+    "supported": { "label": "Works", "tone": "green", "icon": "check" },
+    "partial": { "label": "Partly works", "tone": "amber", "icon": "alert" },
+    "untested": { "label": "Not proven yet", "tone": "blue", "icon": "clock" },
+    "unsupported": { "label": "Not available", "tone": "neutral", "icon": "minus" }
+  },
+  "verdict": {
+    "blocked": { "label": "Blocked", "tone": "red" },
+    "allowed": { "label": "Allowed", "tone": "green" },
+    "observed": { "label": "Watched only", "tone": "blue" },
+    "isolated": { "label": "Locked down", "tone": "red" }
+  },
+  "glossary": [
+    { "say": "rule", "not": "policy, policy revision", "means": "What may connect where. Every change to your rules gets a version number, shown under Details." },
+    { "say": "device, this device, this computer", "not": "endpoint", "means": "A computer, phone or TV that Moat watches or protects." },
+    { "say": "checked just now / checked 5 min ago", "not": "evidence just now, evidence age", "means": "When the device last reported. Older than 10 minutes, Moat says it can't confirm." },
+    { "say": "connection", "not": "flow, verdict", "means": "One attempt by an app to reach a server." },
+    { "say": "app", "not": "executable, process, identity", "means": "An exact program, recognised by its file and its signature, never by its name alone. The file path and signer are under Details." },
+    { "say": "task", "not": "session, protected session", "means": "Something you start through Moat, such as a coding agent, that runs inside a boundary with its own rules." },
+    { "say": "watched only", "not": "observed, monitoring, permitted not enforced", "means": "Moat recorded the connection but did not check it against a rule." },
+    { "say": "web filter", "not": "resolver, DNS", "means": "Your home's ad or DNS blocker (Pi-hole or AdGuard Home). For phones and TVs it is the only view Moat has." },
+    { "say": "lockdown", "not": "isolation", "means": "An emergency switch that blocks new connections until you turn it off." },
+    { "say": "record an app", "not": "capture", "means": "Watch one app do one job for a while, so you can decide what to allow." },
+    { "say": "review", "not": "candidate, permission diff", "means": "What an app tried to reach while you recorded it. Nothing is allowed until you tick it." },
+    { "say": "approved list", "not": "baseline", "means": "The places you allowed for one app after a review. It never changes; new activity starts a new review." },
+    { "say": "new since approval", "not": "drift", "means": "Places an app started reaching after you approved its list." },
+    { "say": "rule packs", "not": "workflow packs, modules, cells", "means": "Ready-made rules for common work (coding, package installs). Nothing is turned on until you choose." },
+    { "say": "controller", "not": "server, backend", "means": "The Moat hub that keeps your rules and collects reports from your devices. Devices keep working without it." },
+    { "say": "owner key", "not": "signing key, owner signature", "means": "The key only you hold. Changes that allow more need it." },
+    { "say": "approval key", "not": "delegated issuer", "means": "A narrow key for this phone or browser that can only approve what your owner key allows it to." },
+    { "say": "gap", "not": "telemetry gap, spool gap", "means": "A stretch of time where reports were lost, so activity then is incomplete." }
+  ],
+  "jargon": {
+    "$note": "Words that may not appear in headings, labels, buttons, chips, banners or explanations outside a Details disclosure (web/src/copy.test.ts). Data a device reported (hostnames, app names, reasons) is exempt.",
+    "terms": ["endpoint", "egress", "telemetry", "rollups?", "verdicts?", "cgroup", "nftables", "SNI", "executables?", "evidence", "flows?", "polic(y|ies)", "revisions?", "rev", "sessions?", "incidents?", "snapshots?", "resolvers?", "spool", "canary", "baselines?", "candidates?", "drift", "captures?", "loopback", "TCP", "UDP", "moatd", "NEFilter\\w*", "permitted", "enforc(e|ed|es|ing|ement)", "delegat(e|ed|ion)", "audit token", "ancestry", "admission"]
+  }
+}

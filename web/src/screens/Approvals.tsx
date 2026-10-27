@@ -1,11 +1,11 @@
 import { useState } from "react";
-import { Badge, Card, Icon, Ident, SectionTitle } from "../components/ui";
+import { Actions, Button, Card, Details, Facts, Fine, Ident, StatusChip } from "../components/ui";
 import { useData, useStore } from "../data/store";
 import { until } from "../format";
 
 /**
- * Phone approvals: this browser gets its own narrowly delegated key. The owner key stays on the owner's machine;
- * it signs a delegation naming the devices, the kind of approval and the longest lifetime this browser may approve.
+ * Approve from this browser: it gets its own narrow approval key. Your owner key stays on your own machine; it signs a
+ * permission naming the devices, the kind of approval and the longest time this browser may approve for.
  */
 export function ApprovalsCard() {
   const { issuer, createIssuer, registerDelegation, forgetIssuer, mode } = useStore();
@@ -15,68 +15,62 @@ export function ApprovalsCard() {
   const devices = data.devices.filter((d) => d.platform === "linux" || d.platform === "macos").map((d) => d.id);
   const d = issuer?.delegation;
   return (
-    <Card className="approvals">
-      <SectionTitle action={d ? <Badge tone="green">delegated</Badge> : <Badge>not set up</Badge>}>Phone approvals on this device</SectionTitle>
+    <Card className="approvals" title="Approve from this browser" action={d ? <StatusChip tone="green">Set up</StatusChip> : <StatusChip>Not set up</StatusChip>}>
       {!issuer && (
         <>
-          <p className="small muted">Give this browser its own approval key. It can only approve what your owner key delegates to it (for example: allow once, on these devices, for at most an hour). The owner key itself never comes here.</p>
-          <button type="button" className="btn btn-quiet" onClick={createIssuer}>
-            <Icon name="shield" size={15} /> Create an approval key for this device
-          </button>
+          <p className="muted">Give this phone or browser its own approval key, so you can allow something once without your owner key. It can only approve what your owner key lets it.</p>
+          <Actions>
+            <Button icon="shield" onClick={createIssuer}>
+              Create an approval key for this device
+            </Button>
+          </Actions>
         </>
       )}
       {issuer && !d && (
         <>
-          <p className="small muted">
-            Key <Ident value={issuer.keyId} mono /> was created in this browser. On the machine that holds your owner key, run:
+          <p className="muted">
+            Key <Ident value={issuer.keyId} mono /> was created in this browser. On the computer that holds your owner key, run this, then paste what it prints:
           </p>
           <pre className="code">{`moat-controller delegate-issuer <owner.key> ${issuer.publicHex} --devices ${devices.join(",") || "<device-id>"} --max-ttl 3600 --days 30 --label phone`}</pre>
-          <label className="small" htmlFor="delegation">
-            Paste the printed delegation
-          </label>
+          <label htmlFor="delegation">Paste what it printed</label>
           <textarea id="delegation" className="input mono" rows={3} value={json} onChange={(e) => setJson(e.target.value)} spellCheck={false} />
-          {err && <div className="small bad">{err}</div>}
-          <div className="decision-actions">
-            <button
-              type="button"
-              className="btn btn-primary"
+          {err && <p className="error">{err}</p>}
+          <Actions>
+            <Button
+              kind="primary"
               disabled={!json.trim()}
               onClick={async () => {
                 setErr(await registerDelegation(json));
               }}
             >
-              Use this delegation
-            </button>
-            <button type="button" className="btn btn-quiet" onClick={forgetIssuer}>
+              Use this approval
+            </Button>
+            <Button kind="quiet" onClick={forgetIssuer}>
               Discard key
-            </button>
-          </div>
+            </Button>
+          </Actions>
         </>
       )}
       {issuer && d && (
         <>
-          <dl className="facts">
-            <div>
-              <dt>Key</dt>
-              <dd>
-                <Ident value={issuer.keyId} mono />
-              </dd>
-            </div>
-            <div>
-              <dt>May approve</dt>
-              <dd>
-                {d.scope.kinds.join(", ")} on <Ident value={d.scope.devices.join(", ")} />, at most {Math.round(d.scope.max_ttl_seconds / 60)} min each
-              </dd>
-            </div>
-            <div>
-              <dt>Delegation ends</dt>
-              <dd>{until(d.not_after)}</dd>
-            </div>
-          </dl>
-          <p className="small muted">The signer checks this delegation and your signature over each exact plan. Broader changes still need your owner key.{mode === "demo" ? " (Demo: nothing was registered.)" : ""}</p>
-          <button type="button" className="btn btn-quiet" onClick={forgetIssuer}>
-            Remove from this browser
-          </button>
+          <p>
+            This browser may approve <strong>{d.scope.kinds.join(", ").replace(/_/g, " ")}</strong> for at most {Math.round(d.scope.max_ttl_seconds / 60)} min at a time, for {until(d.not_after)}.
+          </p>
+          <Details summary="Technical details">
+            <Facts
+              rows={[
+                ["Key", <Ident key="k" value={issuer.keyId} mono />],
+                ["Devices", <Ident key="d" value={d.scope.devices.join(", ")} />],
+              ]}
+            />
+            <Fine>The controller checks this permission and your signature on each exact approval. Anything broader still needs your owner key.</Fine>
+          </Details>
+          {mode === "demo" && <Fine>Demo: nothing was registered.</Fine>}
+          <Actions>
+            <Button kind="quiet" onClick={forgetIssuer}>
+              Remove from this browser
+            </Button>
+          </Actions>
         </>
       )}
     </Card>

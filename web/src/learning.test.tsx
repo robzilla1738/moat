@@ -36,17 +36,18 @@ describe("accept request", () => {
 describe("candidate review", () => {
   const html = inDemo(<CandidateReview id="cand-demo-1" go={go} />);
   it("shows the permission diff with every entry unselected", () => {
-    expect(html).toContain("Permission diff");
-    expect(html).toContain("4 would broaden");
+    expect(html).toContain("What it tried to reach");
+    expect(html).toContain("4 would allow more");
     expect(html).toContain("registry.npmjs.org");
     expect(html).not.toMatch(/type="checkbox"[^>]*checked/);
     expect(html).toMatch(/<button[^>]*disabled=""[^>]*>Accept/);
   });
-  it("keeps unknown identity, lost events and refused-only entries visible", () => {
-    expect(html).toContain("unknown identity");
-    expect(html).toContain("lost events");
-    expect(html).toContain("Only ever refused");
-    expect(html).toContain("Destination not reported");
+  it("keeps unknown apps, lost reports and blocked-only entries visible (not behind a disclosure)", () => {
+    const visible = html.replace(/<div class="details-body">[\s\S]*?<\/details>/g, "");
+    expect(visible).toContain("Unknown app");
+    expect(visible).toContain("Lost reports");
+    expect(visible).toContain("Only ever blocked");
+    expect(visible).toContain("Address not reported");
   });
   it("says accepting needs the owner and enforcing needs the owner key", () => {
     expect(html).toContain("needs an owner sign-in");
@@ -57,26 +58,29 @@ describe("candidate review", () => {
 describe("learning overview and drift queue", () => {
   const html = inDemo(<Learning go={go} />);
   it("has a bounded capture control and separate review and drift queues", () => {
-    expect(html).toContain("Capture a workflow");
-    expect(html).toContain("Existing rules, including every deny, stay enforced");
-    expect(html).toContain("Candidates");
-    expect(html).toContain("Drift review");
+    expect(html).toContain("Record an app");
+    expect(html).toContain("Your current rules, including every block, stay on while it records");
+    expect(html).toContain("Ready to review");
+    expect(html).toContain("New since approval");
     expect(html).toContain("1 in queue");
-    expect(html).toContain("Reviewed baselines");
+    expect(html).toContain("Approved lists");
   });
 });
 
 describe("pack browser", () => {
   const html = inDemo(<Packs />);
   it("shows each module's effective delta and the cells where it would not take effect", () => {
-    expect(html).toContain("unsupported cells");
+    expect(html).toContain("Won&#x27;t apply on a device");
     expect(html).toContain(String(demoPacks[0]!.effective.unsupported_cells));
+    // the warning is visible; the exact reason per device is under "Where it applies"
+    const visible = html.replace(/<div class="details-body">[\s\S]*?<\/details>/g, "");
+    expect(visible).toMatch(/Won&#x27;t apply on [^<]+/);
     expect(html).toContain("skipped with a report: session enforcement unsupported");
-    expect(html).toContain("Already in the current policy: no change.");
+    expect(html).toContain("Already in your rules: no change.");
     expect(html).toContain("api.anthropic.com");
   });
   it("enables nothing by default", () => {
     expect(html).not.toMatch(/type="checkbox"[^>]*checked/);
-    expect(html).toMatch(/<button[^>]*disabled=""[^>]*>Propose/);
+    expect(html).toMatch(/<button[^>]*disabled=""[^>]*>Turn on/);
   });
 });

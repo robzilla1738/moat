@@ -16,11 +16,11 @@ machines, enforced locally on each device, coordinated by an optional controller
 
 <table>
 <tr>
-<td colspan="2"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/desktop-home-dark.png"><img src="docs/screenshots/desktop-home-light.png" alt="Moat web dashboard on desktop: apps, coverage, blocked and most-active cards (demo data)"></picture></td>
+<td colspan="2"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/desktop-home-dark.png"><img src="docs/screenshots/desktop-home-light.png" alt="Moat web on desktop, Apps: what needs you now, with plain decision cards and your apps (demo data)"></picture></td>
 </tr>
 <tr>
-<td width="64%"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/macos-apps-dark.png"><img src="docs/screenshots/macos-apps-light.png" alt="Moat for macOS: overview bento with coverage, counters, recent flows and most-blocked apps (demo data)"></picture></td>
-<td><picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/mobile-overview-dark.png"><img src="docs/screenshots/mobile-overview-light.png" alt="Moat on a phone: overview with KPI tiles and decisions (demo data)"></picture></td>
+<td width="64%"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/macos-apps-dark.png"><img src="docs/screenshots/macos-apps-light.png" alt="Moat for macOS, Apps: protection status, getting started and your apps (demo data)"></picture></td>
+<td><picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/mobile-overview-dark.png"><img src="docs/screenshots/mobile-overview-light.png" alt="Moat on a phone, Overview: how protected you are, latest rule change and the last 24 hours (demo data)"></picture></td>
 </tr>
 <tr>
 <td colspan="2" align="center"><sub><b>CI captures on demo data, not real devices.</b> Each image follows your GitHub light or dark theme; both versions of every screen are in <a href="docs/screenshots">docs/screenshots</a> (desktop web: <a href="docs/screenshots/desktop-home-light.png">light</a> · <a href="docs/screenshots/desktop-home-dark.png">dark</a>; Mac: <a href="docs/screenshots/macos-apps-light.png">light</a> · <a href="docs/screenshots/macos-apps-dark.png">dark</a>; phone: <a href="docs/screenshots/mobile-overview-light.png">light</a> · <a href="docs/screenshots/mobile-overview-dark.png">dark</a>).</sub></td>
@@ -76,22 +76,22 @@ A launcher that only adds a label is an *instrumented* session, not a protected 
 </tr>
 <tr>
 <td><sub><b>macOS Activity.</b> Blocked flows say <i>blocked before data was sent</i>; observed flows are never called allowed; bytes appear only when macOS reported them.</sub></td>
-<td><sub><b>Menu bar extra.</b> Coverage at a glance, recent blocks, and Isolate this Mac behind a second explicit confirmation. Turning isolation off still needs the typed phrase in Recovery.</sub></td>
+<td><sub><b>Menu bar extra.</b> Protection at a glance, recent blocks, and Lock down this Mac (emergency isolation) behind a second explicit confirmation. Turning it off still needs the typed phrase in Coverage &amp; recovery.</sub></td>
 </tr>
 <tr>
-<td><picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/desktop-overview-dark.png"><img src="docs/screenshots/desktop-overview-light.png" alt="Web overview: flows by verdict, blocked hour by hour, when traffic happens, evidence age"></picture></td>
-<td><picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/mobile-allow-once-dark.png"><img src="docs/screenshots/mobile-allow-once-light.png" alt="Phone: allow once for this session"></picture></td>
+<td><picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/desktop-overview-dark.png"><img src="docs/screenshots/desktop-overview-light.png" alt="Web Overview: protection, latest rule change, last 24 hours (demo data)"></picture></td>
+<td><picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/mobile-decision-dark.png"><img src="docs/screenshots/mobile-decision-light.png" alt="Phone: the decision card, allow once for this task or keep blocking (demo data)"></picture></td>
 </tr>
 <tr>
-<td><sub><b>Overview.</b> Hourly rollups by verdict, blocked attempts per hour, each device's evidence age against the 10-minute freshness limit, and endpoint receipts for the latest revision. Every chart is drawn from recorded fields; demo charts are tagged <i>Sample data</i>.</sub></td>
-<td><sub><b>Phone web UI.</b> "Allow once for this session" is bound to the incident, policy revision and session instance; stale approvals are rejected.</sub></td>
+<td><sub><b>Overview: how protected am I?</b> Three cards: devices protected (and the reason for each one that isn't), whether the latest rule change is in force on every device (from device receipts), and the last 24 hours as blocked / allowed / watched only. Every chart is drawn from recorded fields; demo charts are tagged <i>Sample data</i>.</sub></td>
+<td><sub><b>Decision card.</b> One sentence, two buttons (<i>Allow once for this task</i>, <i>Keep blocking</i>) and exactly what will happen. The approval is bound to the alert, the rule version and the task; stale approvals are refused. Ids and versions sit under Technical details.</sub></td>
 </tr>
 <tr>
-<td><picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/desktop-rules-dark.png"><img src="docs/screenshots/desktop-rules-light.png" alt="Fleet rules"></picture></td>
+<td><picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/desktop-rules-dark.png"><img src="docs/screenshots/desktop-rules-light.png" alt="Rules (demo data)"></picture></td>
 <td><picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/macos-onboarding-dark.png"><img src="docs/screenshots/macos-onboarding-light.png" alt="macOS first-run onboarding: what Moat can claim"></picture></td>
 </tr>
 <tr>
-<td><sub><b>Rules.</b> Every revision shows its diff, who authorized it, per-device delivery state, and what each platform had to leave out.</sub></td>
+<td><sub><b>Rules.</b> Every change shows what changed, who approved it, whether each device is using it, and what each platform had to leave out.</sub></td>
 <td><sub><b>First-run onboarding.</b> Starts with what Moat can and cannot claim on this Mac, then walks through extension approval, the content filter and adding your signer key (you add it; the app only reads it).</sub></td>
 </tr>
 </table>
@@ -126,8 +126,8 @@ Everything here is implemented and tested on GitHub CI runners or in unit tests,
 * **Linux ordinary apps (W09–W10).** Observe-only inventory (socket tables, optional bpftrace connect attribution) with
   counted loss. OpenSnitch was measured and not adopted; app rules stay rejected because no enforcing hook is proven.
   [W09](docs/decisions/W09-linux-ordinary-apps.md) · [W10](docs/decisions/W10-enforcement.md)
-* **macOS app and filter (W07, W12, W14).** Apps-first app in Liquid Glass (with macOS 14/15 fallbacks and
-  accessibility settings), menu bar extra and honest onboarding. The engine is generation-bound, its cache never
+* **macOS app and filter (W07, W12, W14).** Apps-first app in Moat's bento design (opaque cards on shared
+  tokens, light and dark, no translucency; see [design](docs/design.md)), menu bar extra and honest onboarding. The engine is generation-bound, its cache never
   outlives a timed permission, restored state is re-verified, trust reloads live, and a first canary is refused.
   Standalone rules are compiled by moat-core and signed by the Keychain owner key behind user presence. Unsigned CI
   builds only; never checked by eye or run as a signed extension on a real Mac. [macOS](docs/platforms/macos.md)

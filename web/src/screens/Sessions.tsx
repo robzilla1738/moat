@@ -1,51 +1,55 @@
-import { Badge, Card, Chain, Icon, Ident, SectionTitle } from "../components/ui";
+/**
+ * Tasks ("What are my protected tasks doing?") and one task. A task is something you start through Moat (for example
+ * a coding agent) that runs inside a boundary with its own rules. Whether that boundary is real is always visible.
+ */
+import { Actions, Button, Card, Chain, Details, EmptyState, Facts, Fine, Icon, Ident, List, ListRow, Page, Stat, StatusChip } from "../components/ui";
 import { useData, useStore } from "../data/store";
+import type { Session } from "../data/types";
 import { ago } from "../format";
+
+const sum = (xs: { count: number }[]) => xs.reduce((a, b) => a + b.count, 0);
+const isProtected = (s: Session) => s.boundaryKind === "linux_cgroup" && s.verified;
+
+function TaskChip({ s }: { s: Session }) {
+  return isProtected(s) ? (
+    <StatusChip tone="green" icon="lock">
+      Protected
+    </StatusChip>
+  ) : (
+    <StatusChip tone="amber">Not protected: label only</StatusChip>
+  );
+}
 
 export function Sessions({ go }: { go: (to: string) => void }) {
   const data = useData();
   return (
-    <div className="page">
-      <div className="page-head">
-        <h1>Sessions</h1>
-        <p className="lede">Runs started through a protected launcher. The boundary exists before the first instruction executes, and every child inherits it.</p>
-      </div>
-      <div className="stack">
-        {data.sessions.map((s) => {
-          const device = data.devices.find((d) => d.id === s.deviceId);
-          return (
-            <Card key={s.id} as="button" onClick={() => go(`sessions/${s.id}`)} className="session-card">
-              <div className="session-top">
-                <div>
-                  <div className="session-title">{s.chain[0]?.name ?? s.id}</div>
-                  <div className="muted small">
-                    {device?.name} · {s.profile} · {s.state === "running" ? `running ${ago(s.startedAt).replace(" ago", "")}` : `ended ${ago(s.endedAt ?? s.startedAt)}`}
-                  </div>
-                </div>
-                {s.boundaryKind === "linux_cgroup" && s.verified ? <Badge tone="green" dot>Protected</Badge> : <Badge tone="amber">Instrumented only</Badge>}
-              </div>
-              <div className="session-boundary">
-                <Icon name={s.boundaryKind === "linux_cgroup" ? "shield" : "alert"} size={14} />
-                <span>{s.boundary}</span>
-              </div>
-              {s.chain.length > 1 && (
-                <div className="session-chain">
-                  <Chain nodes={s.chain} compact />
-                </div>
-              )}
-              <div className="session-counts">
-                <span>
-                  <span className="ok">{s.allowed.reduce((a, b) => a + b.count, 0)}</span> allowed
-                </span>
-                <span>
-                  <span className="bad">{s.blocked.reduce((a, b) => a + b.count, 0)}</span> blocked
-                </span>
-              </div>
-            </Card>
-          );
-        })}
-      </div>
-    </div>
+    <Page title="Tasks" lede="Things you start through Moat, such as a coding agent. Each runs inside its own boundary with its own rules.">
+      {data.sessions.length === 0 ? (
+        <EmptyState title="No tasks yet" icon="sessions">
+          Start an app with moat-launch on a Linux computer and it shows up here, with everything it tried to reach.
+        </EmptyState>
+      ) : (
+        <div className="card list-card">
+          {data.sessions.map((s) => {
+            const device = data.devices.find((d) => d.id === s.deviceId);
+            return (
+              <ListRow
+                key={s.id}
+                icon={<Icon name="sessions" size={16} />}
+                title={<Ident value={s.chain[0]?.name ?? s.id} />}
+                sub={
+                  <>
+                    <Ident value={device?.name ?? s.deviceId} /> · {s.state === "running" ? `running for ${ago(s.startedAt).replace(" ago", "")}` : `ended ${ago(s.endedAt ?? s.startedAt)}`} · {sum(s.allowed)} allowed · {sum(s.blocked)} blocked
+                  </>
+                }
+                trailing={<TaskChip s={s} />}
+                onClick={() => go(`sessions/${encodeURIComponent(s.id)}`)}
+              />
+            );
+          })}
+        </div>
+      )}
+    </Page>
   );
 }
 
@@ -53,87 +57,69 @@ export function SessionDetail({ id, go }: { id: string; go: (to: string) => void
   const data = useData();
   const { closeSession, canAct } = useStore();
   const s = data.sessions.find((x) => x.id === id);
-  if (!s) return <div className="page">Not found</div>;
+  void go;
+  if (!s)
+    return (
+      <Page title="Task not found" back={{ label: "Tasks", to: "sessions" }}>
+        <EmptyState title="Task not found" icon="sessions" />
+      </Page>
+    );
   const device = data.devices.find((d) => d.id === s.deviceId);
   return (
-    <div className="page">
-      <button type="button" className="back" onClick={() => go("sessions")}>
-        <Icon name="chevron" size={16} className="flip" /> Sessions
-      </button>
-      <div className="page-head">
-        <div className="eyebrow">
-          {device?.name} · {s.profile}
-        </div>
-        <h1 className="detail-title">{s.chain[0]?.name}</h1>
-        <div className="head-badges">
-          {s.verified ? <Badge tone="green" dot>Verified session</Badge> : <Badge tone="amber">Self-reported; a hint only</Badge>}
-          <Badge tone={s.state === "running" ? "blue" : "neutral"}>{s.state}</Badge>
-          <span className="mono small muted">{s.id}</span>
-        </div>
+    <Page back={{ label: "Tasks", to: "sessions" }} eyebrow={<Ident value={device?.name ?? s.deviceId} />} title={<Ident value={s.chain[0]?.name ?? s.id} />}>
+      <div className="chips">
+        <TaskChip s={s} />
+        <StatusChip tone={s.state === "running" ? "blue" : "neutral"}>{s.state === "running" ? "Running" : "Ended"}</StatusChip>
+        {!s.verified && <StatusChip tone="amber">Reported by the app itself</StatusChip>}
       </div>
-      <Card className="boundary-card">
-        <div className="boundary-row">
-          <Icon name={s.boundaryKind === "linux_cgroup" ? "shield" : "alert"} size={20} />
-          <div>
-            <div className="boundary-title">{s.boundary}</div>
-            <div className="muted small">
-              {s.boundaryKind === "linux_cgroup"
-                ? "Placed in its cgroup before exec, uid dropped, no_new_privs, inherited descriptors closed, user-session brokers hidden. Not covered: abstract Unix sockets, the system DNS resolver, loopback services the profile allows."
-                : "A label without an OS boundary. Session rules do not apply; traffic follows the ordinary profile."}
-            </div>
-          </div>
-        </div>
-        <div className="muted small">Launched by {s.launcher} · started {ago(s.startedAt)}</div>
+      <Card title={isProtected(s) ? "Protected from the start" : "Not protected"}>
+        <p>{isProtected(s) ? "Moat set up this task's boundary before it started, and everything it launches stays inside." : "This is only a label. No boundary was set up, so the task follows the device's normal rules."}</p>
+        <Details summary="Technical details">
+          <Facts
+            rows={[
+              ["Boundary", <Ident key="b" value={s.boundary} kind="text" />],
+              ["Task id", <Ident key="i" value={s.id} mono />],
+              ["Rules", <Ident key="p" value={s.profile} />],
+              ["Started by", `${s.launcher} · ${ago(s.startedAt)}`],
+            ]}
+          />
+          {s.boundaryKind === "linux_cgroup" && <Fine>Placed in its cgroup before exec, uid dropped, no_new_privs, inherited descriptors closed, user-session brokers hidden. Not covered: abstract Unix sockets, the system DNS resolver, loopback services the profile allows.</Fine>}
+          {s.chain.length > 0 && <Chain nodes={s.chain} />}
+        </Details>
       </Card>
-      <div className="grid-2">
-        <Card>
-          <SectionTitle>Process chain</SectionTitle>
-          <Chain nodes={s.chain} />
-        </Card>
-        <Card>
-          <SectionTitle>Destinations</SectionTitle>
-          <ul className="dest-list">
-            {s.allowed.map((a) => (
-              <li key={a.destination}>
-                <span className="dest-verdict ok">
-                  <Icon name="check" size={12} />
-                </span>
-                <span className="mono">{a.destination}</span>
-                <span className="muted small">{a.via}</span>
-                <span className="dest-count">{a.count}</span>
-              </li>
-            ))}
-            {s.blocked.map((a) => (
-              <li key={a.destination}>
-                <span className="dest-verdict bad">
-                  <Icon name="x" size={12} />
-                </span>
-                <span className="mono">{a.destination}</span>
-                <span className="muted small">{a.rule}</span>
-                <span className="dest-count">{a.count}</span>
-              </li>
-            ))}
-            {!s.allowed.length && !s.blocked.length && <li className="muted">No attributed flows.</li>}
-          </ul>
-        </Card>
-      </div>
+      <Card title="Where it connected">
+        <div className="stats">
+          <Stat label="Allowed" value={sum(s.allowed)} tone="green" />
+          <Stat label="Blocked" value={sum(s.blocked)} tone="red" />
+        </div>
+        <List>
+          {s.blocked.map((a) => (
+            <ListRow key={`b${a.destination}`} title={<Ident value={a.destination} kind="host" mono />} sub={<Ident value={a.rule} kind="text" />} trailing={<StatusChip tone="red">{a.count} blocked</StatusChip>} />
+          ))}
+          {s.allowed.map((a) => (
+            <ListRow key={`a${a.destination}`} title={<Ident value={a.destination} kind="host" mono />} sub={<Ident value={a.via} kind="text" />} trailing={<StatusChip tone="green">{a.count} allowed</StatusChip>} />
+          ))}
+          {!s.allowed.length && !s.blocked.length && <p className="muted">Nothing recorded for this task yet.</p>}
+        </List>
+      </Card>
       {s.intent && (
-        <Card>
-          <SectionTitle action={<Badge>self-reported</Badge>}>Stated intent</SectionTitle>
+        <Card title="What the app said it was doing" action={<StatusChip>Its own words</StatusChip>}>
           <p className="intent">
-            “<Ident value={s.intent} kind="text" />”
+            &ldquo;<Ident value={s.intent} kind="text" />&rdquo;
           </p>
-          <div className="muted small">Reported by the agent. It enriches the timeline; it cannot grant access or confirm a block.</div>
+          <Fine>The app reported this itself. It helps you read the activity; it can&apos;t allow anything or prove a block.</Fine>
         </Card>
       )}
       {s.state === "running" && (
-        <div className="decision-actions">
-          <button type="button" className="btn btn-danger" disabled={!canAct.ok || !!s.closeRequestedAt} onClick={() => closeSession(s)}>
-            {s.closeRequestedAt ? "Close requested" : "End session"}
-          </button>
-          <span className="muted small">{canAct.reason ?? (s.closeRequestedAt ? `Requested ${ago(s.closeRequestedAt)}; still running until the endpoint reports it ended.` : "Sent as a typed close action on the device's next sync; done when the endpoint reports it ended.")}</span>
-        </div>
+        <Card>
+          <Actions>
+            <Button kind="danger" disabled={!canAct.ok || !!s.closeRequestedAt} onClick={() => closeSession(s)}>
+              {s.closeRequestedAt ? "End requested" : "End this task"}
+            </Button>
+          </Actions>
+          <Fine>{canAct.reason ?? (s.closeRequestedAt ? `Requested ${ago(s.closeRequestedAt)}. It keeps running until the device confirms it ended.` : "Sent to the device when it next checks in. Done when the device confirms it ended.")}</Fine>
+        </Card>
       )}
-    </div>
+    </Page>
   );
 }

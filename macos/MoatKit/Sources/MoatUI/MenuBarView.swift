@@ -1,9 +1,9 @@
 import MoatKit
 import SwiftUI
 
-/// The menu bar extra's panel (`MenuBarExtra` with `.window` style): quick status, recent blocks, and the emergency
-/// isolate action. Isolating always takes a second, explicit confirmation; the Isolate button morphs into the
-/// Cancel / Isolate now pair (glassEffectID inside a GlassEffectContainer on macOS 26).
+/// The menu bar extra's panel (`MenuBarExtra` with `.window` style): "Is this Mac protected, and what did it just
+/// block?" Status, the last few blocks, and the emergency lockdown, which always takes a second, explicit
+/// confirmation (the Lock down button turns into the Cancel / Lock down now pair).
 public struct MenuBarContent: View {
     @ObservedObject var model: AppModel
     var openMain: () -> Void
@@ -21,10 +21,10 @@ public struct MenuBarContent: View {
 
     public var body: some View {
         let p = Palette.of(scheme)
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: Space.s4) {
             header(p)
             if let s = model.status {
-                Text(s.coverage.claim).font(.callout).foregroundStyle(p.text2).fixedSize(horizontal: false, vertical: true)
+                Text(verbatim: s.coverage.claim).font(.callout).foregroundStyle(p.text2).fixedSize(horizontal: false, vertical: true)
                 recent(p)
             } else {
                 Label("Waiting for the filter to report…", systemImage: "antenna.radiowaves.left.and.right")
@@ -32,7 +32,7 @@ public struct MenuBarContent: View {
             }
             Divider()
             isolation(p)
-            HStack(spacing: 8) {
+            HStack(spacing: Space.s2) {
                 Button("Open Moat", action: openMain).moatButtonStyle(prominent: true).keyboardShortcut("o")
                 Button {
                     Task { await model.refresh() }
@@ -44,18 +44,18 @@ public struct MenuBarContent: View {
                 Button("Quit", action: quit).buttonStyle(.plain).foregroundStyle(p.muted).font(.callout)
             }
         }
-        .padding(16)
+        .padding(Space.s4)
         .frame(width: 348)
         .environment(\.palette, p)
         .tint(p.accentStrong)
     }
 
     private func header(_ p: Palette) -> some View {
-        HStack(spacing: 10) {
+        HStack(spacing: Space.s3) {
             AppMark(size: 28)
-            VStack(alignment: .leading, spacing: 1) {
+            VStack(alignment: .leading, spacing: Space.s1) {
                 Text("Moat").font(.headline)
-                Text(model.status?.installed.map { "Policy r\($0.revision) · \($0.policyName)" } ?? "No signed policy")
+                Text(verbatim: model.status?.installed.map { "Rules: \($0.policyName)" } ?? "No signed rules yet")
                     .font(.caption).foregroundStyle(p.muted).lineLimit(1)
             }
             Spacer()
@@ -68,9 +68,9 @@ public struct MenuBarContent: View {
 
     private func recent(_ p: Palette) -> some View {
         let blocked = Array(model.flows.filter { $0.decision.verdict == .deny }.prefix(4))
-        return VStack(alignment: .leading, spacing: 8) {
+        return VStack(alignment: .leading, spacing: Space.s2) {
             HStack {
-                Text("Recent blocks").font(.subheadline.weight(.semibold))
+                Text("Recently blocked").font(.subheadline.weight(.semibold))
                 Spacer()
                 if let n = model.status?.flowsDenied { Text("\(n) total").font(.caption).foregroundStyle(p.muted) }
             }
@@ -78,10 +78,10 @@ public struct MenuBarContent: View {
                 Text("Nothing blocked recently.").font(.callout).foregroundStyle(p.muted)
             }
             ForEach(blocked) { r in
-                HStack(spacing: 8) {
+                HStack(spacing: Space.s2) {
                     Image(systemName: "xmark.shield.fill").foregroundStyle(p.red).font(.callout).accessibilityHidden(true)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(r.facts.appLabel).font(.callout.weight(.semibold)).lineLimit(1)
+                    VStack(alignment: .leading, spacing: Space.s1) {
+                        Text(verbatim: r.facts.appLabel).font(.callout.weight(.semibold)).lineLimit(1)
                         Text(verbatim: "\(r.facts.remoteHost ?? r.facts.remoteIP):\(r.facts.remotePort)")
                             .font(.system(.caption, design: .monospaced)).foregroundStyle(p.text2).lineLimit(1).truncationMode(.middle)
                     }
@@ -91,35 +91,35 @@ public struct MenuBarContent: View {
                 .accessibilityElement(children: .combine)
             }
         }
-        .padding(12)
-        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(p.surface))
-        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(p.border, lineWidth: 1))
+        .padding(Space.s3)
+        .background(RoundedRectangle(cornerRadius: Radius.card, style: .continuous).fill(p.surface))
+        .overlay(RoundedRectangle(cornerRadius: Radius.card, style: .continuous).strokeBorder(p.border, lineWidth: 1))
     }
 
     @ViewBuilder private func isolation(_ p: Palette) -> some View {
         if model.status?.isolation.active == true {
-            HStack(spacing: 10) {
+            HStack(spacing: Space.s3) {
                 Image(systemName: "lock.shield.fill").foregroundStyle(p.red).moatPulse(true, reduceMotion: reduceMotion)
-                Text("Isolation is on. Turning it off needs the typed phrase in Recovery.").font(.callout).fixedSize(horizontal: false, vertical: true)
+                Text("Emergency lockdown is on. Turn it off in Coverage & recovery, with the typed phrase.").font(.callout).fixedSize(horizontal: false, vertical: true)
             }
         } else {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: Space.s2) {
                 if confirming {
-                    Text("Block new outbound connections except loopback on this Mac until you turn it off? Open connections are not cut.")
+                    Text("Block new connections from this Mac, except to itself, until you turn it off? Connections already open stay open.")
                         .font(.callout.weight(.medium)).fixedSize(horizontal: false, vertical: true)
                 }
-                MoatGlassContainer(spacing: 8) {
-                    HStack(spacing: 8) {
+                MoatGlassContainer(spacing: Space.s2) {
+                    HStack(spacing: Space.s2) {
                         if confirming {
                             glassButton("Cancel", symbol: "xmark", tint: nil, p) { setConfirming(false) }
                                 .moatGlassID("cancel", in: ns, reduceMotion: reduceMotion)
-                            glassButton("Isolate now", symbol: "lock.shield.fill", tint: p.red, p) {
+                            glassButton("Lock down now", symbol: "lock.shield.fill", tint: p.red, p) {
                                 setConfirming(false)
                                 Task { await model.enterIsolation(reason: "Turned on from the menu bar") }
                             }
                             .moatGlassID("isolate", in: ns, reduceMotion: reduceMotion)
                         } else {
-                            glassButton("Isolate this Mac…", symbol: "lock.shield", tint: nil, p) { setConfirming(true) }
+                            glassButton("Lock down this Mac…", symbol: "lock.shield", tint: nil, p) { setConfirming(true) }
                                 .moatGlassID("isolate", in: ns, reduceMotion: reduceMotion)
                         }
                     }
@@ -136,9 +136,9 @@ public struct MenuBarContent: View {
         Button(action: action) {
             Label(title, systemImage: symbol)
                 .font(.callout.weight(.semibold))
-                .foregroundStyle(tint == nil ? p.text : Color.white)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 8)
+                .foregroundStyle(tint == nil ? p.text : BrandColor.onTint)
+                .padding(.horizontal, Space.s4)
+                .padding(.vertical, Space.s2)
                 .contentShape(Capsule())
         }
         .buttonStyle(.plain)
