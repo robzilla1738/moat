@@ -38,7 +38,7 @@ final class FilterDataProvider: NEFilterDataProvider {
         let facts = FlowFacts(
             id: flow.identifier.uuidString,
             bundleID: nil,
-            signingID: identity.signingID ?? flow.sourceAppIdentifier,
+            signingID: identity.signingID,
             teamID: identity.teamID,
             executable: identity.path,
             pid: identity.pid,

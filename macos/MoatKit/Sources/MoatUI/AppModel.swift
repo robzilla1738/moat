@@ -45,13 +45,21 @@ public final class AppModel: ObservableObject {
         self.screen = screen
     }
 
+    /// True when `lastError` came from failing to reach the extension (cleared by the next good refresh).
+    /// Errors from an owner action stay visible until dismissed.
+    private var errorIsConnection = false
+
     public func refresh() async {
         do {
             status = try await client.status()
             flows = try await client.recentFlows(limit: 200)
-            lastError = nil
+            if errorIsConnection {
+                lastError = nil
+                errorIsConnection = false
+            }
         } catch {
             lastError = "\(error)"
+            errorIsConnection = true
         }
     }
 
@@ -63,7 +71,9 @@ public final class AppModel: ObservableObject {
             notice = label
             lastError = nil
         } catch {
+            notice = nil
             lastError = "\(error)"
+            errorIsConnection = false
         }
         await refresh()
     }
