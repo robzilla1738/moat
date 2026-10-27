@@ -15,6 +15,7 @@ import { Controller } from "../src/controller.ts";
 import { generateKeyPair } from "../src/crypto.ts";
 import { Moatctl } from "../src/moatctl.ts";
 import { bootstrap, fixture, MOATCTL } from "./helpers.ts";
+import { enroll as enrollDevice } from "./w12-helpers.ts";
 
 test("flow store: batched inserts, duplicates ignored, gaps found, rollups, retention and quota", () => {
   const fs = new FlowStore(join(mkdtempSync(join(tmpdir(), "flows-")), "flows.db"));
@@ -82,6 +83,8 @@ test("DNS-only integrations: AdGuard Home and Pi-hole records carry no process, 
 
 test("Digital Kingdom feed: enforcer reports, never independent observations; durable cursor", async () => {
   const f = fixture();
+  enrollDevice(f, "mbp-m1", "macos");
+  enrollDevice(f, "omarchy", "linux");
   f.c.raise({ kind: "blocked_connection", device: "mbp-m1", session: "s1", app: "curl", destination: "oss-cn-beijing.aliyuncs.com", port: 443, transport: "tcp", rule: "default:coding-session", revision: 4, reason: "blocked", urgency: "high", ref: "seq:1", at: "2026-10-26T12:00:00Z" });
   f.c.raise({ kind: "coverage_lost", device: "omarchy", destination: "-", reason: "nft failed", urgency: "high", ref: "seq:2", at: "2026-10-26T12:01:00Z" });
   const posts: string[] = [];
@@ -95,6 +98,11 @@ test("Digital Kingdom feed: enforcer reports, never independent observations; du
   assert.equal(evs[1]!.action, "sensor_unavailable");
   assert.equal((await feed.push()).sent, 0, "cursor persisted");
   assert.equal(toDkEvent({ kind: "policy_rejected" } as never), null);
+  // an event for something that is not an enrolled Moat endpoint is outside the producer authority: dropped, not sent
+  f.c.raise({ kind: "coverage_lost", device: "stranger", destination: "-", reason: "x", urgency: "high", ref: "seq:3", at: new Date().toISOString() });
+  const r2 = await feed.push();
+  assert.equal(r2.sent, 0);
+  assert.match(r2.dropped[0]!, /not an enrolled Moat endpoint/);
 });
 
 test("end to end over HTTP: separate signer process boundary, enrollment, mutually authenticated sync into a moatd state dir", async () => {
