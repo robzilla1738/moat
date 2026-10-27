@@ -38,6 +38,10 @@ jobs:
         run: sudo REQUIRE_NFT=1 linux/tests/netns-enforcement.sh target/debug
       - name: W10 ordinary-app inventory (observe-only) vs an independent receiver
         run: sudo linux/tests/ordinary-inventory.sh target/debug
+      - name: W10 connect-time attribution (bpftrace, observe-only) vs receiver and kernel counters
+        run: |
+          sudo apt-get install -y -qq bpftrace
+          sudo linux/tests/ordinary-inventory-ebpf.sh target/debug
 
   installed:
     name: installed systemd unit (W11)

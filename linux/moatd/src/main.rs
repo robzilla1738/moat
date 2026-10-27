@@ -50,15 +50,26 @@ enum Cmd {
         /// spool (W10). Off unless set. Never enforces anything.
         #[arg(long)]
         ordinary_inventory_ms: Option<u64>,
+        /// Also attribute ordinary-app TCP connects at connect time with this bpftrace binary (W10 increment 2,
+        /// observe-only; buffer loss, stalls and tracer exit are spooled as inventory_loss). Off unless set.
+        #[arg(long)]
+        ordinary_inventory_bpftrace: Option<String>,
     },
     /// Observe-only ordinary-app inventory in the foreground: JSON lines on stdout (W10). Never enforces anything.
     Inventory {
         /// Sampling interval in milliseconds.
         #[arg(long, default_value_t = 200)]
         interval_ms: u64,
-        /// Stop after this many seconds (default: run until killed).
+        /// Stop after this many seconds (default: run until killed). With --ebpf, counted from the moment the tracer
+        /// attached.
         #[arg(long)]
         seconds: Option<u64>,
+        /// Connect-time attribution with this bpftrace binary instead of socket-table sampling (W10 increment 2).
+        #[arg(long)]
+        ebpf: Option<String>,
+        /// bpftrace per-CPU buffer pages (tests force loss with a tiny buffer).
+        #[arg(long)]
+        perf_rb_pages: Option<u32>,
     },
     /// Queue a signed snapshot for the daemon (copied into <state>/inbox).
     Apply {
@@ -149,7 +160,16 @@ fn main() -> ExitCode {
 
 fn run(cli: Cli) -> Result<(), String> {
     match cli.cmd {
-        Cmd::Run { device_id, cgroup_mount, spool_mib, tick_secs, no_egress_proxy, egress_proxy_ports, ordinary_inventory_ms } => {
+        Cmd::Run {
+            device_id,
+            cgroup_mount,
+            spool_mib,
+            tick_secs,
+            no_egress_proxy,
+            egress_proxy_ports,
+            ordinary_inventory_ms,
+            ordinary_inventory_bpftrace,
+        } => {
             let ports = egress_proxy_ports
                 .split_once('-')
                 .and_then(|(a, b)| Some((a.parse::<u16>().ok()?, b.parse::<u16>().ok()?)))
@@ -178,10 +198,62 @@ fn run(cli: Cli) -> Result<(), String> {
             }
             ep.startup();
             eprintln!("moatd: coverage {}", ep.coverage_label());
-            moatd::server::serve_with(ep, cli.socket, Duration::from_secs(tick_secs), ordinary_inventory_ms.map(Duration::from_millis))
-                .map_err(|e| e.to_string())
+            moatd::server::serve_with(
+                ep,
+                cli.socket,
+                Duration::from_secs(tick_secs),
+                ordinary_inventory_ms.map(Duration::from_millis),
+                ordinary_inventory_bpftrace,
+            )
+            .map_err(|e| e.to_string())
         }
-        Cmd::Inventory { interval_ms, seconds } => {
+        Cmd::Inventory { interval_ms, seconds, ebpf: Some(bpftrace), perf_rb_pages } => {
+            use moatd::inventory::{ProcFs, Source};
+            let src = ProcFs::default();
+            let mut t = moatd::ebpf::Tracer::start(&bpftrace, perf_rb_pages).map_err(|e| format!("{bpftrace}: {e}"))?;
+            println!(
+                "{}",
+                serde_json::json!({"type": "coverage", "coverage": moatd::inventory::COVERAGE, "note": moatd::ebpf::coverage_note()})
+            );
+            // --seconds counts attached tracing time: bpftrace may take many seconds to compile and attach.
+            let launched = std::time::Instant::now();
+            let mut start = launched;
+            let mut announced = false;
+            let ident = |pid: u32| src.identity(pid);
+            loop {
+                for ev in t.drain(&ident) {
+                    println!("{}", serde_json::to_string(&ev).unwrap());
+                }
+                if t.decoder.attached && !announced {
+                    announced = true;
+                    start = std::time::Instant::now();
+                    println!(
+                        "{}",
+                        serde_json::json!({"type": "sensor_attached", "measurement_source": moatd::ebpf::MEASUREMENT, "attach_ms": launched.elapsed().as_millis() as u64})
+                    );
+                }
+                use std::io::Write;
+                let _ = std::io::stdout().flush();
+                if !announced && launched.elapsed() >= Duration::from_secs(180) {
+                    for ev in t.drain(&ident) {
+                        println!("{}", serde_json::to_string(&ev).unwrap());
+                    }
+                    t.stop();
+                    return Err("bpftrace did not attach within 180 s (see ebpf_unparsed records for its output)".into());
+                }
+                if announced && seconds.is_some_and(|s| start.elapsed() >= Duration::from_secs(s)) {
+                    // let the tracer flush what it already has (and its loss counters) before stopping
+                    std::thread::sleep(Duration::from_millis(1500));
+                    for ev in t.drain(&ident) {
+                        println!("{}", serde_json::to_string(&ev).unwrap());
+                    }
+                    t.stop();
+                    return Ok(());
+                }
+                std::thread::sleep(Duration::from_millis(interval_ms.clamp(10, 200)));
+            }
+        }
+        Cmd::Inventory { interval_ms, seconds, ebpf: None, .. } => {
             use moatd::inventory::{Inventory, ProcFs};
             let src = ProcFs::default();
             let mut inv = Inventory::new();

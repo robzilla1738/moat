@@ -58,6 +58,21 @@ record says `observe_only`, and Moat's nftables ruleset is not touched.
 Why this path and not OpenSnitch: [W09 decision](../decisions/W09-linux-ordinary-apps.md). CI proof:
 `linux/tests/ordinary-inventory.sh` (client and receiver network namespaces; the receiver logs every accepted peer).
 
+**Increment 2: connect-time attribution.** `moatd inventory --ebpf /usr/bin/bpftrace` (or
+`moatd run --ordinary-inventory-bpftrace /usr/bin/bpftrace`) attributes every TCP connect in the kernel at the moment
+it starts (`tracepoint:sock:inet_sock_set_state`, CLOSE → SYN_SENT): pid, uid, comm and cgroup id from the connecting
+task itself, so a process that connects and exits at once is still attributed (`connect_attempt` records). The
+executable identity is read from /proc afterwards; a process already gone, a reused PID (started after the connect) or
+a uid mismatch leaves `identity: null` with the reason. Loss is reported: bpftrace buffer overflow (`ebpf_buffer`,
+exact count), missing heartbeats (`ebpf_stalled`), the tracer exiting (`ebpf_stopped`) and unparsed lines
+(`ebpf_unparsed`). bpftrace is an optional runtime dependency; nothing new runs in the kernel unless it is installed
+and the flag is set. TCP only (UDP is not attributed by this path); every network namespace is seen but not named.
+CI proof: `linux/tests/ordinary-inventory-ebpf.sh` (short-lived processes attributed by their own pid; a 1-page buffer
+and a 20 000-connect flood accounted for against the kernel's ActiveOpens; tracer kill reported).
+
+Enforcement for ordinary apps stays unavailable: no hook is proven
+([W10 enforcement decision](../decisions/W10-enforcement.md)).
+
 ## Policy delivery
 
 `moatd` only installs **signed** snapshots from a trusted signer key (`/var/lib/moat/trusted/*.pub`). Delivery is a

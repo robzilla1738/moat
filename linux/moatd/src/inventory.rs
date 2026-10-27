@@ -130,6 +130,19 @@ pub struct Identity {
     pub confidence: String,
 }
 
+/// What the kernel said about the connecting task, at connect time.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct KernelAttribution {
+    pub pid: u32,
+    pub uid: u32,
+    /// The task's comm (at most 15 bytes, set by the process itself: a hint, not an identity).
+    pub comm: String,
+    /// cgroup v2 id (inode of the task's cgroup directory).
+    pub cgroup_id: u64,
+    /// Kernel monotonic nanoseconds at the connect.
+    pub at_ns: u64,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum InventoryEvent {
@@ -148,6 +161,20 @@ pub enum InventoryEvent {
     },
     /// Connections the kernel saw that the inventory did not (or could not) report.
     InventoryLoss { coverage: String, scope: String, count: u64, detail: String },
+    /// A TCP connect attributed in the kernel at the moment it started (W10 increment 2, `crate::ebpf`): the
+    /// connecting task's pid, uid, comm and cgroup id come from the tracepoint itself, so a process that exits
+    /// immediately is still attributed. `identity` is the /proc lookup made afterwards; it is null (with a reason)
+    /// when the process is already gone or its PID was reused. Never a decision.
+    ConnectAttempt {
+        coverage: String,
+        measurement_source: String,
+        transport: Transport,
+        remote: String,
+        kernel: KernelAttribution,
+        identity: Option<Identity>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        unknown_reason: Option<String>,
+    },
 }
 
 /// Where the collector reads from (procfs in production, fixtures in tests).

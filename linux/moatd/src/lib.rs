@@ -10,6 +10,7 @@
 pub mod caller;
 pub mod cgroup;
 pub mod control;
+pub mod ebpf;
 pub mod endpoint;
 pub mod inventory;
 pub mod journal;
