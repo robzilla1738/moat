@@ -33,11 +33,14 @@ scope is [docs/STATUS.md](docs/STATUS.md) and [docs/support-matrix.md](docs/supp
 
 ## Supported versions
 
-There are no releases yet. Fixes land on `main`. Once releases exist, the supported versions and their end of
-support are listed in [docs/support-matrix.md](docs/support-matrix.md).
+Only experimental prereleases exist (`v0.1.0-alpha.*`), and no version is supported. Fixes land on `main` and in
+the next prerelease; there are no backports. Supported versions and their end of support will be listed in
+[docs/support-matrix.md](docs/support-matrix.md). Release assets can be checked with
+`release/recovery-drill.sh integrity <dir>` ([docs/recovery-drill.md](docs/recovery-drill.md)).
 
 ## Maintainer setup still needed
 
-Private vulnerability reporting must be enabled in the repository settings (*Settings → Code security*). Until it
-is, the *Report a vulnerability* button does not appear; open a minimal public issue that says only "security
+Private vulnerability reporting must be enabled in the repository settings (*Settings → Code security*;
+[#51](https://github.com/robzilla1738/moat/issues/51)). Until it is, the *Report a vulnerability* button does not
+appear; open a minimal public issue that says only "security
 report, please contact me" and the maintainer will reach out privately.

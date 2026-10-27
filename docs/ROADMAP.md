@@ -2,6 +2,30 @@
 
 > The original product and technical roadmap Moat is built from, prepared October 26, 2026. docs/STATUS.md tracks each item.
 
+## Where Moat stands against this roadmap (updated 2026-10-27)
+
+The text below the line is the original roadmap, unchanged. Progress is tracked only in the
+[claim ledger](STATUS.md) ([`claim-ledger.json`](claim-ledger.json)). This summary follows it and claims nothing
+beyond it. **Nothing is supported on real devices**: no claim is `supported_installed`, and every result comes from
+GitHub CI runners or unit tests.
+
+| Gate | Status | What blocks it |
+| --- | --- | --- |
+| G0 truthful experimental build | **Not met.** All Lane A baseline defects are closed with regression tests; three Lane B defects are open in the ledger. | `D-MAC-CACHE-TRUST`, `D-WEB-DEMO-SUCCESS`, `D-INCIDENT-ROUTING` |
+| G1 useful local Mac alpha | Not started on a device | Developer ID, NE profiles, notarization ([#2](https://github.com/robzilla1738/moat/issues/2)); a signed install on a clean second Mac ([#7](https://github.com/robzilla1738/moat/issues/7)) |
+| G2 cross-platform local beta | Blocked | G1; Linux ordinary-app enforcement unavailable ([W10 decision](decisions/W10-enforcement.md)); Omarchy proof ([#6](https://github.com/robzilla1738/moat/issues/6)) |
+| G3 private fleet beta | Blocked | Fleet sync, learning and DNS adapters pass in CI only; needs real endpoints, a 24-hour outage test and phone approvals |
+| G4, G5 | Not started | Compatibility suite and 30-day pilot ([#11](https://github.com/robzilla1738/moat/issues/11)), VPN matrix ([#8](https://github.com/robzilla1738/moat/issues/8)), independent review |
+
+Work packages W01–W16 have source and CI evidence at the levels the ledger records; the per-package state is in
+[STATUS.md](STATUS.md#work-packages-master_roadmap-12). Decision records: [W09](decisions/W09-linux-ordinary-apps.md),
+[W10 enforcement](decisions/W10-enforcement.md), [W10 loader](decisions/W10-increment-3-loader.md),
+[W11 `CAP_SYS_PTRACE`](decisions/W11-cap-sys-ptrace.md), [naming](naming.md).
+Support: [support matrix](support-matrix.md), [recovery drill](recovery-drill.md),
+[recovery and update policy](recovery-update-policy.md).
+
+---
+
 
 Product and technical roadmap
 

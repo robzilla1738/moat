@@ -1,15 +1,41 @@
 # Status: claim ledger
 
-Moat is an **experimental build**. Release gate G0 ("truthful experimental build", MASTER_ROADMAP §13) is **not yet
-met**: the open defects below include packaged systemd restrictions that break launched coding workloads. Until they are closed, treat every protection below as
-unproven outside the environment named next to it.
+Moat is an **experimental build**. Nothing is supported on real devices: no claim below is `supported_installed`,
+and no claim has installed evidence on Robert's machines. Every result comes from GitHub CI runners or unit tests,
+in the environment named next to it.
+
+## Where Moat stands, by gate (MASTER_ROADMAP §11.1, §13)
+
+| Gate | Status | What blocks it |
+| --- | --- | --- |
+| **G0** truthful experimental build | **Not met.** Every Lane A defect from the baseline review is closed with a merged regression test. Three Lane B defects are still open in the ledger, and `fleet.web.live-actions` last recorded a fail. | `D-MAC-CACHE-TRUST`, `D-WEB-DEMO-SUCCESS`, `D-INCIDENT-ROUTING` (Lane B: W06–W08 Mac and web). Each closes only when its regression test is merged and the ledger cites the run. |
+| **G1** useful local Mac alpha | **Not started on a device.** The standalone Mac journey runs in CI unsigned and has never run as a signed, approved system extension. | Apple Developer ID, Network Extension provisioning profiles and notarization ([#2](https://github.com/robzilla1738/moat/issues/2)); a clean signed install on a second Mac ([#7](https://github.com/robzilla1738/moat/issues/7)); `D-MAC-CACHE-TRUST`. Linux installed proof on Omarchy ([#6](https://github.com/robzilla1738/moat/issues/6)) moves alongside it. |
+| **G2** cross-platform local beta | **Blocked.** | Linux ordinary-app enforcement is unavailable: no hook is proven ([W10 decision](decisions/W10-enforcement.md)); the BPF loader is chosen ([increment 3](decisions/W10-increment-3-loader.md)) but the BPF program licence needs Robert's decision. Ordinary-app inventory is observe-only and CI-only. G1 is required first. |
+| **G3** private fleet beta | **Blocked.** Fleet sync, staged rollout, learning and DNS adapters pass component tests in CI only. | A real Mac companion (G1), two real endpoints through a 24-hour controller outage, reboot, key rotation and stale approvals, and phone approvals on a device. |
+| G4 / G5 | Not started. | Compatibility suite and 30 days of real workflows ([#11](https://github.com/robzilla1738/moat/issues/11)), VPN matrix ([#8](https://github.com/robzilla1738/moat/issues/8)), independent review. |
+
+Decision records: [W09 ordinary apps on Linux](decisions/W09-linux-ordinary-apps.md) ·
+[W10 enforcement stays unavailable](decisions/W10-enforcement.md) ·
+[W10 BPF loader](decisions/W10-increment-3-loader.md) ·
+[W11 `CAP_SYS_PTRACE`](decisions/W11-cap-sys-ptrace.md) · [naming](naming.md).
+Support: [support matrix](support-matrix.md) (no supported configurations yet) ·
+[recovery and update policy](recovery-update-policy.md) · [recovery drill](recovery-drill.md) ·
+[security reporting](../SECURITY.md).
+
+Release artifacts: each build of the `release` workflow produces the release manifest (generated from this ledger),
+CycloneDX SBOMs, the licence report and `SHA256SUMS`. Builds from main and `v*` tags also get a keyless Sigstore
+signature over `SHA256SUMS` and a GitHub build-provenance attestation for every asset. These say which workflow
+built which bytes from which commit. They are not policy authority: the owner policy key is a separate trust domain,
+never present in CI, and not used to sign releases. No Apple Developer ID signature, notarization or signed Arch
+package exists yet.
 
 The machine-readable source is [`claim-ledger.json`](claim-ledger.json). A test
 (`core/moat-core/tests/claim_ledger.rs`) fails CI if a claim is marked supported without installed or
 real-workflow evidence, if a claim cites a defect that does not exist, or if this page leaves a claim out.
 
 Supported platforms and end-of-support rules: [support-matrix.md](support-matrix.md). Per-build test coverage:
-the release manifest artifact of the `release-engineering` workflow.
+the release manifest (an asset of every release, and an artifact of the `release` and `release-engineering`
+workflows).
 
 ## How to read a claim
 
@@ -30,6 +56,7 @@ the release manifest artifact of the `release-engineering` workflow.
 | `ci-ubuntu-26.04-x86_64` | GitHub runner ubuntu-26.04, kernel 7.0.0-1017-azure, cgroup2fs, nftables 1.1.6; tests run as root in a netns lab. Not the installed package or the systemd unit. |
 | `ci-macos-26` | GitHub macos-26 runner, Xcode 26, unsigned builds, no activated system extension. |
 | `ci-node-22` | GitHub ubuntu runner, Node 22, controller tests against the Rust `moatctl`. |
+| `ci-release` | GitHub ubuntu runner in the `release` workflow; Sigstore public-good signing with the workflow's OIDC identity and GitHub's attestation store. |
 | `unit` | `cargo test`, no OS hooks. |
 | `omarchy-installed` | Robert's Omarchy machine with the packaged service. No result recorded. |
 | `mac-signed-installed` | Signed, notarized install on a real Mac. No result recorded. |
@@ -55,6 +82,11 @@ the release manifest artifact of the `release-engineering` workflow.
 | `linux.packaging.systemd` | implemented_unproven | native_ci | ci-ubuntu-installed-unit | pass, linux-endpoint 40540159764 @ a63827b | Packaged unit under systemd on Ubuntu: project and /tmp writable, containment probes fail; **not Omarchy**. Keeps `CAP_SYS_PTRACE` ([decision](decisions/W11-cap-sys-ptrace.md)). |
 | `macos.filter.app-rules` | implemented_unproven | component | ci-macos-26 | pass, macos 40493342625 @ d5270bd | Never run signed; `D-MAC-CACHE-TRUST` (Lane B). |
 | `fleet.web.live-actions` | unknown_degraded | component | ci-node-22 | **fail** (review of d5270bd) | `D-WEB-DEMO-SUCCESS`, `D-INCIDENT-ROUTING` (Lane B, W08). |
+| `fleet.sync.acks-reconcile` | implemented_unproven | component | ci-node-22 | pass, controller 40565815980 @ 7b31e81 | Contiguous acks with declared gaps, receipt-based reconciliation, staged rollout, offline local changes held for the owner; against moatd's sync-state and spool files, not two real endpoints; no 24-hour outage (G3). |
+| `learning.reviewed-baselines` | implemented_unproven | component | ci-node-22 | pass, controller 40565815980 @ 7b31e81 | Bounded identity-bound capture, immutable reviewed baselines, drift as new candidates, three packs; no capture from a real device, alert volume unmeasured. |
+| `dns.adapters.adguard-pihole` | implemented_unproven | component | ci-node-22 | pass, controller 40565815980 @ 7b31e81 | AdGuard Home and Pi-hole v6 against recorded responses and mocks, not a live instance; DNS-only coverage (#9, #10). |
+| `release.integrity` | implemented_unproven | component | ci-release | pass, release 40569608036 @ ae2fe41 | SHA256SUMS, CycloneDX SBOMs with a coverage gate, keyless Sigstore signature and per-asset build-provenance attestations, tamper negative controls. Not policy authority; the owner policy key is separate and unused. No Developer ID, notarization or signed Arch package. |
+| `linux.recovery.local-drill` | implemented_unproven | native_ci | ci-ubuntu-26.04-x86_64 | pass, release 40569608036 @ ae2fe41 | [Recovery drill](recovery-drill.md) with real moatd in a CI netns: isolation across crash and restart, disable with the daemon stopped, trial revert and rollback, corrupt journal, newer-schema state, untrusted signer. Not the installed unit on Omarchy; no reboot. |
 | `vpn.coexistence` | unknown_degraded | none | omarchy-installed | not_run | No VPN claim. |
 
 ## Open defects
@@ -95,21 +127,26 @@ above is updated with the run that proves it.
 | W07 Mac engine | Lane B | see Lane B |
 | W08 truthful UI | Lane B | see Lane B |
 | W09 ordinary-app Linux experiment | Lane A | done: measured in CI (run 40545113846); decision: native inventory, OpenSnitch not adopted, enforcement deferred ([decision](decisions/W09-linux-ordinary-apps.md)) |
-| W10 ordinary-app Linux inventory | Lane A | increment 1 done in CI netns: observe-only inventory vs an independent receiver; enforcement not started (no hook proven, W09); eBPF increment 2 scheduled |
-| W11 installed-platform proofs | Lane A (Linux) / Robert | Linux: packaged unit proven under systemd on an Ubuntu runner (installed-unit.sh); Omarchy run and the `CAP_SYS_PTRACE` decision need Robert. Mac: Lane B |
+| W10 ordinary-app Linux inventory | Lane A | increments 1–2 done in CI netns, **observe-only**: socket-table inventory and bpftrace connect-time attribution against an independent receiver, loss reported. Increment 3 decided the loader (aya + a separate BPF program, [decision](decisions/W10-increment-3-loader.md)); the program's licence needs Robert ([#53](https://github.com/robzilla1738/moat/issues/53)). Enforcement stays unavailable ([decision](decisions/W10-enforcement.md)) |
+| W11 installed-platform proofs | Lane A (Linux) / Robert | Linux: packaged unit passes under systemd on an Ubuntu runner (installed-unit.sh); the Omarchy run ([#6](https://github.com/robzilla1738/moat/issues/6)) and the `CAP_SYS_PTRACE` decision ([#54](https://github.com/robzilla1738/moat/issues/54)) need Robert. Mac: Lane B, blocked on Developer ID ([#2](https://github.com/robzilla1738/moat/issues/2)) |
+| W12 standalone local experience | Lane B (Lane A: moat-ffi compile) | Apps-first standalone app, app detail, What changed?, diagnostics in controller, web and macOS; Mac standalone apply compiles with moat-core and the owner key signs the exact snapshot. CI only, unsigned; never run on a real Mac |
+| W13 fleet sync | Lane B (Lane A: moatd outbox) | contiguous acks and declared gaps, reconciliation, staged rollout, offline local changes held for the owner, moatd outbox agent; component tests (`fleet.sync.acks-reconcile`, `linux.spool.gaps`) |
+| W14 learning | Lane B | bounded capture, reviewed immutable baselines, drift as new candidates, three packs; component tests (`learning.reviewed-baselines`) |
+| W15 release | Lane A | SECURITY.md, CODEOWNERS, licence report with copyleft gate, release manifest from this ledger, actions pinned to SHAs, support matrix, naming note, SBOMs, SHA256SUMS, keyless signing and provenance attestations, [recovery drill](recovery-drill.md). Not done: 30-day pilot, independent review, signed platform packages, updater metadata (TUF evaluation), rulesets ([#51](https://github.com/robzilla1738/moat/issues/51)) |
+| W16 DNS and Digital Kingdom | Lane B | AdGuard Home and Pi-hole v6 adapters, DNS-only presentation, Digital Kingdom producer authority; component tests (`dns.adapters.adguard-pihole`); no live instance ([#9](https://github.com/robzilla1738/moat/issues/9), [#10](https://github.com/robzilla1738/moat/issues/10)) |
 
 ## Needs Robert
 
-1. **Omarchy:** install the package and run `sudo REQUIRE_NFT=1 linux/tests/netns-enforcement.sh target/debug`
-   and a real `moat-launch --profile coding-session -- claude`; results become `omarchy-installed` evidence.
-2. **Apple:** Developer Program, Developer ID certificates, NE provisioning profiles, notarytool profile
-   (Lane B owns the release path).
-3. **`CAP_SYS_PTRACE` in moatd.service:** keep it, or schedule passing the caller's mount namespace over the
-   control socket so it can be dropped ([decision page](decisions/W11-cap-sys-ptrace.md)).
-4. **Decisions:** grant lifetime defaults and recovery semantics (W01 uses conservative defaults until decided);
-   whether to request the Endpoint Security entitlement.
-5. **VPN matrix and adversarial harness** on real devices; results are recorded here with dates and versions.
-6. **GitHub Pages:** Settings → Pages → Source: GitHub Actions, if the public demo is wanted.
+Tracked as issues labelled [`blocked-on-robert`](https://github.com/robzilla1738/moat/issues?q=is%3Aopen+label%3Ablocked-on-robert),
+[`decision`](https://github.com/robzilla1738/moat/issues?q=is%3Aopen+label%3Adecision) and
+[`needs-device-proof`](https://github.com/robzilla1738/moat/issues?q=is%3Aopen+label%3Aneeds-device-proof).
+
+1. **Apple** ([#2](https://github.com/robzilla1738/moat/issues/2), [#7](https://github.com/robzilla1738/moat/issues/7)): Developer Program, Developer ID certificates, NE provisioning profiles, notarytool profile, then a signed install on a clean second Mac. This is the G1 blocker.
+2. **Omarchy** ([#6](https://github.com/robzilla1738/moat/issues/6)): install the package, run `sudo REQUIRE_NFT=1 linux/tests/netns-enforcement.sh target/debug`, `sudo release/recovery-drill.sh local /usr/bin` and a real `moat-launch --profile coding-session -- claude`; results become `omarchy-installed` evidence.
+3. **Repository settings** ([#51](https://github.com/robzilla1738/moat/issues/51)): enable private vulnerability reporting; add a `main` ruleset with required checks and code-owner review (verified via the API on 2026-10-27: no rulesets, reporting disabled).
+4. **Decisions:** naming ([#52](https://github.com/robzilla1738/moat/issues/52)), BPF program licence ([#53](https://github.com/robzilla1738/moat/issues/53)), `CAP_SYS_PTRACE` vs passing the mount namespace ([#54](https://github.com/robzilla1738/moat/issues/54)), sessions stop rather than being adopted on restart ([#55](https://github.com/robzilla1738/moat/issues/55)), `MOAT_SIGNER_CONTROLLER_GRANTS` default ([#56](https://github.com/robzilla1738/moat/issues/56)), grant lifetimes ([#57](https://github.com/robzilla1738/moat/issues/57)), Endpoint Security entitlement ([#3](https://github.com/robzilla1738/moat/issues/3)), APNs via ntfy ([#4](https://github.com/robzilla1738/moat/issues/4)).
+5. **Signed Arch package** ([#5](https://github.com/robzilla1738/moat/issues/5)); **GitHub Pages** for the demo ([#1](https://github.com/robzilla1738/moat/issues/1)).
+6. **Real devices:** VPN matrix ([#8](https://github.com/robzilla1738/moat/issues/8)), DNS-only coverage on a live resolver ([#9](https://github.com/robzilla1738/moat/issues/9)), Digital Kingdom feed ([#10](https://github.com/robzilla1738/moat/issues/10)), compatibility suite and 30 days of real workflows ([#11](https://github.com/robzilla1738/moat/issues/11)), and the device-only rows of the [adversarial matrix](adversarial-matrix.md) and [recovery drill](recovery-drill.md).
 
 Excluded from this phase by the roadmap: Windows, a custom DNS server, a native iOS firewall, universal TLS
 inspection, automatic trust promotion, a hosted service.

@@ -8,7 +8,7 @@ An open, self-hosted outbound firewall for people whose software increasingly ac
 MCP servers, package installers, local models, generated programs. One signed policy across your Macs and Linux
 machines, enforced locally on each device, coordinated by an optional controller you run yourself.
 
-[Status](docs/STATUS.md) · [Protection contract](docs/protection-contract.md) · [Policy semantics](docs/policy-semantics.md) · [Threat model](docs/threat-model.md)
+[Status](docs/STATUS.md) · [Support matrix](docs/support-matrix.md) · [Protection contract](docs/protection-contract.md) · [Policy semantics](docs/policy-semantics.md) · [Threat model](docs/threat-model.md)
 
 </div>
 
@@ -17,14 +17,35 @@ machines, enforced locally on each device, coordinated by an optional controller
 </p>
 <p align="center"><sub>The macOS app on macOS 26, captured from the real app window on the CI runner in demo mode (no signed install).</sub></p>
 
-> **Read this first.** Moat is an **experimental build** and has not met its first release gate. Known open
-> defects include temporary grants that lose device and process scope, a launcher path a contained Linux workload can
-> use to request a looser session, and activation state that is not durably journaled; they are listed, with the work
-> package that closes each one, in the [claim ledger](docs/STATUS.md). The Linux protected-session boundary passes its
-> tests on a CI runner kernel but has not been proven through the installed service; the macOS content filter has
-> never run as a signed system extension. Nothing is marked *supported* until installed or real-workflow evidence
-> exists. There is no fail-closed claim, no VPN-compatibility claim and no TLS interception; phones and the TV get
-> **DNS-only** coverage, labeled as such.
+> **Read this first.** Moat is an **experimental build**. Nothing is supported on real devices: no claim is
+> `supported_installed`, and every result so far comes from GitHub CI runners or unit tests. The Linux
+> protected-session boundary passes on a CI runner kernel and as a packaged unit on an Ubuntu runner, but has not run
+> on Omarchy. The macOS content filter has never run as a signed system extension. There is no fail-closed claim, no
+> VPN-compatibility claim and no TLS interception. Phones and the TV get **DNS-only** coverage, labelled as such.
+
+## Where Moat stands
+
+The [claim ledger](docs/STATUS.md) is the source; this is its summary by release gate (MASTER_ROADMAP §13).
+
+| Gate | Status | Blocked on |
+| --- | --- | --- |
+| **G0** truthful experimental build | **Not met.** Every Lane A defect from the baseline review is closed with a regression test. Three Mac/web defects are still open in the ledger. | `D-MAC-CACHE-TRUST`, `D-WEB-DEMO-SUCCESS`, `D-INCIDENT-ROUTING` |
+| **G1** useful local Mac alpha | Not started on a device | Developer ID, NE provisioning profiles and notarization ([#2](https://github.com/robzilla1738/moat/issues/2)); a signed install on a clean second Mac ([#7](https://github.com/robzilla1738/moat/issues/7)) |
+| **G2** cross-platform local beta | Blocked | G1. Linux ordinary-app enforcement is unavailable ([W10 decision](docs/decisions/W10-enforcement.md)); inventory is observe-only; Omarchy proof ([#6](https://github.com/robzilla1738/moat/issues/6)) |
+| **G3** private fleet beta | Blocked | Fleet sync, learning and DNS adapters pass in CI only; needs real endpoints, a 24-hour outage test and phone approvals on a device |
+
+Decision records: [W09](docs/decisions/W09-linux-ordinary-apps.md) · [W10 enforcement](docs/decisions/W10-enforcement.md) ·
+[W10 BPF loader](docs/decisions/W10-increment-3-loader.md) · [W11 `CAP_SYS_PTRACE`](docs/decisions/W11-cap-sys-ptrace.md) ·
+[naming](docs/naming.md). Support: [support matrix](docs/support-matrix.md) (no supported configurations yet) ·
+[recovery drill](docs/recovery-drill.md) · [recovery and update policy](docs/recovery-update-policy.md) ·
+[security reporting](SECURITY.md).
+
+**Releases** are prereleases built by the `release` workflow: Linux x86_64 binaries (an archive, not a signed
+package), source and web tarballs, CycloneDX SBOMs, a licence report, the release manifest generated from the claim
+ledger, and `SHA256SUMS` with a keyless Sigstore signature and per-asset GitHub build-provenance attestations. Verify
+them with `release/recovery-drill.sh integrity <dir>`. Those signatures identify the workflow and commit that built the
+bytes. They are not policy authority: the owner policy key is separate and is not used for releases. There is no
+signed or notarized macOS build yet.
 
 ## Three things, never blended
 
@@ -82,7 +103,7 @@ runner's small display. The phone and desktop images are the fleet web UI render
   key. The approval steps need a signed build on a real Mac and have not run there yet.
 * **Linux timed rollback.** `moatd apply --trial-secs N` installs a trial revision that reverts on its own unless you
   run `moatd recover confirm`; `recover rollback` reverts now. The replay mark is kept, the first revision cannot be a
-  trial, and rollback never touches isolation. Proven in CI's netns suite; untested on Omarchy.
+  trial, and rollback never touches isolation. Passes CI's netns suite and the recovery drill; untested on Omarchy.
 * **Session hostname proxy (Linux).** Inside a protected session, TCP hostname rules are enforced by a per-session
   loopback proxy that reads TLS SNI, HTTP CONNECT or Host, resolves the name itself and connects only to what it
   resolved; nftables fences the listener. No TLS interception. UDP stays IP-only and domain fronting is still
@@ -149,16 +170,16 @@ npm run dev -w web                               # or the static demo: npm run b
 
 ## Design rules (and where they do not hold yet)
 
-These are the rules the code is built around. Where a rule is not yet true, the [claim ledger](docs/STATUS.md)
-names the defect and the regression test that will close it.
+These are the rules the code is built around. The [claim ledger](docs/STATUS.md) says where each one has been
+tested, and names any open defect.
 
 * **No silent weakening.** A rule needing a capability the device lacks is rejected, or (allow rules only) left out
-  *with a report*. Profiles are not yet capability-checked (`D-PROFILE-CAPABILITY`).
+  *with a report*. Profiles are capability-checked at compile time.
 * **No scripts in policy.** Strict, versioned data; unknown fields rejected.
 * **Signed, platform-matched, replay-protected snapshots.** Trust is owner configuration; nothing promotes it.
 * **Agents cannot authorize themselves.** Broadening needs the owner key; agents can only propose a diff and assert
-  intent. The broadening classifier still misses some changes (`D-DIFF-*`), and generated grants lose scope
-  (`D-GRANT-SCOPE-LOSS`).
+  intent. The structured diff is conservative (unknown changes count as broadening), and grants keep their device
+  and session scope through serialization. Tested in CI, not on an installed endpoint.
 * **Isolation is sticky.** No heartbeat loss, restart, new policy or canary rollback reopens it.
 * **Gaps are visible.** Sequence numbers, restart and gap records; enforcement never waits on logging.
 * **No invented measurements.** No "0 bytes" without a measurement, never an intended upload size.
@@ -177,6 +198,11 @@ names the defect and the regression test that will close it.
 [Linux](docs/platforms/linux.md) ·
 [macOS](docs/platforms/macos.md) ·
 [OpenSnitch adapter feasibility](docs/platforms/opensnitch-adapter-feasibility.md) ·
+[Support matrix](docs/support-matrix.md) ·
+[Recovery drill](docs/recovery-drill.md) ·
+[Recovery and update policy](docs/recovery-update-policy.md) ·
+[Naming](docs/naming.md) ·
+[Security](SECURITY.md) ·
 [**Status**](docs/STATUS.md)
 
 ## License
