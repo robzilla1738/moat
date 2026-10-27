@@ -7,6 +7,7 @@
 //! * [`recovery`] is local, root-only and sticky.
 //! * [`endpoint`] ties them together; [`server`] and [`control`] expose a few typed local operations.
 
+pub mod caller;
 pub mod cgroup;
 pub mod control;
 pub mod endpoint;
