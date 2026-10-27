@@ -118,7 +118,12 @@ impl RecognizerPack {
                 return Err(format!("duplicate family {}", r.family));
             }
             let s = &r.spec;
-            if s.executables.is_empty() && s.path_contains.is_empty() && s.bundle_ids.is_empty() && s.team_ids.is_empty() && s.entrypoints.is_empty() {
+            if s.executables.is_empty()
+                && s.path_contains.is_empty()
+                && s.bundle_ids.is_empty()
+                && s.team_ids.is_empty()
+                && s.entrypoints.is_empty()
+            {
                 return Err(format!("{} has an empty match", r.family));
             }
         }

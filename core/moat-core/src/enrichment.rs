@@ -292,10 +292,24 @@ pub fn import_aws_ip_ranges(json: &str) -> Result<RangeDataset, String> {
     let d: Doc = serde_json::from_str(json).map_err(|e| format!("not an AWS ip-ranges document: {e}"))?;
     let mut entries = Vec::new();
     for p in d.prefixes {
-        entries.push(RangeEntry { cidr: p.ip_prefix.parse().map_err(|e| format!("{e}"))?, provider: "aws".into(), service: Some(p.service), region: Some(p.region), asn: None, asn_owner: None });
+        entries.push(RangeEntry {
+            cidr: p.ip_prefix.parse().map_err(|e| format!("{e}"))?,
+            provider: "aws".into(),
+            service: Some(p.service),
+            region: Some(p.region),
+            asn: None,
+            asn_owner: None,
+        });
     }
     for p in d.ipv6_prefixes {
-        entries.push(RangeEntry { cidr: p.ipv6_prefix.parse().map_err(|e| format!("{e}"))?, provider: "aws".into(), service: Some(p.service), region: Some(p.region), asn: None, asn_owner: None });
+        entries.push(RangeEntry {
+            cidr: p.ipv6_prefix.parse().map_err(|e| format!("{e}"))?,
+            provider: "aws".into(),
+            service: Some(p.service),
+            region: Some(p.region),
+            asn: None,
+            asn_owner: None,
+        });
     }
     Ok(RangeDataset {
         schema: RANGE_SCHEMA.into(),
@@ -327,7 +341,14 @@ pub fn import_gcp_cloud_json(json: &str) -> Result<RangeDataset, String> {
     let mut entries = Vec::new();
     for p in d.prefixes {
         let c = p.v4.or(p.v6).ok_or("prefix without address")?;
-        entries.push(RangeEntry { cidr: c.parse().map_err(|e| format!("{e}"))?, provider: "gcp".into(), service: p.service, region: p.scope, asn: None, asn_owner: None });
+        entries.push(RangeEntry {
+            cidr: c.parse().map_err(|e| format!("{e}"))?,
+            provider: "gcp".into(),
+            service: p.service,
+            region: p.scope,
+            asn: None,
+            asn_owner: None,
+        });
     }
     Ok(RangeDataset {
         schema: RANGE_SCHEMA.into(),
@@ -384,7 +405,12 @@ mod tests {
 
     #[test]
     fn facts_carry_source_and_caveats() {
-        let ds = import_csv("cidr,provider,service,region,asn,asn_owner\n203.0.113.0/24,alibaba-cloud,OSS,cn-beijing,AS64500,Example\n", "fixture", "2026-10-01").unwrap();
+        let ds = import_csv(
+            "cidr,provider,service,region,asn,asn_owner\n203.0.113.0/24,alibaba-cloud,OSS,cn-beijing,AS64500,Example\n",
+            "fixture",
+            "2026-10-01",
+        )
+        .unwrap();
         let e = Enricher::new().with_dataset(ds);
         let f = e.facts(Some("203.0.113.7".parse().unwrap()), Some("oss-cn-beijing.aliyuncs.com"));
         assert!(f.iter().any(|x| x.kind == FactKind::CloudProvider && x.value == "alibaba-cloud"));

@@ -126,7 +126,11 @@ pub fn diff_packs(old: &ServicePack, new: &ServicePack) -> PackDiff {
             }
             Some(od) if od != nd => {
                 d.changed.push(h.to_string());
-                if (od.necessity == Necessity::Optional && nd.necessity == Necessity::Required) || od.ports != nd.ports || od.intention != nd.intention || od.transport != nd.transport {
+                if (od.necessity == Necessity::Optional && nd.necessity == Necessity::Required)
+                    || od.ports != nd.ports
+                    || od.intention != nd.intention
+                    || od.transport != nd.transport
+                {
                     d.expands_trust = true;
                 }
             }
@@ -188,7 +192,14 @@ mod tests {
         let old = builtin_service_packs().into_iter().find(|p| p.id == "npm").unwrap();
         let mut new = old.clone();
         new.version = "2026.11.1".into();
-        new.destinations.push(PackDestination { host: "registry.yarnpkg.com".into(), necessity: Necessity::Optional, explanation: "Yarn mirror of the npm registry".into(), intention: Intention::Download, ports: vec![PortRange::single(443)], transport: Transport::Tcp });
+        new.destinations.push(PackDestination {
+            host: "registry.yarnpkg.com".into(),
+            necessity: Necessity::Optional,
+            explanation: "Yarn mirror of the npm registry".into(),
+            intention: Intention::Download,
+            ports: vec![PortRange::single(443)],
+            transport: Transport::Tcp,
+        });
         let d = diff_packs(&old, &new);
         assert!(d.expands_trust);
         assert_eq!(d.added, vec!["registry.yarnpkg.com".to_string()]);

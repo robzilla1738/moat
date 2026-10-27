@@ -106,10 +106,7 @@ pub fn compile(policy: &Policy, adv: &CapabilityAdvertisement, opts: &CompileOpt
                 rule_id: r.id.clone(),
                 action: r.action,
                 missing: vec![Capability::SessionEnforcement],
-                reason: format!(
-                    "{} has no protected-session boundary; sessions for this profile are refused at launch",
-                    adv.adapter
-                ),
+                reason: format!("{} has no protected-session boundary; sessions for this profile are refused at launch", adv.adapter),
             });
             continue;
         }
@@ -133,7 +130,11 @@ pub fn compile(policy: &Policy, adv: &CapabilityAdvertisement, opts: &CompileOpt
                     rule_id: r.id.clone(),
                     action: r.action,
                     missing: missing.clone(),
-                    reason: format!("needs {} which {} does not support; omitting this allow makes the platform stricter", names.join(", "), adv.adapter),
+                    reason: format!(
+                        "needs {} which {} does not support; omitting this allow makes the platform stricter",
+                        names.join(", "),
+                        adv.adapter
+                    ),
                 });
                 continue;
             }

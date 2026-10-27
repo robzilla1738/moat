@@ -33,7 +33,11 @@ impl PolicyDiff {
         !self.broadening.is_empty()
     }
     pub fn is_empty(&self) -> bool {
-        self.added.is_empty() && self.removed.is_empty() && self.changed.is_empty() && self.profile_changes.is_empty() && self.set_changes.is_empty()
+        self.added.is_empty()
+            && self.removed.is_empty()
+            && self.changed.is_empty()
+            && self.profile_changes.is_empty()
+            && self.set_changes.is_empty()
     }
 }
 
@@ -47,12 +51,13 @@ fn restrictiveness(d: DefaultAction) -> u8 {
 
 fn dest_superset(a: &Destinations, b: &Destinations) -> bool {
     // does `a` contain everything `b` names (syntactically)?
-    a.any || (b.hosts.iter().all(|h| a.hosts.contains(h))
-        && b.cidrs.iter().all(|c| a.cidrs.contains(c))
-        && b.scopes.iter().all(|s| a.scopes.contains(s))
-        && b.sets.iter().all(|s| a.sets.contains(s))
-        && b.providers.iter().all(|p| a.providers.contains(p))
-        && !b.any)
+    a.any
+        || (b.hosts.iter().all(|h| a.hosts.contains(h))
+            && b.cidrs.iter().all(|c| a.cidrs.contains(c))
+            && b.scopes.iter().all(|s| a.scopes.contains(s))
+            && b.sets.iter().all(|s| a.sets.contains(s))
+            && b.providers.iter().all(|p| a.providers.contains(p))
+            && !b.any)
 }
 
 pub fn diff(old: &Policy, new: &Policy) -> PolicyDiff {
@@ -120,7 +125,8 @@ pub fn diff(old: &Policy, new: &Policy) -> PolicyDiff {
         if !n.contains_key(id) {
             d.removed.push(id.to_string());
             if r.action == Action::Deny {
-                d.broadening.push(format!("deny rule {id} removed{}", if r.layer == Layer::Emergency { " (emergency lifted)" } else { "" }));
+                d.broadening
+                    .push(format!("deny rule {id} removed{}", if r.layer == Layer::Emergency { " (emergency lifted)" } else { "" }));
             } else {
                 d.narrowing.push(format!("allow rule {id} removed"));
             }

@@ -68,7 +68,14 @@ impl DeviceRevision {
 
     /// Advance the state. `origin` is who reported it; receipts must come from the endpoint enforcer and
     /// verification from an independent observer.
-    pub fn advance(&mut self, to: RevisionState, at: DateTime<Utc>, origin: Option<Origin>, evidence_ref: Option<String>, detail: Option<String>) -> Result<(), TransitionError> {
+    pub fn advance(
+        &mut self,
+        to: RevisionState,
+        at: DateTime<Utc>,
+        origin: Option<Origin>,
+        evidence_ref: Option<String>,
+        detail: Option<String>,
+    ) -> Result<(), TransitionError> {
         use RevisionState::*;
         let ok = matches!(
             (self.state, to),

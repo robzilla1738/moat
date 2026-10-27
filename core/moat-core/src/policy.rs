@@ -366,10 +366,8 @@ impl Policy {
             }
             self.validate_selector(&p.applies_to, &format!("profiles[{i}].applies_to"), &mut errors);
             if p.learning == LearningMode::Restrictive && p.default != DefaultAction::Deny {
-                errors.push(err(
-                    format!("profiles[{i}]"),
-                    "a restrictive-learning profile must default to deny (time never promotes trust)",
-                ));
+                errors
+                    .push(err(format!("profiles[{i}]"), "a restrictive-learning profile must default to deny (time never promotes trust)"));
             }
         }
         if !profile_ids.contains(&self.fallback_profile) {

@@ -83,7 +83,9 @@ pub fn render_alert(f: &AlertFacts) -> String {
     out.push_str(&format!(" {verb} {} to {label}.", f.protocol));
     match (f.verdict, f.permitted_by_observation) {
         (Verdict::Deny, _) => out.push_str(&format!(" The {} blocked the connection.", f.decided_by)),
-        (Verdict::Allow, true) => out.push_str(&format!(" The {} is observing, so the connection was permitted, not enforced.", f.decided_by)),
+        (Verdict::Allow, true) => {
+            out.push_str(&format!(" The {} is observing, so the connection was permitted, not enforced.", f.decided_by))
+        }
         (Verdict::Allow, false) => out.push_str(&format!(" The {} allowed the connection.", f.decided_by)),
     }
     if let Some(r) = &f.endpoint_region {
@@ -171,7 +173,8 @@ mod tests {
         f.verdict = Verdict::Allow;
         f.transfer = TransferMeasurement::NotMeasured;
         assert!(render_alert(&f).contains("not measured"));
-        f.transfer = TransferMeasurement::Measured { bytes_out: 2_100_000, bytes_in: 512, scope: "flow".into(), source: "NEFilterReport".into() };
+        f.transfer =
+            TransferMeasurement::Measured { bytes_out: 2_100_000, bytes_in: 512, scope: "flow".into(), source: "NEFilterReport".into() };
         let t = render_alert(&f);
         assert!(t.contains("2.1 MB sent") && t.contains("flow counters"));
     }

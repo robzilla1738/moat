@@ -170,6 +170,9 @@ mod tests {
     fn observation_mode() {
         let mut h = healthy();
         h.enforcing = false;
-        assert_eq!(assess(&CapabilityAdvertisement::macos_network_extension(), &h, now(), Duration::minutes(5)).level, CoverageLevel::Observed);
+        assert_eq!(
+            assess(&CapabilityAdvertisement::macos_network_extension(), &h, now(), Duration::minutes(5)).level,
+            CoverageLevel::Observed
+        );
     }
 }

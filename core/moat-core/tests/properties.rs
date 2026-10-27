@@ -23,7 +23,13 @@ fn base_policy(rules: Vec<Rule>) -> Policy {
         description: None,
         device_groups: Default::default(),
         destination_sets: Default::default(),
-        profiles: vec![Profile { id: "p".into(), description: None, default: DefaultAction::Observe, learning: LearningMode::Observe, applies_to: Selector::default() }],
+        profiles: vec![Profile {
+            id: "p".into(),
+            description: None,
+            default: DefaultAction::Observe,
+            learning: LearningMode::Observe,
+            applies_to: Selector::default(),
+        }],
         rules,
         fallback_profile: "p".into(),
     }
@@ -37,7 +43,11 @@ fn rule(i: usize, action: Action, layer: Layer, any: bool) -> Rule {
         action,
         layer,
         selector: if layer == Layer::Override { narrow } else { Selector::default() },
-        destinations: if any { Destinations { any: true, ..Default::default() } } else { Destinations { scopes: vec![moat_core::net::NetScope::Public], ..Default::default() } },
+        destinations: if any {
+            Destinations { any: true, ..Default::default() }
+        } else {
+            Destinations { scopes: vec![moat_core::net::NetScope::Public], ..Default::default() }
+        },
         transport: Transport::Any,
         ports: vec![],
         expires_at: if layer == Layer::Override { Some("2027-01-01T00:00:00Z".parse().unwrap()) } else { None },

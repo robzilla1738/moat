@@ -71,7 +71,12 @@ pub struct SimulationInput<'a> {
 }
 
 pub fn simulate(input: &SimulationInput) -> SimulationReport {
-    let mut r = SimulationReport { observations: input.observations.len(), disclaimer: REPLAY_DISCLAIMER.into(), unacknowledged_devices: input.unacknowledged_devices.clone(), ..Default::default() };
+    let mut r = SimulationReport {
+        observations: input.observations.len(),
+        disclaimer: REPLAY_DISCLAIMER.into(),
+        unacknowledged_devices: input.unacknowledged_devices.clone(),
+        ..Default::default()
+    };
     let mut seen_hosts = BTreeSet::new();
     for f in input.observations {
         if let Some(h) = &f.hostname {
@@ -98,7 +103,8 @@ pub fn simulate(input: &SimulationInput) -> SimulationReport {
                 flow_id: f.id.clone(),
                 device_id: f.device_id.clone(),
                 app,
-                destination: f.hostname.as_ref().map(|h| h.name.clone()).unwrap_or_else(|| f.remote_ip.to_string()) + &format!(":{}", f.remote_port),
+                destination: f.hostname.as_ref().map(|h| h.name.clone()).unwrap_or_else(|| f.remote_ip.to_string())
+                    + &format!(":{}", f.remote_port),
                 before: la,
                 after: lb,
             });
@@ -129,7 +135,13 @@ pub fn simulate(input: &SimulationInput) -> SimulationReport {
                 omitted_rules: s.report.omitted.iter().map(|o| o.rule_id.clone()).collect(),
                 warnings: s.report.warnings.len(),
             }),
-            Err(e) => r.platforms.push(PlatformResult { adapter: adv.adapter.clone(), compiles: false, errors: e.iter().map(|x| x.to_string()).collect(), omitted_rules: vec![], warnings: 0 }),
+            Err(e) => r.platforms.push(PlatformResult {
+                adapter: adv.adapter.clone(),
+                compiles: false,
+                errors: e.iter().map(|x| x.to_string()).collect(),
+                omitted_rules: vec![],
+                warnings: 0,
+            }),
         }
     }
     r.uncertain.dedup();
@@ -147,7 +159,10 @@ mod tests {
         let cur = policy();
         let mut prop = policy();
         prop.profiles.iter_mut().find(|p| p.id == "ordinary-desktop-learning").unwrap().default = DefaultAction::Deny;
-        let obs = vec![flow("safari", "198.51.100.1", 443, Some("example.com"), None), flow("git", "198.51.100.2", 443, Some("api.github.com"), Some("coding-session"))];
+        let obs = vec![
+            flow("safari", "198.51.100.1", 443, Some("example.com"), None),
+            flow("git", "198.51.100.2", 443, Some("api.github.com"), Some("coding-session")),
+        ];
         let e = Enricher::new();
         let r = simulate(&SimulationInput {
             current: &cur,
@@ -155,7 +170,12 @@ mod tests {
             observations: &obs,
             enricher: &e,
             platforms: &[CapabilityAdvertisement::macos_network_extension(), CapabilityAdvertisement::linux_nftables_cgroup()],
-            compile_options: CompileOptions { revision: 1, rollback_of: None, issued_at: "2026-10-26T12:00:00Z".parse().unwrap(), not_after: None },
+            compile_options: CompileOptions {
+                revision: 1,
+                rollback_of: None,
+                issued_at: "2026-10-26T12:00:00Z".parse().unwrap(),
+                not_after: None,
+            },
             unacknowledged_devices: vec!["mini".into()],
         });
         assert_eq!(r.newly_blocked, 1);

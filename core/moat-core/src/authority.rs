@@ -48,7 +48,9 @@ pub fn permitted(origin: Origin) -> &'static [Assertion] {
     match origin {
         Origin::RuntimeSelfReport => &[Intent],
         Origin::Launcher => &[SessionLifecycle, CoverageChange],
-        Origin::EndpointEnforcer => &[ConnectionObserved, ConnectionBlocked, ConnectionAllowed, FlowCounters, PolicyReceived, PolicyApplied, CoverageChange],
+        Origin::EndpointEnforcer => {
+            &[ConnectionObserved, ConnectionBlocked, ConnectionAllowed, FlowCounters, PolicyReceived, PolicyApplied, CoverageChange]
+        }
         Origin::IndependentObserver => &[EffectVerified, ConnectionObserved],
         Origin::DnsResolver => &[DnsQuery, CoverageChange],
     }
@@ -66,11 +68,7 @@ pub fn check(origin: Origin, assertion: Assertion) -> Result<(), AuthorityViolat
     if permitted(origin).contains(&assertion) {
         Ok(())
     } else {
-        Err(AuthorityViolation {
-            origin,
-            assertion,
-            detail: format!("{origin:?} may not assert {assertion:?}"),
-        })
+        Err(AuthorityViolation { origin, assertion, detail: format!("{origin:?} may not assert {assertion:?}") })
     }
 }
 

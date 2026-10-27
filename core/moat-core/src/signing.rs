@@ -98,7 +98,9 @@ impl std::fmt::Display for VerifyError {
             VerifyError::RevokedKey { key_id } => write!(f, "signed by revoked key {key_id}"),
             VerifyError::BadSignature => write!(f, "signature does not verify"),
             VerifyError::WrongPlatform { expected, got } => write!(f, "snapshot is for {got:?}, this endpoint is {expected:?}"),
-            VerifyError::Replay { revision, last_applied } => write!(f, "revision {revision} is not newer than applied revision {last_applied} (replay rejected)"),
+            VerifyError::Replay { revision, last_applied } => {
+                write!(f, "revision {revision} is not newer than applied revision {last_applied} (replay rejected)")
+            }
             VerifyError::Expired { not_after } => write!(f, "snapshot expired at {not_after}"),
             VerifyError::FromTheFuture { issued_at } => write!(f, "snapshot issued in the future ({issued_at})"),
             VerifyError::InvalidPolicy { detail } => write!(f, "snapshot policy is invalid: {detail}"),
@@ -192,10 +194,21 @@ pub struct ApplyReceipt {
 
 impl EndpointPolicyState {
     /// Verify and atomically install. On failure the current snapshot is untouched.
-    pub fn apply(&mut self, signed: &SignedSnapshot, trust: &TrustStore, platform: Platform, now: DateTime<Utc>) -> Result<ApplyReceipt, VerifyError> {
+    pub fn apply(
+        &mut self,
+        signed: &SignedSnapshot,
+        trust: &TrustStore,
+        platform: Platform,
+        now: DateTime<Utc>,
+    ) -> Result<ApplyReceipt, VerifyError> {
         match verify_snapshot(signed, trust, platform, self.last_applied, now) {
             Ok(s) => {
-                let r = ApplyReceipt { revision: s.revision, rollback_of: s.rollback_of, policy_digest: s.policy_digest.clone(), applied_at: now };
+                let r = ApplyReceipt {
+                    revision: s.revision,
+                    rollback_of: s.rollback_of,
+                    policy_digest: s.policy_digest.clone(),
+                    applied_at: now,
+                };
                 self.last_applied = Some(s.revision);
                 self.current = Some(s);
                 Ok(r)

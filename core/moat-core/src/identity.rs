@@ -138,11 +138,26 @@ pub struct ProcessNode {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum LifecycleEvent {
-    Fork { parent: ProcessInstanceId, child: ProcessInstanceId, at: DateTime<Utc> },
-    Exec { process: ProcessInstanceId, app: AppIdentity, user: Option<String>, at: DateTime<Utc> },
-    Exit { process: ProcessInstanceId, at: DateTime<Utc> },
+    Fork {
+        parent: ProcessInstanceId,
+        child: ProcessInstanceId,
+        at: DateTime<Utc>,
+    },
+    Exec {
+        process: ProcessInstanceId,
+        app: AppIdentity,
+        user: Option<String>,
+        at: DateTime<Utc>,
+    },
+    Exit {
+        process: ProcessInstanceId,
+        at: DateTime<Utc>,
+    },
     /// The sensor knows it lost events (buffer overflow, restart). Everything alive becomes uncertain.
-    Gap { device_id: String, at: DateTime<Utc> },
+    Gap {
+        device_id: String,
+        at: DateTime<Utc>,
+    },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -260,10 +275,7 @@ impl ProcessGraph {
         while self.exited_order.len() > self.max_exited {
             if let Some(old) = self.exited_order.pop_front() {
                 // Keep a node that still has a live descendant referencing it, so ancestry survives.
-                let referenced = self
-                    .nodes
-                    .values()
-                    .any(|n| n.exited_at.is_none() && n.parent.as_ref() == Some(&old));
+                let referenced = self.nodes.values().any(|n| n.exited_at.is_none() && n.parent.as_ref() == Some(&old));
                 if referenced {
                     self.exited_order.push_back(old);
                     break;

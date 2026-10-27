@@ -141,20 +141,12 @@ impl CapabilityAdvertisement {
     pub fn macos_network_extension() -> Self {
         use Capability::*;
         let mut m = BTreeMap::new();
-        let s = |support: Support, note: &str| CapabilityStatus {
-            support,
-            note: if note.is_empty() { None } else { Some(note.to_string()) },
-        };
+        let s =
+            |support: Support, note: &str| CapabilityStatus { support, note: if note.is_empty() { None } else { Some(note.to_string()) } };
         m.insert(ProcessIdentity, s(Support::Untested, "source app audit token via NEFilterFlow"));
-        m.insert(
-            AncestorAttribution,
-            s(Support::Unsupported, "needs Endpoint Security entitlement; responsible-process only otherwise"),
-        );
+        m.insert(AncestorAttribution, s(Support::Unsupported, "needs Endpoint Security entitlement; responsible-process only otherwise"));
         m.insert(AppEnforcement, s(Support::Untested, "NEFilterDataProvider verdicts per flow"));
-        m.insert(
-            SessionEnforcement,
-            s(Support::Unsupported, "no tested macOS session boundary yet; use protected launcher integrations"),
-        );
+        m.insert(SessionEnforcement, s(Support::Unsupported, "no tested macOS session boundary yet; use protected launcher integrations"));
         m.insert(UserEnforcement, s(Support::Untested, ""));
         m.insert(DnsEvidence, s(Support::Partial, "remote hostname when the flow carries it"));
         m.insert(HostnameEnforcement, s(Support::Partial, "only when the flow exposes a hostname; IP otherwise"));
@@ -176,10 +168,8 @@ impl CapabilityAdvertisement {
     pub fn linux_nftables_cgroup() -> Self {
         use Capability::*;
         let mut m = BTreeMap::new();
-        let s = |support: Support, note: &str| CapabilityStatus {
-            support,
-            note: if note.is_empty() { None } else { Some(note.to_string()) },
-        };
+        let s =
+            |support: Support, note: &str| CapabilityStatus { support, note: if note.is_empty() { None } else { Some(note.to_string()) } };
         m.insert(ProcessIdentity, s(Support::Partial, "pid + start time from /proc; observation only"));
         m.insert(AncestorAttribution, s(Support::Partial, "/proc parent chain at observation time; not a maintained graph"));
         m.insert(AppEnforcement, s(Support::Unsupported, "nftables cannot match executables; use a protected session"));
@@ -206,10 +196,7 @@ impl CapabilityAdvertisement {
         let mut m = BTreeMap::new();
         m.insert(
             Capability::DnsEvidence,
-            CapabilityStatus {
-                support: Support::Supported,
-                note: Some("per-client queries when client identity is preserved".into()),
-            },
+            CapabilityStatus { support: Support::Supported, note: Some("per-client queries when client identity is preserved".into()) },
         );
         CapabilityAdvertisement {
             platform: Platform::DnsResolver,

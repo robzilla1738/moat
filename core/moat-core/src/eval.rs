@@ -93,12 +93,8 @@ pub struct EvalContext<'a> {
 
 impl<'a> EvalContext<'a> {
     pub fn new(policy: &'a Policy, enricher: &'a Enricher, device_id: &str) -> Self {
-        let device_groups = policy
-            .device_groups
-            .iter()
-            .filter(|(_, members)| members.iter().any(|m| m == device_id))
-            .map(|(g, _)| g.clone())
-            .collect();
+        let device_groups =
+            policy.device_groups.iter().filter(|(_, members)| members.iter().any(|m| m == device_id)).map(|(g, _)| g.clone()).collect();
         EvalContext { policy, enricher, device_groups }
     }
 }
@@ -198,11 +194,17 @@ fn destinations_match(ctx: &EvalContext, d: &Destinations, f: &FlowAttempt, note
         let by_ip = || {
             ctx.enricher
                 .provider_of_ip(f.remote_ip)
-                .filter(|(p, r)| p == &pm.provider && (pm.regions.is_empty() || r.as_ref().map(|r| pm.regions.contains(r)).unwrap_or(false)))
+                .filter(|(p, r)| {
+                    p == &pm.provider && (pm.regions.is_empty() || r.as_ref().map(|r| pm.regions.contains(r)).unwrap_or(false))
+                })
                 .map(|(p, r)| format!("address in {p} published ranges{}", r.map(|r| format!(" ({r})")).unwrap_or_default()))
         };
         let by_host = || {
-            f.hostname.as_ref().and_then(|h| match_endpoint(ctx.enricher.patterns(), &h.name)).filter(|m| m.provider == pm.provider && (pm.regions.is_empty() || pm.regions.contains(&m.region))).map(|m| format!("hostname matches documented {} {} endpoint for {}", m.provider, m.service, m.region))
+            f.hostname
+                .as_ref()
+                .and_then(|h| match_endpoint(ctx.enricher.patterns(), &h.name))
+                .filter(|m| m.provider == pm.provider && (pm.regions.is_empty() || pm.regions.contains(&m.region)))
+                .map(|m| format!("hostname matches documented {} {} endpoint for {}", m.provider, m.service, m.region))
         };
         let hit = match pm.mode {
             ProviderMode::KnownIps => by_ip(),
@@ -321,7 +323,12 @@ pub fn evaluate(ctx: &EvalContext, f: &FlowAttempt) -> Decision {
                 id: win.id.clone(),
                 layer: win.layer,
                 action: win.action,
-                provenance: format!("{:?}{}", win.provenance.kind, win.provenance.reference.as_ref().map(|r| format!(" {r}")).unwrap_or_default()).to_lowercase(),
+                provenance: format!(
+                    "{:?}{}",
+                    win.provenance.kind,
+                    win.provenance.reference.as_ref().map(|r| format!(" {r}")).unwrap_or_default()
+                )
+                .to_lowercase(),
             },
             overridden,
             notes,
