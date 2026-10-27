@@ -33,9 +33,9 @@ public enum Screen: String, CaseIterable, Identifiable {
         case .coverage: return "Coverage & recovery"
         case .appDetail: return "App"
         case .whatChanged: return "What changed?"
-        case .learning: return "Learning"
-        case .candidate: return "Review candidate"
-        case .packs: return "Workflow packs"
+        case .learning: return "Learn"
+        case .candidate: return "Review"
+        case .packs: return "Rule packs"
         }
     }
 
@@ -135,7 +135,7 @@ public final class AppModel: ObservableObject {
             do {
                 let r = try await applier.apply(plan, id: id, now: now)
                 lastApplied = r
-                notice = "Applied on this Mac: revision \(r.summary.revision), signed with your owner key \(r.keyID). The rule ends \(plan.expires.formatted(date: .omitted, time: .shortened))."
+                notice = "In use on this Mac as rules version \(r.summary.revision), signed with your owner key \(r.keyID). The rule ends at \(plan.expires.formatted(date: .omitted, time: .shortened))."
                 lastError = nil
                 await refresh(now: now)
             } catch {
@@ -150,7 +150,7 @@ public final class AppModel: ObservableObject {
         do {
             if signer.keyID == nil { try signer.createKey() }
             lastAuthorization = try await signer.authorize(plan.ownerPlan(id: id))
-            notice = "Authorized with your owner key \(signer.keyID ?? ""). \(applyUnavailableReason)"
+            notice = "Approved with your owner key \(signer.keyID ?? ""). \(applyUnavailableReason)"
             lastError = nil
         } catch {
             lastError = "\(error)"
@@ -173,14 +173,14 @@ public final class AppModel: ObservableObject {
     /// Start a bounded capture for one app identity. It only reads what the filter records; rules stay enforced.
     public func startCapture(app: AppSummary, workflow: String, networkContext: String, hours: Double, now: Date = Date()) {
         guard app.identityKnown else {
-            lastError = "macOS reported no identity for this app. A capture is bound to an exact identity."
+            lastError = "macOS didn't report which program this is, and a recording needs to know exactly which app it is."
             return
         }
         let scope = CaptureScope(id: "cap-\(Int(now.timeIntervalSince1970))", signingID: app.signingID, executable: app.executable, teamID: app.teamID, appName: app.name, workflow: workflow, networkContext: networkContext, start: now, end: now.addingTimeInterval(hours * 3600))
         do {
             try Learning.validate(scope)
             learning.captures.insert(scope, at: 0)
-            notice = "Capturing \(app.name) for \(workflow). Existing rules stay enforced; nothing seen is trusted until you review it."
+            notice = "Recording \(app.name) for \(workflow). Your current rules stay on; nothing it reaches is trusted until you review it."
             lastError = nil
             saveLearning()
         } catch {
@@ -231,7 +231,7 @@ public final class AppModel: ObservableObject {
             let previous = learning.current(for: c.scope)
             let b = try Learning.accept(c, accepting: accepting, acknowledgeIncomplete: acknowledgeIncomplete, previous: previous, authorization: auth, id: "base-\(Int(now.timeIntervalSince1970))", now: now)
             try learning.record(b)
-            notice = "Reviewed baseline recorded (\(b.entries.count) entries), authorized with your owner key \(auth.keyID). It is not enforced by being recorded."
+            notice = "Approved list saved (\(b.entries.count) places), signed with your owner key \(auth.keyID). It doesn't take effect just by being saved."
             lastError = nil
             screen = .learning
             saveLearning()
@@ -242,7 +242,7 @@ public final class AppModel: ObservableObject {
 
     public func discardCandidate(_ id: String) {
         learning.candidates.removeAll { $0.id == id }
-        notice = "Discarded. Nothing was accepted; capture again for more evidence."
+        notice = "Discarded. Nothing was accepted; record again to see more."
         screen = .learning
         saveLearning()
     }
@@ -273,13 +273,13 @@ public final class AppModel: ObservableObject {
     }
 
     /// Shown only when this build has no policy compiler (no applier): never replaced by a pretend success.
-    public static let standaloneApplyUnavailable = "This build has no policy compiler, so the rule is authorized but not applied from this Mac; apply it through your controller or with moatctl."
+    public static let standaloneApplyUnavailable = "This build has no policy compiler, so the rule is approved but not put in use from this Mac; use your controller or moatctl for that."
 
     /// Demo and screenshot runs: no owner key is touched, nothing is signed or applied.
-    public static let demoApplyNote = "Demo: no owner key is used and nothing is signed or applied. In the real app, Moat compiles the rule, your owner key signs that exact snapshot, and the filter extension verifies it before enforcing it."
+    public static let demoApplyNote = "Demo: no owner key is used and nothing is signed or put in use. In the real app, Moat builds the rule, your owner key signs exactly that, and the filter checks the signature before using it."
 
     /// Shown under the plan when standalone apply is available.
-    public static let standaloneApplyHow = "Moat compiles the rule with its policy core, your owner key signs that exact snapshot, and the filter extension verifies it against your trusted keys before enforcing it. No controller is needed."
+    public static let standaloneApplyHow = "Moat builds the rule, your owner key signs exactly that, and the filter checks it against your trusted keys before using it. No controller is needed."
 
     /// True when `lastError` came from failing to reach the extension (cleared by the next good refresh).
     /// Errors from an owner action stay visible until dismissed.

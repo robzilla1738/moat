@@ -92,6 +92,21 @@
       "neutral": "#A1A8B8"
     }
   },
+  "contrast": {
+    "note": "Increased-contrast overrides (prefers-contrast: more); macOS uses the system's own increased contrast.",
+    "light": {
+      "muted": "#3C4354",
+      "text-2": "#1F2433",
+      "border": "#9AA1B2",
+      "border-strong": "#6B7285"
+    },
+    "dark": {
+      "muted": "#C3C8D6",
+      "text-2": "#E3E6EE",
+      "border": "#5A6175",
+      "border-strong": "#7B8299"
+    }
+  },
   "status": {
     "note": "Status is never colour alone: every tone pairs an icon with a label.",
     "green": {

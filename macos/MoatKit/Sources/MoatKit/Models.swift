@@ -183,7 +183,7 @@ public enum Measurement: Codable, Sendable, Equatable {
 
     public var label: String {
         switch self {
-        case .blockedBeforeData: return "Blocked before data was sent"
+        case .blockedBeforeData: return "Blocked before any data was sent"
         case let .reported(out, inb): return "\(ByteFormat.string(out)) out · \(ByteFormat.string(inb)) in (reported by macOS)"
         case .unknown: return "Amount sent not measured"
         }
@@ -227,26 +227,26 @@ public enum CoverageLevel: String, Codable, Sendable {
 
     public var label: String {
         switch self {
-        case .observed: return "Observing"
-        case .enforced: return "Enforcing"
-        case .degraded: return "Degraded"
-        case .isolated: return "Isolated"
-        case .recoveryRequired: return "Recovery required"
-        case .rollbackPending: return "Rollback pending"
-        case .unknown: return "Unknown"
+        case .observed: return "Watching only"
+        case .enforced: return "Protected"
+        case .degraded: return "Partly protected"
+        case .isolated: return "Locked down"
+        case .recoveryRequired: return "Needs you at the device"
+        case .rollbackPending: return "Undo didn't finish"
+        case .unknown: return "Can't confirm"
         }
     }
 
     /// The one-line claim. Deliberately narrow: no containment, ancestry or fail-closed promises on macOS.
     public var claim: String {
         switch self {
-        case .observed: return "Activity is visible. Nothing is being blocked."
-        case .enforced: return "App rules from your signed policy are enforced by the content filter."
-        case .degraded: return "Coverage is reduced. See what is wrong below."
-        case .isolated: return "Emergency isolation: new outbound connections except loopback are blocked until you turn it off here. Connections already open are not cut."
-        case .recoveryRequired: return "Moat could not reconcile its saved state. Recover here with owner authentication; nothing is guessed or reinstalled on its own."
-        case .rollbackPending: return "A rollback could not reinstall the previous revision, so the trial revision is still enforced. Recover here with owner authentication."
-        case .unknown: return "The filter has not reported. Moat cannot say what is covered."
+        case .observed: return "Moat records connections here but doesn't block them yet."
+        case .enforced: return "Your signed rules decide which apps on this Mac may connect."
+        case .degraded: return "Something your rules need isn't working on this Mac. See why below."
+        case .isolated: return "Emergency lockdown: new outbound connections from this Mac, except to itself, are blocked until you turn it off here. Connections already open stay open."
+        case .recoveryRequired: return "Moat couldn't confirm its saved setup. Fix it here with your password or Touch ID; nothing is guessed or reinstalled on its own."
+        case .rollbackPending: return "Undoing a trial change didn't finish, so the trial rules are still in force. Fix it here with your password or Touch ID."
+        case .unknown: return "The filter hasn't reported, so we can't confirm this Mac is protected."
         }
     }
 }

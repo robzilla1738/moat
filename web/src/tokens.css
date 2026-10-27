@@ -77,5 +77,23 @@
   --radius-card: 14px;
   --radius-inner: 10px;
   --radius-control: 10px;
+  --radius-chip: 999px;
   --hit: 44px;
+}
+@media (prefers-contrast: more) {
+  :root,
+    [data-theme="light"] {
+    color-scheme: light;
+    --muted: #3C4354;
+    --text-2: #1F2433;
+    --border: #9AA1B2;
+    --border-strong: #6B7285;
+  }
+  [data-theme="dark"] {
+    color-scheme: dark;
+    --muted: #C3C8D6;
+    --text-2: #E3E6EE;
+    --border: #5A6175;
+    --border-strong: #7B8299;
+  }
 }

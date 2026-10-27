@@ -1,6 +1,11 @@
 import MoatKit
 import SwiftUI
 
+// Moat's one component set on macOS, with the same names and rules as the web (docs/design.md, "Components"):
+// Card, SectionTitle (section header), Pill (status chip: icon + label), ListRowView, NoticeBanner, EmptyStateView,
+// MoatButton (primary / secondary / danger; quiet is a plain link-style button) and TechnicalDetails (disclosure).
+// Spacing, type and radii come from Theme.swift (Space, TypeScale, Radius); status words from brand/vocabulary.json.
+
 struct PaletteKey: EnvironmentKey {
     static let defaultValue = Palette.dark
 }
@@ -12,26 +17,27 @@ extension EnvironmentValues {
     }
 }
 
-/// Bento card: an opaque surface with a hairline border and a very soft shadow (light appearance only).
+/// Card: an opaque surface with a hairline border and a very soft shadow (light appearance only).
 struct Card<Content: View>: View {
     @Environment(\.palette) private var p
     @Environment(\.colorScheme) private var scheme
     @Environment(\.colorSchemeContrast) private var contrast
-    var padding: CGFloat = 18
+    var padding: CGFloat = Space.s5
     @ViewBuilder var content: Content
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) { content }
+        VStack(alignment: .leading, spacing: Space.s3) { content }
             .padding(padding)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(p.surface))
+            .background(RoundedRectangle(cornerRadius: Radius.card, style: .continuous).fill(p.surface))
             .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                RoundedRectangle(cornerRadius: Radius.card, style: .continuous)
                     .strokeBorder(contrast == .increased ? p.text.opacity(0.4) : p.border, lineWidth: 1))
-            .shadow(color: Color.black.opacity(scheme == .dark ? 0 : 0.05), radius: 2, x: 0, y: 1)
+            .shadow(color: scheme == .dark ? Color.clear : BrandColor.shadow, radius: 2, x: 0, y: 1)
     }
 }
 
+/// Section header: one title and at most one quiet trailing note.
 struct SectionTitle: View {
     @Environment(\.palette) private var p
     let text: String
@@ -91,35 +97,104 @@ struct Pill: View {
 
     var body: some View {
         let c = tone.color(p)
-        HStack(spacing: 4) {
+        HStack(spacing: Space.s1) {
             if let s = symbol ?? (tone != .neutral || dot ? tone.symbol : nil) {
-                Image(systemName: s).font(.system(size: 9.5, weight: .bold)).accessibilityHidden(true)
+                Image(systemName: s).font(.caption2.weight(.bold)).accessibilityHidden(true)
             }
             Text(text).font(.caption.weight(.semibold))
         }
         .foregroundStyle(tone == .neutral ? p.text2 : c)
-        .padding(.horizontal, 9)
-        .padding(.vertical, 4)
+        .padding(.horizontal, Space.s2)
+        .padding(.vertical, Space.s1)
         .background(Capsule().fill(tone == .neutral ? p.surface3 : c.opacity(0.13)))
         .accessibilityElement(children: .combine)
     }
 }
 
-/// A KPI tile (bento): chip label, big tabular figure, sub line.
-struct Stat: View {
-    let label: String
-    let value: String
-    var sub: String?
-    var tone: Tone?
+/// A list row: leading symbol, title, one sub line, trailing chip.
+struct ListRowView<Trailing: View>: View {
+    @Environment(\.palette) private var p
     var symbol: String?
+    var tone: Tone = .neutral
+    let title: String
+    var sub: String?
+    var mono = false
+    @ViewBuilder var trailing: Trailing
 
     var body: some View {
-        KpiTile(label: label, symbol: symbol ?? tone?.symbol ?? "chart.bar.fill", tone: tone ?? .accent, value: value, sub: sub)
+        HStack(alignment: .top, spacing: Space.s3) {
+            if let symbol {
+                ZStack {
+                    RoundedRectangle(cornerRadius: Radius.inner, style: .continuous).fill(tone.color(p).opacity(0.12)).frame(width: Space.s8, height: Space.s8)
+                    Image(systemName: symbol).font(.body.weight(.semibold)).foregroundStyle(tone.color(p))
+                }
+                .accessibilityHidden(true)
+            }
+            VStack(alignment: .leading, spacing: Space.s1) {
+                Text(verbatim: title).font(mono ? .system(.body, design: .monospaced) : .body.weight(.semibold)).foregroundStyle(p.text).lineLimit(2)
+                if let sub { Text(verbatim: sub).font(.callout).foregroundStyle(p.muted).fixedSize(horizontal: false, vertical: true) }
+            }
+            Spacer(minLength: Space.s2)
+            trailing
+        }
+        .padding(.vertical, Space.s1)
+        .accessibilityElement(children: .combine)
     }
 }
 
-/// A control button: bordered prominent (primary/danger) or bordered (secondary), large control size (≥ 28 pt tall,
-/// with the system's own hit area).
+extension ListRowView where Trailing == EmptyView {
+    init(symbol: String? = nil, tone: Tone = .neutral, title: String, sub: String? = nil, mono: Bool = false) {
+        self.init(symbol: symbol, tone: tone, title: title, sub: sub, mono: mono) { EmptyView() }
+    }
+}
+
+/// A warning or announcement across a view or card. Coverage and safety warnings are banners and never go behind a
+/// disclosure; their exact technical reason can.
+struct NoticeBanner: View {
+    @Environment(\.palette) private var p
+    let title: String
+    var text: String?
+    var tone: Tone = .amber
+
+    var body: some View {
+        HStack(alignment: .top, spacing: Space.s3) {
+            Image(systemName: tone == .blue ? "info.circle.fill" : tone.symbol).foregroundStyle(tone.color(p)).accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: Space.s1) {
+                Text(verbatim: title).font(.callout.weight(.semibold)).foregroundStyle(p.text)
+                if let text { Text(verbatim: text).font(.callout).foregroundStyle(p.text2).fixedSize(horizontal: false, vertical: true) }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(Space.s3)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: Radius.card, style: .continuous).fill(tone.color(p).opacity(0.10)))
+        .overlay(RoundedRectangle(cornerRadius: Radius.card, style: .continuous).strokeBorder(tone.color(p).opacity(0.3), lineWidth: 1))
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// Disclosure for secondary and technical detail (hostnames, ports, hashes, rule versions, signer and task ids).
+/// Never for a coverage or safety warning.
+struct TechnicalDetails<Content: View>: View {
+    @Environment(\.palette) private var p
+    var title = "Technical details"
+    @ViewBuilder var content: Content
+    @State private var open = false
+
+    var body: some View {
+        DisclosureGroup(isExpanded: $open) {
+            VStack(alignment: .leading, spacing: Space.s2) { content }
+                .font(.callout)
+                .foregroundStyle(p.text2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, Space.s2)
+        } label: {
+            Text(verbatim: title).font(.callout.weight(.medium)).foregroundStyle(p.accent)
+        }
+    }
+}
+
+/// A control button: bordered prominent (primary / danger) or bordered (secondary), large control size.
 struct MoatButton: View {
     enum Kind { case primary, secondary, danger }
     let title: String
@@ -152,7 +227,7 @@ struct Segmented<T: Hashable>: View {
     @Binding var selection: T
 
     var body: some View {
-        HStack(spacing: 2) {
+        HStack(spacing: Space.s1) {
             ForEach(Array(options.enumerated()), id: \.offset) { item in
                 let opt = item.element
                 let on = opt.0 == selection
@@ -162,12 +237,12 @@ struct Segmented<T: Hashable>: View {
                     Text(opt.1)
                         .font(.callout.weight(on ? .semibold : .regular))
                         .foregroundStyle(on ? p.text : p.text2)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 6)
+                        .padding(.horizontal, Space.s3)
+                        .padding(.vertical, Space.s1)
                         .background {
                             if on {
-                                RoundedRectangle(cornerRadius: 8, style: .continuous).fill(p.surface)
-                                    .shadow(color: Color.black.opacity(0.08), radius: 1.5, x: 0, y: 1)
+                                RoundedRectangle(cornerRadius: Radius.inner, style: .continuous).fill(p.surface)
+                                    .shadow(color: BrandColor.shadow, radius: 1.5, x: 0, y: 1)
                                     .matchedGeometryEffect(id: "selection", in: ns)
                             }
                         }
@@ -177,9 +252,9 @@ struct Segmented<T: Hashable>: View {
                 .accessibilityAddTraits(on ? .isSelected : [])
             }
         }
-        .padding(3)
-        .background(RoundedRectangle(cornerRadius: 11, style: .continuous).fill(p.surface3))
-        .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous).strokeBorder(p.border, lineWidth: 1))
+        .padding(Space.s1)
+        .background(RoundedRectangle(cornerRadius: Radius.control, style: .continuous).fill(p.surface3))
+        .overlay(RoundedRectangle(cornerRadius: Radius.control, style: .continuous).strokeBorder(p.border, lineWidth: 1))
     }
 }
 
@@ -190,6 +265,16 @@ extension Support {
         case .partial: return .amber
         case .untested: return .blue
         case .unsupported: return .neutral
+        }
+    }
+
+    /// The shared status words (brand/vocabulary.json "support").
+    var label: String {
+        switch self {
+        case .supported: return "Works"
+        case .partial: return "Partly works"
+        case .untested: return "Not proven yet"
+        case .unsupported: return "Not available"
         }
     }
 }
@@ -225,12 +310,13 @@ extension CoverageLevel {
 }
 
 extension FlowDecision {
+    /// The connection's status in the shared words (brand/vocabulary.json "verdict").
     var pill: (String, Tone) {
-        if isObservation { return ("Observed", .blue) }
+        if isObservation { return ("Watched only", .blue) }
         switch (verdict, source) {
-        case (.deny, .emergencyIsolation): return ("Isolated", .red)
+        case (.deny, .emergencyIsolation): return ("Locked down", .red)
         case (.deny, _): return ("Blocked", .red)
-        case (.allow, .loopback): return ("Loopback", .neutral)
+        case (.allow, .loopback): return ("This Mac only", .neutral)
         case (.allow, _): return ("Allowed", .green)
         }
     }

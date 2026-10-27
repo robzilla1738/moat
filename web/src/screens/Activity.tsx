@@ -131,7 +131,7 @@ export function DecisionCard({ incident: i, go, detailed = false }: { incident: 
     </>
   );
   return (
-    <Card className={`decision ${action ? "decision-acted" : ""}`}>
+    <Card className={`decision ${detailed ? "" : "decision-summary"} ${action ? "decision-acted" : ""}`}>
       {detailed ? (
         <div className="decision-head">{head}</div>
       ) : (
@@ -237,19 +237,18 @@ export function Activity({ go }: { go: (to: string) => void }) {
                   <Icon name={k.icon} size={16} />
                 </span>
                 <span className="row-main">
-                  <span className="row-eyebrow">
-                    {k.label} · {ago(i.lastAt)}
-                  </span>
                   <span className="row-title">
                     <AlertTitle i={i} deviceName={device?.name ?? i.deviceId} />
                   </span>
                   <span className="row-sub">
                     {i.destination !== "-" ? (
                       <>
-                        to <Ident value={i.destination} kind="host" mono /> · <Ident value={device?.name ?? i.deviceId} />
+                        to <Ident value={i.destination} kind="host" mono /> · <Ident value={device?.name ?? i.deviceId} /> · {ago(i.lastAt)}
                       </>
                     ) : (
-                      <Ident value={i.reason} kind="text" />
+                      <>
+                        <Ident value={i.reason} kind="text" /> · {ago(i.lastAt)}
+                      </>
                     )}
                   </span>
                   {(i.occurrences > 1 || i.state !== "open" || (a && a.kind === "allow_once")) && (

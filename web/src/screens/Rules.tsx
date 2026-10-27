@@ -106,10 +106,13 @@ export function Rules({ go }: { go: (to: string) => void }) {
           </div>
           {sim.platforms.some((p) => !p.compiles) && (
             <Banner tone="amber" title="Won't apply everywhere.">
-              {sim.platforms
-                .filter((p) => !p.compiles)
-                .map((p) => `${p.adapter}: ${p.note}`)
-                .join(" · ")}
+              <Ident
+                value={sim.platforms
+                  .filter((p) => !p.compiles)
+                  .map((p) => `${p.adapter}: ${p.note}`)
+                  .join(" · ")}
+                kind="text"
+              />
             </Banner>
           )}
           <Details summary={`What would change (${sim.changed.length})`}>
@@ -164,7 +167,7 @@ export function Rules({ go }: { go: (to: string) => void }) {
               </span>
               <StatusChip tone={r.authorizedBy ? AUTH[r.authorizedBy]![0] : "amber"}>{r.authorizedBy ? AUTH[r.authorizedBy]![1] : "Signer not recorded"}</StatusChip>
             </summary>
-            <div className="details-body">
+            <div className="details-body details-plain">
               <List>
                 {r.changes.map((c) => (
                   <ListRow key={c.rule} title={<><StatusChip tone={c.broadening ? "amber" : "neutral"}>{c.kind}</StatusChip> <Ident value={c.rule} mono /></>} sub={<Ident value={c.detail} kind="text" />} />

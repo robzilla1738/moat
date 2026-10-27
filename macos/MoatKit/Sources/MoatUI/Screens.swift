@@ -2,121 +2,20 @@ import MoatKit
 import SwiftUI
 import UniformTypeIdentifiers
 
-// MARK: - Overview
+// MARK: - Status headline
 
-struct OverviewScreen: View {
-    @ObservedObject var model: AppModel
-    @Environment(\.palette) private var p
-    /// The window shows the full-bleed hero above this screen; standalone renders show the header instead.
-    var heroShown = false
-
-    var body: some View {
-        if let s = model.status {
-            let blocked = model.flows.filter { $0.decision.verdict == .deny }
-            let observed = model.flows.filter { $0.decision.isObservation }.count
-            VStack(alignment: .leading, spacing: 20) {
-                if !heroShown {
-                    ScreenHeader(eyebrow: "This computer", title: OverviewHero.headline(s), dim: s.coverage.claim)
-                }
-                HStack(spacing: 12) {
-                    Stat(label: "Flows seen", value: "\(s.flowsSeen)", sub: "since the filter started")
-                    Stat(label: "Blocked", value: "\(s.flowsDenied)", sub: "before data was sent", tone: .red)
-                    Stat(label: "Observed", value: "\(observed)", sub: "permitted, not enforced", tone: .blue)
-                    Stat(label: "Policy", value: s.installed.map { "r\($0.revision)" } ?? "none", sub: s.installed?.policyName ?? "observing only")
-                }
-                if s.isolation.active {
-                    Card {
-                        HStack(alignment: .top, spacing: 12) {
-                            Image(systemName: "lock.shield.fill").font(.title2).foregroundStyle(p.red)
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("Emergency isolation is on").font(.title3.weight(.semibold))
-                                Text(s.isolation.reason ?? "").foregroundStyle(p.text2).font(.body)
-                                Text("It stays on until you turn it off in Recovery. It never reopens on its own.")
-                                    .foregroundStyle(p.muted).font(.callout)
-                            }
-                            Spacer()
-                            MoatButton(title: "Open Recovery", systemImage: "lifepreserver", kind: .danger) { model.screen = .coverage }
-                        }
-                    }
-                }
-                HStack(alignment: .top, spacing: 16) {
-                    Card {
-                        SectionTitle(text: "Recently blocked", trailing: "\(blocked.count) shown")
-                        if blocked.isEmpty {
-                            Label("Nothing blocked recently. Blocks appear here the moment the filter reports one.", systemImage: "checkmark.seal")
-                                .foregroundStyle(p.text2).font(.callout)
-                        }
-                        ForEach(blocked.prefix(5)) { r in FlowRow(record: r, compact: true) }
-                        MoatButton(title: "All activity", systemImage: "arrow.right") { model.screen = .activity }
-                    }
-                    VStack(spacing: 16) {
-                        Card {
-                            SectionTitle(text: "Coverage")
-                            HStack(spacing: 10) {
-                                Image(systemName: s.coverage.symbol).foregroundStyle(s.coverage.tone.color(p)).font(.title2)
-                                Text(s.coverage.label).font(.title3.weight(.semibold))
-                            }
-                            ForEach(Array(s.coverageNotes.prefix(3).enumerated()), id: \.offset) { item in
-                                Text(item.element).font(.callout).foregroundStyle(p.text2).fixedSize(horizontal: false, vertical: true)
-                            }
-                        }
-                        Card {
-                            SectionTitle(text: "Not covered here")
-                            Text("Phones and the TV get DNS-only coverage from the controller's resolver: no per-app identity, no byte counts.")
-                                .font(.callout).foregroundStyle(p.text2).fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
-                    .frame(width: 330)
-                }
-            }
-        } else {
-            EmptyStateView(text: "Connecting to the Moat filter…")
-        }
-    }
-
-}
-
-/// The coverage status card at the head of the overview bento: icon, label and the claim that level supports.
-/// `headline` is the one-line summary used by the screen header.
-struct OverviewHero: View {
-    @Environment(\.palette) private var p
-    let status: StatusReport
-
+/// The one-line answer to "is this Mac protected?" in the shared words (brand/vocabulary.json).
+enum OverviewHero {
     static func headline(_ s: StatusReport) -> String {
         switch s.coverage {
-        case .enforced: return "Enforcing."
-        case .observed: return "Observing."
-        case .isolated: return "Isolated."
-        case .degraded: return "Needs attention."
-        case .recoveryRequired: return "Recovery required."
-        case .rollbackPending: return "Rollback pending."
-        case .unknown: return "No report."
+        case .enforced: return "Protected."
+        case .observed: return "Watching only."
+        case .isolated: return "Locked down."
+        case .degraded: return "Partly protected."
+        case .recoveryRequired: return "Needs you at this Mac."
+        case .rollbackPending: return "Undo didn't finish."
+        case .unknown: return "Can't confirm."
         }
-    }
-
-    var body: some View {
-        let tone = status.coverage.tone.color(p)
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 10) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 10, style: .continuous).fill(tone.opacity(0.14)).frame(width: 36, height: 36)
-                    Image(systemName: status.coverage.symbol).font(.body.weight(.semibold)).foregroundStyle(tone)
-                }
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("This Mac").font(.caption.weight(.semibold)).foregroundStyle(p.muted)
-                    Text(status.coverage.label).font(.headline).foregroundStyle(p.text)
-                }
-            }
-            Text(status.coverage.claim).font(.callout).foregroundStyle(p.text2).fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: 0)
-            Text(status.installed.map { "Policy r\($0.revision) · \($0.policyName)" } ?? "No signed policy (observing)")
-                .font(.caption).foregroundStyle(p.muted).lineLimit(2)
-        }
-        .padding(16)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(p.surface))
-        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(p.border, lineWidth: 1))
-        .accessibilityElement(children: .combine)
     }
 }
 
@@ -129,37 +28,32 @@ struct FlowRow: View {
 
     var body: some View {
         let pill = record.decision.pill
-        let label = pill.0
-        let tone = pill.1
-        HStack(alignment: .top, spacing: 12) {
+        HStack(alignment: .top, spacing: Space.s3) {
             ZStack {
-                RoundedRectangle(cornerRadius: 8, style: .continuous).fill(tone.color(p).opacity(0.12)).frame(width: 32, height: 32)
+                RoundedRectangle(cornerRadius: Radius.inner, style: .continuous).fill(pill.1.color(p).opacity(0.12)).frame(width: Space.s8, height: Space.s8)
                 Image(systemName: record.decision.verdict == .deny ? "xmark.shield" : (record.decision.isObservation ? "eye" : "checkmark.shield"))
-                    .font(.body.weight(.semibold)).foregroundStyle(tone.color(p))
+                    .font(.body.weight(.semibold)).foregroundStyle(pill.1.color(p))
             }
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 8) {
-                    Text(record.facts.appLabel).font(.body.weight(.semibold)).lineLimit(1)
-                    Image(systemName: "arrow.right").font(.caption2.weight(.bold)).foregroundStyle(p.muted)
-                    Text(destination).font(.system(.body, design: .monospaced)).foregroundStyle(p.text2).lineLimit(1)
-                }
-                Text(record.decision.summary).font(.callout).foregroundStyle(p.muted).lineLimit(compact ? 1 : 2)
+            .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: Space.s1) {
+                Text(verbatim: record.facts.appLabel).font(.body.weight(.semibold)).lineLimit(1)
+                Text(verbatim: destination).font(.system(.callout, design: .monospaced)).foregroundStyle(p.text2).lineLimit(1).truncationMode(.middle)
                 if !compact {
-                    HStack(spacing: 10) {
-                        Text(record.measurement.label)
-                        if record.facts.teamID == nil { Text("no team ID (unsigned or ad-hoc)") }
-                        Text("ancestry not available")
+                    HStack(spacing: Space.s2) {
+                        Text(verbatim: record.measurement.label)
+                        if record.facts.teamID == nil { Text("Not signed") }
                     }
                     .font(.caption).foregroundStyle(p.muted)
                 }
             }
-            Spacer(minLength: 8)
-            VStack(alignment: .trailing, spacing: 4) {
-                Pill(text: label, tone: tone)
+            Spacer(minLength: Space.s2)
+            VStack(alignment: .trailing, spacing: Space.s1) {
+                Pill(text: pill.0, tone: pill.1)
                 Text(TimeText.ago(record.facts.at)).font(.caption).foregroundStyle(p.muted)
             }
         }
-        .padding(.vertical, 6)
+        .padding(.vertical, Space.s1)
+        .accessibilityElement(children: .combine)
     }
 
     private var destination: String {
@@ -171,12 +65,11 @@ struct FlowRow: View {
 
 enum ActivityFilter: Hashable { case all, blocked, observed, allowed }
 
+/// Activity: "What did this Mac connect to, and what was blocked?"
 struct ActivityScreen: View {
     @ObservedObject var model: AppModel
     @Environment(\.palette) private var p
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var filter: ActivityFilter = .all
-    @Namespace private var glassNS
 
     var body: some View {
         let rows = model.flows.filter {
@@ -187,50 +80,34 @@ struct ActivityScreen: View {
             case .allowed: return $0.decision.verdict == .allow && !$0.decision.isObservation
             }
         }
-        VStack(alignment: .leading, spacing: 18) {
-            ScreenHeader(eyebrow: "Activity", title: "What left this Mac.", dim: "Newest first.")
+        VStack(alignment: .leading, spacing: Space.s5) {
+            ScreenHeader(eyebrow: "Activity", title: "What this Mac connected to", dim: "Newest first.")
             HStack {
-                MoatGlassContainer(spacing: 10) {
-                    HStack(spacing: 10) {
-                        Segmented(options: [(ActivityFilter.all, "All"), (ActivityFilter.blocked, "Blocked"), (ActivityFilter.observed, "Observed"), (ActivityFilter.allowed, "Allowed")], selection: $filter)
-                            .moatGlassID("filter", in: glassNS, reduceMotion: reduceMotion)
-                        if filter != .all {
-                            Button {
-                                withAnimation(reduceMotion ? nil : .snappy(duration: 0.28)) { filter = .all }
-                            } label: {
-                                Image(systemName: "xmark").font(.callout.weight(.semibold)).frame(width: 32, height: 32)
-                            }
-                            .buttonStyle(.plain)
-                            .moatGlass(in: Circle(), interactive: true)
-                            .moatGlassID("clear", in: glassNS, reduceMotion: reduceMotion)
-                            .accessibilityLabel("Show all activity")
-                            .help("Show all activity")
-                        }
-                    }
-                }
+                Segmented(options: [(ActivityFilter.all, "All"), (ActivityFilter.blocked, "Blocked"), (ActivityFilter.observed, "Watched only"), (ActivityFilter.allowed, "Allowed")], selection: $filter)
                 Spacer()
                 if let gaps = model.status?.telemetryGaps, !gaps.isEmpty {
-                    Pill(text: "\(gaps.count) telemetry gap\(gaps.count == 1 ? "" : "s")", tone: .amber, dot: true)
+                    Pill(text: gaps.count == 1 ? "1 gap in reports" : "\(gaps.count) gaps in reports", tone: .amber)
                 }
             }
-            Card(padding: 14) {
+            Card(padding: Space.s4) {
                 if rows.isEmpty {
                     EmptyStateView(symbol: "line.3.horizontal.decrease.circle", title: "Nothing here yet",
-                                   text: filter == .all ? "Flows appear as soon as the filter sees an outbound connection." : "No recent flows match this filter.")
+                                   text: filter == .all ? "Connections appear as soon as the filter sees an app reach out." : "No recent connections match this filter.")
                 }
                 ForEach(Array(rows.prefix(60).enumerated()), id: \.element.seq) { item in
                     if item.offset > 0 { Rectangle().fill(p.border).frame(height: 1) }
                     FlowRow(record: item.element)
                 }
             }
-            Text("Observed flows were permitted because their profile is observing; they were not checked against an allow rule. Byte counts appear only when macOS delivered a filter report.")
+            Text("“Watched only” means Moat let the connection through without checking a rule. Data amounts appear only when macOS reports them, and this Mac can't see which app started another.")
                 .font(.callout).foregroundStyle(p.muted).fixedSize(horizontal: false, vertical: true)
         }
     }
 }
 
-// MARK: - Policy
+// MARK: - Rules
 
+/// Rules: "Which rules is this Mac using, and can I go back?"
 struct PolicyScreen: View {
     @ObservedObject var model: AppModel
     @Environment(\.palette) private var p
@@ -238,67 +115,67 @@ struct PolicyScreen: View {
     @State private var canary = true
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            ScreenHeader(eyebrow: "Policy", title: "Signed policy.", dim: "Verified on this Mac before it is used.")
-            HStack(spacing: 10) {
-                MoatButton(title: "Learning", systemImage: "sparkles") { model.screen = .learning }
-                MoatButton(title: "Workflow packs", systemImage: "shippingbox") { model.screen = .packs }
+        VStack(alignment: .leading, spacing: Space.s5) {
+            ScreenHeader(eyebrow: "Rules", title: "Your rules", dim: "Moat checks the signature on your rules before this Mac uses them.")
+            HStack(spacing: Space.s2) {
+                MoatButton(title: "Learn what an app needs", systemImage: "sparkles") { model.screen = .learning }
+                MoatButton(title: "Rule packs", systemImage: "shippingbox") { model.screen = .packs }
             }
             if let s = model.status {
-                HStack(alignment: .top, spacing: 16) {
+                if let note = s.coverageNotes.first(where: { $0.hasPrefix("Canary rollout") }) {
                     Card {
-                        SectionTitle(text: "Installed")
+                        HStack(alignment: .top, spacing: Space.s3) {
+                            Image(systemName: "timer").foregroundStyle(p.amber).accessibilityHidden(true)
+                            VStack(alignment: .leading, spacing: Space.s1) {
+                                Text("Trying new rules").font(.headline)
+                                Text(verbatim: note).font(.callout).foregroundStyle(p.text2).fixedSize(horizontal: false, vertical: true)
+                            }
+                            Spacer()
+                            MoatButton(title: "Keep these rules", systemImage: "checkmark", kind: .primary) { Task { await model.confirmCanary() } }
+                        }
+                    }
+                }
+                HStack(alignment: .top, spacing: Space.s4) {
+                    Card {
+                        SectionTitle(text: "In use")
                         if let i = s.installed {
                             summaryRows(i)
                         } else {
-                            Text("No signed policy is installed. Moat is observing only.").foregroundStyle(p.text2).font(.body)
+                            Text("No signed rules yet, so Moat is only watching.").foregroundStyle(p.text2).font(.body)
                         }
-                        VStack(alignment: .leading, spacing: 10) {
-                            MoatButton(title: "Apply signed snapshot…", systemImage: "square.and.arrow.down", kind: .primary) { importing = true }
-                            Toggle("10-minute canary (reverts unless you keep it)", isOn: $canary)
+                        VStack(alignment: .leading, spacing: Space.s2) {
+                            MoatButton(title: "Install signed rules…", systemImage: "square.and.arrow.down", kind: .primary) { importing = true }
+                            Toggle("Try for 10 minutes first (undoes itself unless you keep it)", isOn: $canary)
                                 .toggleStyle(.checkbox)
                                 .font(.callout)
                                 .disabled(s.installed == nil)
                             if s.installed == nil {
-                                Text("The first revision cannot be a canary: there is nothing to roll back to. It is applied as is.")
+                                Text("Your first rules can't be a trial: there is nothing to go back to.")
                                     .font(.callout).foregroundStyle(p.muted).fixedSize(horizontal: false, vertical: true)
                             }
                         }
                     }
                     Card {
-                        SectionTitle(text: "Last known good")
+                        SectionTitle(text: "Last good version")
                         if let g = s.lastKnownGood {
                             summaryRows(g)
                         } else {
-                            Text("None yet. The first confirmed revision becomes last known good when the next one is applied.")
+                            Text("None yet. Your current rules become the last good version once you install the next ones.")
                                 .foregroundStyle(p.muted).font(.body).fixedSize(horizontal: false, vertical: true)
                         }
                     }
                 }
-                if s.coverageNotes.contains(where: { $0.hasPrefix("Canary rollout") }) {
-                    Card {
-                        HStack {
-                            Image(systemName: "timer").foregroundStyle(p.amber)
-                            Text(s.coverageNotes.first { $0.hasPrefix("Canary rollout") } ?? "").font(.body)
-                            Spacer()
-                            MoatButton(title: "Keep this revision", systemImage: "checkmark", kind: .primary) { Task { await model.confirmCanary() } }
-                        }
-                    }
-                }
                 if let r = s.lastRejection {
-                    Card {
-                        SectionTitle(text: "Last change")
-                        Text(r).font(.body).foregroundStyle(p.text2).fixedSize(horizontal: false, vertical: true)
-                    }
+                    NoticeBanner(title: "Your last change was refused.", text: r)
                 }
-                Card {
-                    SectionTitle(text: "Left out on macOS", trailing: "\(s.installed?.omitted.count ?? 0) rules")
-                    Text("These rules need a capability this Mac does not have. They are omitted and reported, never compiled into something weaker.")
-                        .font(.callout).foregroundStyle(p.muted).fixedSize(horizontal: false, vertical: true)
-                    ForEach(s.installed?.omitted ?? []) { o in
-                        HStack(alignment: .top, spacing: 10) {
-                            Text(o.ruleID).font(.system(.callout, design: .monospaced).weight(.semibold))
-                            Text(o.reason).font(.callout).foregroundStyle(p.text2).fixedSize(horizontal: false, vertical: true)
+                let omitted = s.installed?.omitted ?? []
+                if !omitted.isEmpty {
+                    Card {
+                        SectionTitle(text: "Rules this Mac can't apply", trailing: "\(omitted.count)")
+                        Text("These need something this Mac can't do. They're left out and reported, never turned into something weaker.")
+                            .font(.callout).foregroundStyle(p.muted).fixedSize(horizontal: false, vertical: true)
+                        ForEach(omitted) { o in
+                            ListRowView(title: o.ruleID, sub: o.reason, mono: true)
                         }
                     }
                 }
@@ -314,62 +191,53 @@ struct PolicyScreen: View {
     }
 
     @ViewBuilder private func summaryRows(_ i: PolicySummary) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(verbatim: "r\(i.revision)").font(.system(.title, design: .rounded).weight(.semibold))
-                Text(i.policyName).font(.body.weight(.medium)).foregroundStyle(p.text2)
-                if let rb = i.rollbackOf { Pill(text: "rollback of r\(rb)", tone: .amber) }
+        VStack(alignment: .leading, spacing: Space.s2) {
+            HStack(alignment: .firstTextBaseline, spacing: Space.s2) {
+                Text(verbatim: i.policyName).font(.title3.weight(.semibold))
+                if let rb = i.rollbackOf { Pill(text: "Brought back version \(rb)", tone: .amber) }
             }
-            Text("\(i.ruleCount) rules · digest \(String(i.digest.prefix(12)))").font(.system(.callout, design: .monospaced)).foregroundStyle(p.muted)
-            Text("Applied \(TimeText.ago(i.appliedAt))").font(.callout).foregroundStyle(p.muted)
+            Text("\(i.ruleCount) rules · installed \(TimeText.ago(i.appliedAt))").font(.callout).foregroundStyle(p.muted)
+            TechnicalDetails {
+                Text(verbatim: "Version \(i.revision) · digest \(String(i.digest.prefix(12)))").font(.system(.callout, design: .monospaced))
+            }
         }
     }
 }
 
 // MARK: - Coverage
 
+/// Coverage: "What can Moat really do on this Mac?"
 struct CoverageScreen: View {
     @ObservedObject var model: AppModel
     @Environment(\.palette) private var p
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            ScreenHeader(eyebrow: "Coverage", title: "What Moat can claim here.", dim: "Untested means not yet proven on a real, signed install.")
+        VStack(alignment: .leading, spacing: Space.s5) {
+            ScreenHeader(eyebrow: "Coverage", title: "What Moat can do on this Mac", dim: "“Not proven yet” means built, but not yet shown working on a real, signed install.")
             if let s = model.status {
+                if !s.telemetryGaps.isEmpty {
+                    NoticeBanner(title: s.telemetryGaps.count == 1 ? "1 gap in reports" : "\(s.telemetryGaps.count) gaps in reports",
+                                 text: s.telemetryGaps.map { "Reports \($0.fromSeq)–\($0.toSeq) are missing: \($0.reason)" }.joined(separator: "\n"))
+                }
                 Card {
-                    SectionTitle(text: "Capabilities · macOS content filter")
+                    SectionTitle(text: "Abilities")
                     ForEach(Array(s.capabilities.enumerated()), id: \.element.key) { item in
                         let c = item.element
                         if item.offset > 0 { Rectangle().fill(p.border).frame(height: 1) }
-                        HStack(alignment: .top) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(c.label).font(.body.weight(.semibold))
-                                if let n = c.note { Text(n).font(.callout).foregroundStyle(p.muted) }
-                            }
-                            Spacer()
-                            Pill(text: c.support.rawValue.capitalized, tone: c.support.tone)
-                        }
-                        .padding(.vertical, 4)
+                        ListRowView(title: c.label, sub: c.note) { Pill(text: c.support.label, tone: c.support.tone) }
                     }
                 }
-                Card {
-                    SectionTitle(text: "Status notes")
-                    ForEach(Array(s.coverageNotes.enumerated()), id: \.offset) { item in
-                        HStack(alignment: .top, spacing: 8) {
-                            Circle().fill(p.muted).frame(width: 4, height: 4).padding(.top, 7)
-                            Text(item.element).font(.body).foregroundStyle(p.text2).fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
-                    if !s.telemetryGaps.isEmpty {
-                        ForEach(Array(s.telemetryGaps.enumerated()), id: \.offset) { item in
-                            Text("Events \(item.element.fromSeq)–\(item.element.toSeq) missing: \(item.element.reason)")
-                                .font(.callout).foregroundStyle(p.amber)
+                if !s.coverageNotes.isEmpty {
+                    Card {
+                        SectionTitle(text: "Notes from the filter")
+                        ForEach(Array(s.coverageNotes.enumerated()), id: \.offset) { item in
+                            Text(verbatim: item.element).font(.callout).foregroundStyle(p.text2).fixedSize(horizontal: false, vertical: true)
                         }
                     }
                 }
                 Card {
-                    SectionTitle(text: "Not claimed on macOS")
-                    Text("Moat does not claim fail-closed behavior if the extension is disabled or crashes, process ancestry, protected-session containment, or compatibility with any particular VPN until each is proven on a real device. Session-scoped rules are left out of this Mac's policy and reported.")
+                    SectionTitle(text: "What Moat doesn't claim here")
+                    Text("Until each is shown on a real device, Moat doesn't claim that traffic stops if the filter is turned off or crashes, that it can see which app started another, that tasks are kept inside a boundary, or that it works with any particular VPN. Rules for tasks are left out of this Mac's rules and reported.")
                         .font(.callout).foregroundStyle(p.text2).fixedSize(horizontal: false, vertical: true)
                 }
             } else {
@@ -381,6 +249,7 @@ struct CoverageScreen: View {
 
 // MARK: - Recovery
 
+/// Recovery: "Something broke: how do I get back?" Every control here works without the controller.
 struct RecoveryScreen: View {
     @ObservedObject var model: AppModel
     @Environment(\.palette) private var p
@@ -389,24 +258,25 @@ struct RecoveryScreen: View {
     @State private var phrase = ""
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            ScreenHeader(eyebrow: "Recovery", title: "Local controls.", dim: "These work without the controller.")
+        VStack(alignment: .leading, spacing: Space.s5) {
+            ScreenHeader(eyebrow: "Recovery", title: "Get back to working", dim: "These work on this Mac, even without your controller.")
             let iso = model.status?.isolation ?? .off
             Card {
-                HStack(alignment: .top, spacing: 14) {
+                HStack(alignment: .top, spacing: Space.s4) {
                     Image(systemName: iso.active ? "lock.shield.fill" : "lock.open")
-                        .font(.title).foregroundStyle(iso.active ? p.red : p.muted).frame(width: 34)
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(iso.active ? "Emergency isolation is on" : "Emergency isolation").font(.title3.weight(.semibold))
+                        .font(.title).foregroundStyle(iso.active ? p.red : p.muted).frame(width: Space.s8)
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: Space.s2) {
+                        Text(iso.active ? "Emergency lockdown is on" : "Emergency lockdown").font(.title3.weight(.semibold))
                         Text(iso.active
-                            ? "Everything except loopback is blocked. \(iso.reason ?? "")"
-                            : "Blocks new outbound connections except loopback on this Mac, immediately. Connections already open are not cut. It stays on through restarts and never reopens because the controller disappeared.")
+                            ? "New connections from this Mac are blocked, except to itself. \(iso.reason ?? "")"
+                            : "Blocks new connections from this Mac right away, except to itself. Connections already open stay open. It stays on through restarts and never turns off just because your controller is gone.")
                             .font(.body).foregroundStyle(p.text2).fixedSize(horizontal: false, vertical: true)
                         if iso.active, showExit {
                             Text("Type \u{201C}\(ControlHandler.exitPhrase)\u{201D} to confirm.").font(.callout).foregroundStyle(p.muted)
                             HStack {
                                 TextField(ControlHandler.exitPhrase, text: $phrase).textFieldStyle(.roundedBorder).frame(maxWidth: 260)
-                                MoatButton(title: "Turn off", kind: .primary, disabled: phrase.isEmpty) {
+                                MoatButton(title: "Turn off lockdown", kind: .primary, disabled: phrase.isEmpty) {
                                     Task { await model.exitIsolation(confirmation: phrase); phrase = ""; showExit = false }
                                 }
                             }
@@ -416,46 +286,47 @@ struct RecoveryScreen: View {
                     if iso.active {
                         if !showExit { MoatButton(title: "Turn off…", systemImage: "lock.open") { showExit = true } }
                     } else {
-                        MoatButton(title: "Isolate this Mac", systemImage: "lock.shield", kind: .danger) { confirmIsolate = true }
+                        MoatButton(title: "Lock down this Mac", systemImage: "lock.shield", kind: .danger) { confirmIsolate = true }
                     }
                 }
             }
             Card {
-                HStack(alignment: .top, spacing: 14) {
-                    Image(systemName: "arrow.uturn.backward.circle").font(.title).foregroundStyle(p.accent).frame(width: 34)
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Roll back to last known good").font(.title3.weight(.semibold))
-                        Text(model.status?.lastKnownGood.map { "Reinstates revision \($0.revision) (\($0.policyName)). Older signed snapshots from the network are still rejected as replays." }
-                            ?? "No last known good revision yet.")
+                HStack(alignment: .top, spacing: Space.s4) {
+                    Image(systemName: "arrow.uturn.backward.circle").font(.title).foregroundStyle(p.accent).frame(width: Space.s8)
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: Space.s2) {
+                        Text("Go back to the last good version").font(.title3.weight(.semibold))
+                        Text(model.status?.lastKnownGood.map { "Brings back version \($0.revision) (\($0.policyName)). Older signed rules sent over the network are still refused." }
+                            ?? "There's no last good version yet.")
                             .font(.body).foregroundStyle(p.text2).fixedSize(horizontal: false, vertical: true)
                     }
                     Spacer()
-                    MoatButton(title: "Roll back", systemImage: "arrow.uturn.backward", disabled: model.status?.lastKnownGood == nil) {
+                    MoatButton(title: "Go back", systemImage: "arrow.uturn.backward", disabled: model.status?.lastKnownGood == nil) {
                         Task { await model.rollback() }
                     }
                 }
             }
             Card {
-                SectionTitle(text: "If the app cannot reach the filter")
-                VStack(alignment: .leading, spacing: 8) {
-                    step(1, "System Settings › Network › Filters: turn the Moat filter off. Traffic flows without Moat; nothing is enforced.")
-                    step(2, "Run `systemextensionsctl list` in Terminal to see whether the extension is activated or waiting for approval.")
-                    step(3, "To uninstall: quit Moat, move it to the Trash, and approve removal of the system extension when macOS asks. `brew uninstall --cask moat` does the same.")
+                SectionTitle(text: "If Moat can't reach its filter")
+                VStack(alignment: .leading, spacing: Space.s2) {
+                    step(1, "System Settings › Network › Filters: turn the Moat filter off. Traffic then flows without Moat; nothing is blocked.")
+                    step(2, "To see whether the filter is installed or waiting for your approval, run `systemextensionsctl list` in Terminal.")
+                    step(3, "To uninstall: quit Moat, move it to the Trash, and allow the removal when macOS asks. `brew uninstall --cask moat` does the same.")
                 }
             }
         }
-        .confirmationDialog("Isolate this Mac?", isPresented: $confirmIsolate) {
-            Button("Isolate now", role: .destructive) { Task { await model.enterIsolation(reason: "Turned on from the Moat app") } }
+        .confirmationDialog("Lock down this Mac?", isPresented: $confirmIsolate) {
+            Button("Lock down now", role: .destructive) { Task { await model.enterIsolation(reason: "Turned on from the Moat app") } }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("New outbound connections except loopback are blocked until you turn isolation off here. Connections already open are not cut.")
+            Text("New connections from this Mac are blocked, except to itself, until you turn lockdown off here. Connections already open stay open.")
         }
     }
 
     private func step(_ n: Int, _ text: String) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            Text("\(n)").font(.caption2.weight(.bold)).foregroundStyle(p.accent)
-                .frame(width: 20, height: 20).background(Circle().fill(p.accent.opacity(0.12)))
+        HStack(alignment: .top, spacing: Space.s2) {
+            Text(verbatim: "\(n)").font(.caption2.weight(.bold)).foregroundStyle(p.accent)
+                .frame(width: Space.s5, height: Space.s5).background(Circle().fill(p.accent.opacity(0.12)))
             Text(LocalizedStringKey(text)).font(.body).foregroundStyle(p.text2).fixedSize(horizontal: false, vertical: true)
         }
     }

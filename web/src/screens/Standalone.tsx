@@ -88,7 +88,9 @@ export function AppCard({ a, go }: { a: App; go: (to: string) => void }) {
         {a.identity === "unknown" ? "?" : a.name.slice(0, 1)}
       </span>
       <span className="row-main">
-        <span className="row-title">{a.name}</span>
+        <span className="row-title">
+          {a.name} <StatusChip tone={tone}>{label}</StatusChip>
+        </span>
         <span className="row-sub">
           <Ident value={identityLine(a)} kind="text" />
         </span>
@@ -101,7 +103,6 @@ export function AppCard({ a, go }: { a: App; go: (to: string) => void }) {
           active {ago(a.lastActive)}
         </span>
       </span>
-      <StatusChip tone={tone}>{label}</StatusChip>
     </button>
   );
 }

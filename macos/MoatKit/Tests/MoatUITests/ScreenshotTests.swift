@@ -62,7 +62,7 @@ final class ScreenshotTests: XCTestCase {
             EndpointLifecycleEvent.from(event: ["type": "stream_terminated", "session_id": "s-1", "hostname": "api.github.com", "reason": "grant expired"], deviceID: "omarchy", seq: 43)!,
             EndpointLifecycleEvent.from(event: ["type": "session_not_adopted", "session_id": "s-2", "profile": "coding-session", "reason": "cgroup missing"], deviceID: "mini", seq: 7)!,
         ]
-        XCTAssertEqual(OverviewHero.headline(m.status!), "Rollback pending.")
+        XCTAssertEqual(OverviewHero.headline(m.status!), "Undo didn't finish.")
         try render(ScreenContent(model: m).padding(28), .dark, width: 1040, height: 1400, name: "coverage-rollback-pending-dark")
     }
 
@@ -151,7 +151,7 @@ final class ScreenshotTests: XCTestCase {
 
     func testHeroHeadlinesAreNarrowClaims() {
         let s = DemoControlClient().snapshot().0
-        XCTAssertEqual(OverviewHero.headline(s), "Enforcing.")
+        XCTAssertEqual(OverviewHero.headline(s), "Protected.")
         XCTAssertFalse(s.coverage.claim.lowercased().contains("fail-closed"))
         XCTAssertFalse(s.coverage.claim.lowercased().contains("contain"))
     }
@@ -184,9 +184,10 @@ final class AppModelTests: XCTestCase {
 
     func testDecisionPillsNeverCallObservationAllowed() {
         let obs = FlowDecision(verdict: .allow, source: .observationProfile, summary: "")
-        XCTAssertEqual(obs.pill.0, "Observed")
+        XCTAssertEqual(obs.pill.0, "Watched only")
+        XCTAssertNotEqual(obs.pill.0, "Allowed")
         let iso = FlowDecision(verdict: .deny, source: .emergencyIsolation, summary: "")
-        XCTAssertEqual(iso.pill.0, "Isolated")
+        XCTAssertEqual(iso.pill.0, "Locked down")
     }
 
 }
