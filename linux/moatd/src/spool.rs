@@ -136,6 +136,12 @@ pub enum Event {
         resource: String,
         limit: u64,
     },
+    /// Ordinary-app inventory record (W10, `crate::inventory::InventoryEvent`): an observed connection or a
+    /// counted loss. `coverage` is always `observe_only`: nothing here was enforced or decided.
+    Inventory {
+        coverage: String,
+        record: serde_json::Value,
+    },
     /// One connection decided by the session egress proxy (TCP inside a protected session). `attempt` is a
     /// moat-core FlowAttempt whose hostname evidence names its source (sni / connect_proxy / http_host); `decision`
     /// carries verdict, winning rule and profile. No payload is inspected beyond the first TLS record or HTTP header.

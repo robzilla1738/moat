@@ -36,6 +36,8 @@ jobs:
         run: sudo ./target/debug/moatd capabilities
       - name: netns enforcement test (nftables + cgroup v2 + moat-launch)
         run: sudo REQUIRE_NFT=1 linux/tests/netns-enforcement.sh target/debug
+      - name: W10 ordinary-app inventory (observe-only) vs an independent receiver
+        run: sudo linux/tests/ordinary-inventory.sh target/debug
 
   installed:
     name: installed systemd unit (W11)
