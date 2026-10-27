@@ -2,6 +2,11 @@
 //!
 //! The order in the child, between fork and exec, is what makes the boundary exist before any workload code runs:
 //!
+//! 0. leave the daemon's own service sandbox: when moatd runs under systemd with `ProtectSystem=`, `ProtectHome=`
+//!    or `PrivateTmp=`, it lives in a private mount namespace in which the user's home is read-only and /tmp is
+//!    private. The workload must see the user's real filesystem (it edits a project), so the child joins PID 1's
+//!    mount namespace and re-enters its working directory there (W11, D-SYSTEMD-WORKSPACE). The daemon itself stays
+//!    sandboxed. This changes no network or broker boundary: those come from the cgroup and from step 2;
 //! 1. join the session cgroup (write `0` to its `cgroup.procs`) while still root;
 //! 2. optionally enter a private mount namespace and hide broker sockets (user D-Bus/systemd, Docker, SSH agent),
 //!    because a local broker can act on the workload's behalf outside the cgroup;
@@ -98,6 +103,22 @@ pub fn hidden_paths(iso: &BrokerIsolation, uid: u32, env: &BTreeMap<String, Stri
     (dirs, files)
 }
 
+/// PID 1's mount namespace, when this process runs in a different one (a systemd service sandbox, a test's private
+/// mount namespace). `None` when they are the same or when /proc does not let us compare (then nothing changes).
+pub fn host_mount_namespace() -> std::io::Result<Option<OwnedFd>> {
+    let Ok(me) = std::fs::read_link("/proc/self/ns/mnt") else { return Ok(None) };
+    // Reading PID 1's namespace link is a ptrace-mode access check: under the systemd unit (reduced capability
+    // bounding set) it needs CAP_SYS_PTRACE. Failing to compare is an error, never a silent "same namespace".
+    let init = std::fs::read_link("/proc/1/ns/mnt")
+        .map_err(|e| std::io::Error::new(e.kind(), format!("cannot compare with the host mount namespace (/proc/1/ns/mnt): {e}")))?;
+    if me == init {
+        return Ok(None);
+    }
+    let f = std::fs::File::open("/proc/1/ns/mnt")
+        .map_err(|e| std::io::Error::new(e.kind(), format!("moatd runs in a private mount namespace and cannot open the host's: {e}")))?;
+    Ok(Some(OwnedFd::from(f)))
+}
+
 /// Spawn the workload. Must be called as root. Returns the child (the session root process).
 pub fn spawn(spec: LaunchSpec) -> std::io::Result<Child> {
     if spec.uid == 0 {
@@ -112,6 +133,10 @@ pub fn spawn(spec: LaunchSpec) -> std::io::Result<Child> {
     let hide_files: Vec<CString> = hide_files.iter().map(|p| CString::new(p.as_os_str().as_encoded_bytes()).unwrap()).collect();
     let isolate = spec.isolation.any();
     let (uid, gid) = (spec.uid, spec.gid);
+    let host_mnt = host_mount_namespace()?;
+    let host_mnt_fd = host_mnt.as_ref().map(|f| f.as_raw_fd());
+    let cwd_c = CString::new(spec.cwd.as_os_str().as_encoded_bytes())
+        .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidInput, "cwd contains a NUL byte"))?;
     let ctty = spec.controlling_tty;
     if ctty && spec.stdio[0].is_none() {
         return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "controlling_tty needs a terminal on stdin"));
@@ -133,11 +158,23 @@ pub fn spawn(spec: LaunchSpec) -> std::io::Result<Child> {
     // SAFETY: only async-signal-safe libc calls between fork and exec; all allocations happened above.
     unsafe {
         cmd.pre_exec(move || {
-            // 1. join the session cgroup before anything else runs.
-            let fd = libc::open(procs.as_ptr(), libc::O_WRONLY | libc::O_CLOEXEC);
-            if fd < 0 {
+            // The session cgroup is opened in the daemon's own mount namespace, before switching, so no mount in
+            // the namespace the workload will see can redirect the cgroup join.
+            let procs_fd = libc::open(procs.as_ptr(), libc::O_WRONLY | libc::O_CLOEXEC);
+            if procs_fd < 0 {
                 return Err(errno("open cgroup.procs"));
             }
+            // 0. the user's real filesystem, not the daemon's service sandbox.
+            if let Some(fd) = host_mnt_fd {
+                if libc::setns(fd, libc::CLONE_NEWNS) != 0 {
+                    return Err(errno("enter the host mount namespace"));
+                }
+                if libc::chdir(cwd_c.as_ptr()) != 0 {
+                    return Err(errno("enter the working directory in the host mount namespace"));
+                }
+            }
+            // 1. join the session cgroup before anything else runs.
+            let fd = procs_fd;
             let zero = b"0";
             if libc::write(fd, zero.as_ptr().cast(), 1) != 1 {
                 libc::close(fd);
@@ -212,7 +249,9 @@ pub fn spawn(spec: LaunchSpec) -> std::io::Result<Child> {
             Ok(())
         });
     }
-    cmd.spawn()
+    let child = cmd.spawn();
+    drop(host_mnt);
+    child
 }
 
 /// Raw fd helper for diagnostics.

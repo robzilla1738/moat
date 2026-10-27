@@ -14,7 +14,8 @@
     "ci-node-22": "GitHub-hosted ubuntu runner, Node 22, controller tests against the Rust moatctl binary.",
     "unit": "cargo test on any host; no OS hooks.",
     "omarchy-installed": "Robert's Omarchy (Arch) machine with the packaged moatd systemd unit. No result recorded yet.",
-    "mac-signed-installed": "A signed, notarized install on a real Mac with the system extension approved. No result recorded yet."
+    "mac-signed-installed": "A signed, notarized install on a real Mac with the system extension approved. No result recorded yet.",
+    "ci-ubuntu-installed-unit": "GitHub-hosted ubuntu-latest runner with the packaged moatd.service installed and started by systemd, a real non-root user and home (linux/tests/installed-unit.sh). An installed unit on Ubuntu, not the Arch package on Omarchy."
   },
   "claims": [
     {
@@ -284,20 +285,20 @@
       "id": "linux.packaging.systemd",
       "capability": "installed moatd systemd unit launches a workload that can edit its intended project while containment holds",
       "backend": "linux/packaging moatd.service",
-      "evidence_level": "none",
-      "disposition": "unknown_degraded",
-      "tests": [],
-      "environment": "omarchy-installed",
+      "evidence_level": "native_ci",
+      "disposition": "implemented_unproven",
+      "tests": [
+        "linux/tests/installed-unit.sh"
+      ],
+      "environment": "ci-ubuntu-installed-unit",
       "last_result": {
-        "result": "not_run",
-        "run": "",
-        "commit": "d5270bd",
+        "result": "pass",
+        "run": "linux-endpoint 40540159764 (job 122316070839)",
+        "commit": "a63827b",
         "date": "2026-10-27"
       },
-      "limits": "Service sandboxing (ProtectHome/ProtectSystem and similar) is inherited by launched workloads and is expected to block project writes.",
-      "open_defects": [
-        "D-SYSTEMD-WORKSPACE"
-      ]
+      "limits": "Proven on an Ubuntu runner with the packaged unit under systemd, not on Omarchy: stays unproven until the Arch package runs there. The unit keeps CAP_SYS_PTRACE to open /proc/1/ns/mnt (decision pending: docs/decisions/W11-cap-sys-ptrace.md).",
+      "open_defects": []
     },
     {
       "id": "macos.filter.app-rules",
@@ -501,7 +502,14 @@
       "id": "D-SYSTEMD-WORKSPACE",
       "summary": "Packaged systemd restrictions break launched coding workloads.",
       "package": "W11",
-      "status": "open"
+      "status": "closed",
+      "closed_by": "W11 (linux/moatd/src/launch.rs host mount namespace step; linux/packaging/systemd/moatd.service; docs/decisions/W11-cap-sys-ptrace.md)",
+      "regression_tests": [
+        "installed-unit: W11: the workload wrote its intended project under $HOME (not the service's read-only view)",
+        "installed-unit: W11: the workload's /tmp is the user's real /tmp, not the service's PrivateTmp",
+        "installed-unit: containment: egress denied / cgroup escape fails / broader nested launch refused, before and after systemctl restart",
+        "linux-endpoint 40540159764 @ a63827b (job installed systemd unit (W11) 122316070839)"
+      ]
     },
     {
       "id": "D-MAC-CACHE-TRUST",

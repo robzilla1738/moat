@@ -26,6 +26,20 @@ moatd capabilities                            # what this host can really do
 From source: `cargo build --release -p moatd -p moatctl`, then install `moatd`, `moat-launch`, `moatctl` and
 `linux/packaging/systemd/moatd.service`.
 
+**The service sandbox does not leak into workloads (W11).** The unit runs `moatd` with `ProtectSystem=strict`,
+`ProtectHome=read-only` and `PrivateTmp=yes`. A protected workload is spawned by `moatd`, so it would inherit that
+private mount namespace and could not write its project under `$HOME` (D-SYSTEMD-WORKSPACE). Before anything else,
+the workload's child process joins PID 1's mount namespace (`setns`; the unit keeps `CAP_SYS_CHROOT` for that and `CAP_SYS_PTRACE` to open `/proc/1/ns/mnt`; the session cgroup is opened before the switch)
+and re-enters its working directory there; then it joins the session cgroup, hides brokers in its own mount
+namespace and drops privileges as before. The daemon stays sandboxed. CI installs the packaged unit on a GitHub
+runner, starts it with `systemctl`, and checks with a real non-root user that the workload writes its project and
+the real `/tmp`, while egress, cgroup-escape and broader-nested-launch probes still fail
+(`linux/tests/installed-unit.sh`). That is an Ubuntu runner, not the Arch package on Omarchy.
+
+`CAP_SYS_PTRACE` is an open decision for Robert: it widens what a compromised `moatd` can do. The alternative is for
+`moat-launch` to pass its own mount namespace descriptor over the control socket (`SCM_RIGHTS`), validated as a mount
+namespace owned by the initial user namespace; see [the decision page](../decisions/W11-cap-sys-ptrace.md).
+
 ## Policy delivery
 
 `moatd` only installs **signed** snapshots from a trusted signer key (`/var/lib/moat/trusted/*.pub`). Delivery is a
@@ -234,6 +248,7 @@ moat_local_emergency`, then remove the package. The Arch package's `pre_remove` 
 | `cargo test -p moatd` | anywhere | rendering, precedence order, scope tables vs `classify`, spool, recovery, endpoint state machine |
 | `tests/privileged.rs` | CI (ubuntu-latest, root) and any cgroup v2 host | boundary mechanics on a real kernel |
 | `linux/tests/netns-enforcement.sh` | CI (ubuntu-latest, root, nf_tables) | real packets: allow, deny, safety precedence, IPv6, UDP, grandchildren, escape attempts, refusal, replay, recovery, isolation stickiness, offline restart |
+| `linux/tests/installed-unit.sh` | CI (ubuntu-latest, packaged unit under systemd) | the installed service: a real user's workload writes its project and /tmp; containment probes fail; `systemctl restart` restores durable state |
 
 These run on GitHub's Ubuntu kernel, **not yet on Omarchy**. Robert's Arch/Omarchy kernel, systemd and network stack
 are on the [device-proof list](../STATUS.md).

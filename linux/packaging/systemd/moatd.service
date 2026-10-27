@@ -30,7 +30,10 @@ LockPersonality=yes
 RestrictRealtime=yes
 RestrictNamespaces=no
 SystemCallArchitectures=native
-CapabilityBoundingSet=CAP_NET_ADMIN CAP_SYS_ADMIN CAP_SETUID CAP_SETGID CAP_KILL CAP_DAC_OVERRIDE CAP_CHOWN CAP_FOWNER
+# CAP_SYS_CHROOT + CAP_SYS_ADMIN (setns) and CAP_SYS_PTRACE (opening PID 1's /proc/1/ns/mnt): workloads leave this
+# sandbox for the host mount namespace so they see the user's real home and /tmp; the daemon itself stays under
+# ProtectSystem/ProtectHome/PrivateTmp (docs/platforms/linux.md).
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_SYS_ADMIN CAP_SYS_CHROOT CAP_SYS_PTRACE CAP_SETUID CAP_SETGID CAP_KILL CAP_DAC_OVERRIDE CAP_CHOWN CAP_FOWNER
 
 [Install]
 WantedBy=multi-user.target
