@@ -162,7 +162,12 @@ What it does **not** do:
 * **Encrypted ClientHello** exposes only its public outer name, and that is the name evaluated.
 * **Domain fronting** through an allowed host's CDN remains possible.
 * **DNS:** in transparent mode the client still resolves names itself (through the system resolver, a broker; see
-  above). With `HTTPS_PROXY` the proxy does the resolving.
+  above). With `HTTPS_PROXY` the proxy does the resolving, and only **after** authorizing the name: a name no rule
+  can allow is refused without any lookup.
+
+**Admission vs open streams.** Admitted streams are registered and re-checked on every policy install and every
+daemon tick; expiry, a revision that no longer allows them, isolation, session end and daemon stop each end them.
+The full contract, with stopping bounds and what is not promised, is [proxy-stream-contract.md](../proxy-stream-contract.md).
 
 Turn it off with `moatd run --no-egress-proxy`. The capability probe also turns it off when the kernel lacks nftables
 nat `redirect`. With the proxy off, hostname rules in sessions behave as on an IP-only host (`--adapter linux-ip-only`
@@ -171,7 +176,10 @@ in `moatctl`). The capability is advertised as `session_hostname_proxy: untested
 CI (`netns-enforcement.sh`) checks it on a real kernel with a TLS lab: an allowed SNI reaches the real host; a
 denied SNI is blocked; a spoofed SNI aimed at another address still lands on the resolved host; `CONNECT` through the
 injected `HTTPS_PROXY` works and refuses unlisted hosts; plain HTTP is decided by `Host`, and refusals get a `403`;
-TLS to a bare IP (no SNI) is blocked; another process cannot use a session's listener; decisions reach the spool.
+TLS to a bare IP (no SNI) is blocked; another process cannot use a session's listener; decisions reach the spool. W05 adds: a forbidden name produces no query at the lab resolver (positive control: the allowed name does); direct
+and proxied enforcement agree at an independent receiver over IPv4/IPv6; and a long-lived TLS stream is ended at
+expiry, by a revision that no longer allows it, by task close, by isolation and by daemon stop, with the measured
+stopping delay printed in the CI log.
 
 ## Ordinary traffic
 

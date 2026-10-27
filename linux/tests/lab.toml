@@ -25,6 +25,12 @@ default = "deny"
 learning = "restrictive"
 
 [[profiles]]
+id = "lab-mirror"
+description = "W05: lab-allow's address rules, but proxied (it also has a hostname rule), to compare direct and proxied enforcement."
+default = "deny"
+learning = "restrictive"
+
+[[profiles]]
 id = "lab-deny"
 default = "deny"
 learning = "restrictive"
@@ -42,7 +48,7 @@ provenance = { kind = "built_in", reference = "lab" }
 [[rules]]
 id = "lab-lan-tcp"
 action = "allow"
-selector = { session = { profiles = ["lab-allow"] } }
+selector = { session = { profiles = ["lab-allow", "lab-mirror"] } }
 destinations = { scopes = ["lan"] }
 transport = "tcp"
 ports = ["8000-9999"]
@@ -55,4 +61,24 @@ selector = { session = { profiles = ["lab-hosts"] } }
 destinations = { hosts = ["allowed.lab"] }
 transport = "tcp"
 ports = [8443, 8081]
+provenance = { kind = "git", reference = "lab" }
+
+[[rules]]
+id = "lab-hosts-named-dnslab"
+description = "W05: a name only DNS can resolve (the lab resolver logs every query)."
+action = "allow"
+selector = { session = { profiles = ["lab-hosts"] } }
+destinations = { hosts = ["named.dnslab"] }
+transport = "tcp"
+ports = [8443]
+provenance = { kind = "git", reference = "lab" }
+
+[[rules]]
+id = "lab-mirror-hostname"
+description = "W05: makes lab-mirror a proxied profile; never matches the probes (port 1)."
+action = "allow"
+selector = { session = { profiles = ["lab-mirror"] } }
+destinations = { hosts = ["mirror.dnslab"] }
+transport = "tcp"
+ports = [1]
 provenance = { kind = "git", reference = "lab" }
