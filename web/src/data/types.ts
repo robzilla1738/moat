@@ -1,6 +1,6 @@
 export type Coverage = "protected-session" | "enforced" | "monitoring" | "dns-only" | "degraded" | "recovery-required" | "rollback-pending" | "isolated" | "unknown";
 export type Support = "supported" | "partial" | "untested" | "unsupported";
-export type Platform = "macos" | "linux" | "ios" | "android-tv";
+export type Platform = "macos" | "linux" | "ios" | "android-tv" | "dns-client";
 export type RevisionState = "approved" | "distributed" | "received" | "applied" | "verified" | "rejected" | "trial" | "confirmed" | "rolled_back" | "not_targeted";
 
 export interface Capability { key: string; label: string; support: Support; note?: string }
@@ -25,6 +25,11 @@ export interface Device {
   sync?: { desired: number | null; state: "current" | "pending" | "stale" | "rejected" | "held" | "not_released" | "ahead"; detail: string | null };
   blockedToday: number;
   flowsToday: number;
+  /**
+   * W16 DNS-only presentation: what the resolver adapter knows. Evidence age is the resolver's last good poll, not the
+   * client's last query. There is no process, app, connection or byte count for these devices.
+   */
+  dns?: { resolver: string; resolverKind: string | null; resolverHealth: string; lastQueryAt: string | null; gaps: { from: string | null; to: string | null; reason: string }[] };
 }
 
 export interface ChainNode { name: string; exe: string; pid?: number; signed?: string; note?: string }

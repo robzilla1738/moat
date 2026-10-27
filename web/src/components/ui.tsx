@@ -85,7 +85,7 @@ export function SectionTitle({ children, action }: { children: ReactNode; action
 }
 
 export function DeviceIcon({ d, size = 18 }: { d: Pick<Device, "platform" | "isController" | "model">; size?: number }) {
-  const name: IconName = d.platform === "ios" ? "phone" : d.platform === "android-tv" ? "tv" : d.platform === "linux" ? "linux" : d.isController ? "server" : "laptop";
+  const name: IconName = d.platform === "ios" || d.platform === "dns-client" ? "phone" : d.platform === "android-tv" ? "tv" : d.platform === "linux" ? "linux" : d.isController ? "server" : "laptop";
   return <Icon name={name} size={size} />;
 }
 

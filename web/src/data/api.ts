@@ -58,6 +58,7 @@ export interface WireRevision { revision: number; created_at: string; approved_b
 export interface WireSession { id: string; device_id: string; profile: string; boundary: string; verified: number; state: string; started_at: string; ended_at: string | null; intent: string | null; close_requested_at: string | null }
 export interface WireGrant { id: string; kind: string; device_id: string | null; session_id: string | null; process_instance: string | null; destination: string; transport: string; port: number | null; expires_at: string; created_by: string; state: string }
 export interface WireApp { id: string; name: string; family: string | null; exe: string | null; signer: string | null; identity: "executable" | "unknown"; devices: string[]; sessions: number; flows: number; denied: number; observed: number; destinations: { host: string; port: number | null; count: number; verdict: "allow" | "deny" | "observed"; firstAt: string; lastAt: string; new: boolean }[]; lastActive: string; firstSeen: string }
+export interface WireDnsClient { id: string; name: string; resolver: string; client: string; last_query_at: string | null; reachable: number | null; coverage: "dns-only"; claim: string; resolver_kind: string | null; resolver_health: string; resolver_last_ok_at: string | null; evidence_age_s: number | null; gaps: { from_at: string | null; to_at: string | null; reason: string }[] }
 export interface WireReconciliation { device: string; desired: number | null; current: number | null; state: NonNullable<Device["sync"]>["state"]; detail: string | null }
 export interface WireRollup { hour: string; verdict: string; flows: number }
 export interface WireGrantStatus { id: string; state: "pending" | "active" | "rejected" | "expired" | "revoked"; revision: number | null; authorized_by: string | null; expires_at: string; devices: { device_id: string; state: string; stale: boolean; evidence: { revision: number; state: string; at: string; detail: string | null } | null }[]; server_time: string }
@@ -87,6 +88,30 @@ export function mapDevice(d: WireDevice): Device {
     awaitingRetarget: d.awaiting_retarget === true,
     blockedToday: 0,
     flowsToday: 0,
+  };
+}
+
+/**
+ * A DNS-only client from the resolver adapter. Its id matches the controller's `dns_blocked` incidents
+ * (`dns:<resolver>:<client>`). Evidence age is the resolver's last good poll; no capability beyond DNS queries is
+ * claimed, and there is no process, app, connection or byte count to show.
+ */
+export function mapDnsClient(c: WireDnsClient): Device {
+  return {
+    id: `dns:${c.resolver}:${c.client}`,
+    name: c.name || c.client,
+    model: `via ${c.resolver_kind === "pihole" ? "Pi-hole" : c.resolver_kind === "adguard" ? "AdGuard Home" : "resolver"} (${c.resolver})`,
+    platform: "dns-client",
+    coverage: "dns-only",
+    coverageNote: c.claim,
+    lastSeen: c.resolver_last_ok_at,
+    revision: null,
+    revisionState: null,
+    capabilities: [{ key: "dns_evidence", label: "DNS queries", support: "supported", note: "per client, as the resolver reports it" }],
+    telemetryGaps: [],
+    blockedToday: 0,
+    flowsToday: 0,
+    dns: { resolver: c.resolver, resolverKind: c.resolver_kind, resolverHealth: c.resolver_health, lastQueryAt: c.last_query_at, gaps: (c.gaps ?? []).map((g) => ({ from: g.from_at, to: g.to_at, reason: g.reason })) },
   };
 }
 
@@ -186,7 +211,7 @@ export function grantScope(g: Pick<WireGrant, "device_id" | "session_id" | "proc
 
 export async function loadLive(api: Api, now = () => new Date()): Promise<Snapshot> {
   const since = new Date(now().getTime() - 24 * 3600_000).toISOString();
-  const [me, overview, devices, incidents, revisions, sessions, grants, rollups, apps, recon] = await Promise.all([
+  const [me, overview, devices, incidents, revisions, sessions, grants, rollups, apps, recon, dnsClients] = await Promise.all([
     api.get<WireMe>("/v1/me"),
     api.get<WireOverview>("/v1/overview"),
     api.get<WireDevice[]>("/v1/devices"),
@@ -197,6 +222,7 @@ export async function loadLive(api: Api, now = () => new Date()): Promise<Snapsh
     api.get<WireRollup[]>(`/v1/rollups?since=${encodeURIComponent(since)}`),
     api.get<WireApp[]>("/v1/apps"),
     api.get<WireReconciliation[]>("/v1/reconciliation"),
+    api.get<WireDnsClient[]>("/v1/dns/clients"),
   ]);
   const hours = new Map<string, { hour: string; allowed: number; blocked: number; observed: number }>();
   for (const r of rollups) {
@@ -217,7 +243,7 @@ export async function loadLive(api: Api, now = () => new Date()): Promise<Snapsh
     devices: devices.map((d) => {
       const r = (recon ?? []).find((x) => x.device === d.id);
       return { ...mapDevice(d), ...(r ? { sync: { desired: r.desired, state: r.state, detail: r.detail } } : {}) };
-    }),
+    }).concat((dnsClients ?? []).map(mapDnsClient)),
     incidents: incidents.map(mapIncident),
     revisions: revisions.map(mapRevision),
     sessions: sessions.map(mapSession),

@@ -70,14 +70,17 @@ export function storeObservations(db: DB, obs: DnsObservation[], reachable: bool
 }
 
 export function dnsClients(db: DB, now: Date = new Date()) {
-  const health = new Map((db.prepare("SELECT resolver, health, last_ok_at FROM dns_adapter_state").all() as { resolver: string; health: string; last_ok_at: string | null }[]).map((h) => [h.resolver, h]));
+  const health = new Map((db.prepare("SELECT resolver, kind, health, last_ok_at FROM dns_adapter_state").all() as { resolver: string; kind: string; health: string; last_ok_at: string | null }[]).map((h) => [h.resolver, h]));
   return (db.prepare("SELECT * FROM dns_clients ORDER BY last_query_at DESC").all() as Record<string, unknown>[]).map((c) => {
     const h = health.get(String(c.resolver));
     return {
       ...c,
       coverage: "dns-only",
       claim: "Resolver queries from this client. No app, process, connection or byte count is known; direct-IP and alternative encrypted DNS are not covered.",
+      resolver_kind: h?.kind ?? null,
       resolver_health: h?.health ?? "unknown",
+      resolver_last_ok_at: h?.last_ok_at ?? null,
+      gaps: (db.prepare("SELECT from_at, to_at, reason FROM dns_gaps WHERE resolver = ? ORDER BY id DESC LIMIT 5").all(String(c.resolver)) as { from_at: string | null; to_at: string | null; reason: string }[]),
       evidence_age_s: h?.last_ok_at ? Math.max(0, Math.round((now.getTime() - Date.parse(h.last_ok_at)) / 1000)) : null,
     };
   });
