@@ -32,7 +32,7 @@ final class FakeExtension: ControlClient, @unchecked Sendable {
     var reject: String?
     var applied: [Data] = []
     func status() async throws -> StatusReport {
-        StatusReport(extensionVersion: "0.1.0", coverage: .monitoring, coverageNotes: [], filterEnabled: true, isolation: .off, installed: installed, lastKnownGood: lastKnownGood, lastRejection: nil, flowsSeen: 0, flowsDenied: 0, telemetryGaps: [], capabilities: [])
+        StatusReport(extensionVersion: "0.1.0", coverage: .observed, coverageNotes: [], filterEnabled: true, isolation: .off, installed: installed, lastKnownGood: lastKnownGood, lastRejection: nil, flowsSeen: 0, flowsDenied: 0, telemetryGaps: [], capabilities: [])
     }
     func recentFlows(limit: Int) async throws -> [FlowRecord] { [] }
     func applySignedSnapshot(_ data: Data, canarySeconds: Int) async throws -> PolicySummary {

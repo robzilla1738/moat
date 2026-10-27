@@ -155,6 +155,19 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(iso.pill.0, "Isolated")
     }
 
+}
+
+@MainActor
+final class StandaloneApplyCopyTests: XCTestCase {
+    func model(_ screen: Screen) -> AppModel {
+        let client = DemoControlClient(now: Date())
+        let (s, f) = client.snapshot()
+        let m = AppModel(client: client, isDemo: true, screen: screen)
+        m.status = s
+        m.flows = f
+        return m
+    }
+
     func testApplyCopyFollowsTheAvailablePath() {
         let plain = model(.appDetail)
         XCTAssertFalse(plain.canApplyStandalone)
