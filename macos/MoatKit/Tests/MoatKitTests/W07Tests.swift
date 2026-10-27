@@ -223,4 +223,47 @@ final class W07Tests: XCTestCase {
         XCTAssertEqual(caps["ancestor_attribution"], .unsupported)
         XCTAssertEqual(caps["existing_flow_revocation"], .unsupported)
     }
+
+    // MARK: first canary (D-MAC-CACHE-TRUST; Linux equivalent: first_revision_cannot_be_a_trial)
+
+    func testFirstRevisionCannotBeACanaryAndTheRefusalWritesNothing() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("moat-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let h = ControlHandler(engine: FilterEngine(deviceID: "mbp"), store: PolicyStore(directory: dir, verifier: FakeVerifier()), version: "t", filterEnabled: { true }, makeEvaluator: { _ in FakeEvaluator() })
+        guard case let .failure(e) = h.perform(.applySignedSnapshot(Data("rev:1".utf8), canarySeconds: 600)) else { return XCTFail("a first canary was accepted") }
+        XCTAssertTrue(e.message.contains("cannot be a canary"), e.message)
+        XCTAssertNil(h.store.installed, "nothing installed")
+        XCTAssertNil(h.store.lastApplied, "the replay high-water mark did not move")
+        XCTAssertNil(h.store.canaryDeadline)
+        XCTAssertNil(h.store.lastRejection, "the refusal writes nothing")
+        XCTAssertNil(h.engine.installedPolicy, "the engine was not touched")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: dir.appendingPathComponent("state.json").path), "no state file was written")
+        // the same revision applies without a canary, and a later change can then be trialled and rolls back to it
+        let t = Date()
+        _ = try h.perform(.applySignedSnapshot(Data("rev:1".utf8), canarySeconds: 0), now: t).get()
+        _ = try h.perform(.applySignedSnapshot(Data("rev:2".utf8), canarySeconds: 60), now: t).get()
+        h.tick(now: t.addingTimeInterval(120))
+        XCTAssertEqual(h.store.installed?.summary.revision, 1, "the trial rolled back to the first confirmed revision")
+        XCTAssertEqual(h.engine.installedPolicy?.revision, 1)
+    }
+
+    func testPolicyStoreRefusesAFirstCanaryToo() {
+        let s = PolicyStore(directory: nil, verifier: FakeVerifier())
+        guard case let .failure(f) = s.apply(signed: Data("rev:1".utf8), canary: 600) else { return XCTFail("first canary accepted") }
+        XCTAssertEqual(f.kind, "first_canary")
+        XCTAssertNil(s.installed)
+        XCTAssertNil(s.lastApplied)
+    }
+
+    func testACanaryOverAPendingCanaryFallsBackToTheConfirmedRevision() throws {
+        let h = ControlHandler(engine: FilterEngine(deviceID: "mbp"), store: PolicyStore(directory: nil, verifier: FakeVerifier()), version: "t", filterEnabled: { true }, makeEvaluator: { _ in FakeEvaluator() })
+        let t = Date()
+        _ = try h.perform(.applySignedSnapshot(Data("rev:1".utf8), canarySeconds: 0), now: t).get()
+        _ = try h.perform(.applySignedSnapshot(Data("rev:2".utf8), canarySeconds: 60), now: t).get()
+        XCTAssertEqual(h.store.canaryFallback?.summary.revision, 1)
+        _ = try h.perform(.applySignedSnapshot(Data("rev:3".utf8), canarySeconds: 60), now: t).get()
+        h.tick(now: t.addingTimeInterval(120))
+        XCTAssertEqual(h.store.installed?.summary.revision, 1, "never an unconfirmed trial")
+        XCTAssertEqual(h.store.lastApplied, 3, "the replay high-water mark stays")
+    }
 }

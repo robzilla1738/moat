@@ -187,6 +187,11 @@ public final class ControlHandler: @unchecked Sendable {
         case let .applySignedSnapshot(data, canary):
             guard data.count <= Self.maxSnapshotBytes else { return .failure(ControlError("snapshot is larger than \(Self.maxSnapshotBytes) bytes")) }
             guard canary >= 0, canary <= Self.maxCanarySeconds else { return .failure(ControlError("canary must be 0...\(Self.maxCanarySeconds) seconds")) }
+            // First canary: with nothing to roll back to, a trial would silently become permanent. Refuse before
+            // verifying, so the refusal writes nothing (not even a rejection record) and reaches nothing.
+            if canary > 0, store.canaryFallback == nil {
+                return .failure(ControlError("Rejected; nothing was installed. \(PolicyStore.firstCanaryRefusal)"))
+            }
             // Candidate first: verify, then build its evaluator. Only a candidate that passes both replaces the running
             // generation; a failed candidate leaves the previous evaluator and state exactly as they were.
             switch store.prepare(signed: data, now: now) {

@@ -33,6 +33,8 @@ public protocol SnapshotVerifier: Sendable {
 /// * The replay high-water mark (`lastApplied`) never goes down, including after a local rollback, so an older
 ///   signed snapshot replayed from the network is still rejected.
 /// * A canary apply rolls back to the last known good revision unless confirmed before its deadline.
+/// * The first revision on a Mac cannot be a canary: there is nothing to roll back to. The refusal writes nothing
+///   (the same contract as moatd's `first_revision_cannot_be_a_trial`).
 /// * Nothing here changes trust. Trusted keys are owner configuration read by the verifier.
 public final class PolicyStore: @unchecked Sendable {
     public struct Entry: Codable, Equatable, Sendable {
@@ -99,6 +101,11 @@ public final class PolicyStore: @unchecked Sendable {
     public var lastApplied: UInt64? { locked { state.lastApplied } }
     public var canaryDeadline: Date? { locked { state.canaryDeadline } }
     public var isolation: IsolationState { locked { state.isolation } }
+    /// What a canary applied now would roll back to: the installed revision when it is confirmed, otherwise (a canary
+    /// is already pending) the last known good. `nil` means a canary has no fallback and must be refused.
+    public var canaryFallback: Entry? { locked { state.canaryDeadline == nil ? state.installed : state.lastKnownGood } }
+    /// The refusal for a canary without a fallback.
+    public static let firstCanaryRefusal = "The first revision on this Mac cannot be a canary: there is no earlier revision to roll back to. Nothing was installed. Apply it without a canary; later changes can be trialled."
     public var lastRejection: String? { locked { state.lastRejection } }
     /// Set when the last state change could not be written to disk: it is enforced in memory but not durable.
     public var lastPersistError: String? { locked { persistError } }
@@ -175,6 +182,9 @@ public final class PolicyStore: @unchecked Sendable {
 
     /// Verify and install in one step (no evaluator check). Prefer prepare + commit.
     public func apply(signed: Data, canary: TimeInterval = 0, now: Date = Date()) -> Result<PolicySummary, VerificationFailure> {
+        if canary > 0, canaryFallback == nil {
+            return .failure(VerificationFailure(kind: "first_canary", message: Self.firstCanaryRefusal))
+        }
         switch prepare(signed: signed, now: now) {
         case let .failure(f): return .failure(f)
         case let .success(e):
@@ -210,6 +220,10 @@ public final class PolicyStore: @unchecked Sendable {
 
     private func rollbackLocked(now: Date, why: String) -> PolicySummary? {
         guard var good = state.lastKnownGood else {
+            // Only reachable from state written before first canaries were refused: say so instead of going quiet.
+            if state.canaryDeadline != nil, let cur = state.installed {
+                state.lastRejection = "The canary deadline for revision \(cur.summary.revision) passed, but there is no earlier revision to roll back to; revision \(cur.summary.revision) stays enforced (\(why))."
+            }
             state.canaryDeadline = nil
             persist()
             return nil
