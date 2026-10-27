@@ -130,7 +130,8 @@ public struct OnboardingView: View {
                         Image(systemName: done ? "checkmark" : s.symbol).font(.caption.weight(.bold))
                         if current { Text(s.title).font(.caption.weight(.semibold)).lineLimit(1) }
                     }
-                    .foregroundStyle(current ? Color.white : (done ? p.accent : p.text2))
+                    // Light glass tints pale: the current step's label takes the accent there, white on the dark tint.
+                    .foregroundStyle(current ? (scheme == .dark ? Color.white : p.accent) : (done ? p.accent : p.text2))
                     .padding(.horizontal, current ? 12 : 8)
                     .frame(height: 28)
                     .moatGlass(in: Capsule(), tint: current ? p.accent : nil)

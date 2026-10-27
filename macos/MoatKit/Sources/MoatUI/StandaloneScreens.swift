@@ -163,6 +163,8 @@ struct RuleAuthoringCard: View {
             Picker("Destination", selection: $host) {
                 ForEach(app.destinations.prefix(10), id: \.host) { d in Text("\(d.host):\(d.port)").tag(d.host) }
             }
+            // The picker shows the destination the plan uses (the most frequent one until the owner picks another).
+            .onAppear { if host.isEmpty { host = app.destinations.first?.host ?? "" } }
             Stepper("For \(minutes) minutes", value: $minutes, in: 5 ... 480, step: 5)
             Text(plan.ownerPlan(id: "preview").display).font(.system(.callout, design: .monospaced))
             ForEach(plan.problems(), id: \.self) { pr in Text(pr).font(.caption).foregroundStyle(p.red) }

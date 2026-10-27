@@ -1603,7 +1603,12 @@ a {
   flex: 1;
   min-width: 0;
 }
-/* the count badge keeps its size; the identity line ellipsizes instead */
+/* the card aligns its rows to the start, so the header row must stretch to the card width itself; the count badge
+   keeps its size and the identity line ellipsizes instead */
+.app-top {
+  align-self: stretch;
+  min-width: 0;
+}
 .app-top > .badge {
   flex: none;
 }

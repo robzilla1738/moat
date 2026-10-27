@@ -202,7 +202,7 @@ struct Sidebar: View {
                     Circle().fill(p.red).frame(width: 7, height: 7).accessibilityLabel("isolation on")
                 }
                 if s == .activity, let n = model.status?.flowsDenied, n > 0 {
-                    Text("\(n)").font(.caption.monospacedDigit()).foregroundStyle(p.muted).accessibilityLabel("\(n) blocked")
+                    Text("\(n)").font(.caption.monospacedDigit()).foregroundStyle(.secondary).accessibilityLabel("\(n) blocked")
                 }
             }
         } icon: {
