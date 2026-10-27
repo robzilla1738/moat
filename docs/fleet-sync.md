@@ -40,8 +40,28 @@ device instead of overwriting it, and never adopts the local change into the fle
 An approval prepared against an older policy revision is refused (409) and must be prepared again. A revoked device's
 requests are refused (401) and it leaves reconciliation.
 
+## Linux sync agent (moatd outbox)
+
+The reference agent (`moat-controller agent-sync`, `controller/src/agent.ts`) is the only process that talks to the
+controller for a Linux endpoint; moatd never does. Each round it:
+
+1. reads `spool/sync-state.json` (`moat.spool_sync_state.v1`, written by moatd). A missing, torn or unknown-schema
+   file, or impossible numbers (`spool_low_seq > next_seq`, `acked_seq >= next_seq`, a non-sha256 digest) are not
+   believed: the body then carries no `spool_low_seq`/`local_change`, so holes stay pending instead of becoming
+   invented gaps. A sync-state for another `device_id` is refused outright.
+2. uploads every spool record above `max(agent cursor, moatd acked_seq)` with `spool_low_seq` and `local_change`.
+3. writes the controller's contiguous `acked_seq` to `spool/acked` atomically, never lower than the value already
+   there or moatd's accepted `acked_seq`, and never beyond `next_seq - 1` (moatd would refuse it; a controller
+   claiming more than the endpoint wrote is not believed and the response reports `ack_refused`).
+4. follows the controller's `acked_seq` with its cursor, so a lower value (a restored controller) resends what moatd
+   still holds; anything already gone is declared by `spool_low_seq`.
+
+A controller outage fails the round before anything is acknowledged; moatd keeps (or evicts with a `gap` record)
+and the next round resends. Tests: `controller/test/agent-sync.test.ts` (duplicate, reorder, outage, reconnect with
+quota eviction, over-claimed ack, foreign spool, local change held for the owner, stale approval refused).
+
 ## Not yet proven
 
-Two real endpoints across a real controller outage, reboot and reconnect have not been exercised; the controller tests
-simulate them in-process with the real signer and moatctl. The Linux and macOS endpoints do not yet send
-`spool_low_seq` or `local_change`; until they do, holes stay pending and no local change is reported.
+Two real endpoints across a real controller outage, reboot and reconnect have not been exercised; the controller and
+agent tests simulate them in-process and over loopback HTTP with the real signer and moatctl, writing moatd's file
+formats rather than running moatd. The macOS endpoint does not yet send `spool_low_seq` or `local_change`.
