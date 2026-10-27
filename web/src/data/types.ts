@@ -56,12 +56,33 @@ export interface Incident {
  * The state of an owner action, as far as evidence supports it. "sending" and "pending" are never shown as applied;
  * "active" needs an endpoint receipt; "simulated" exists only in demo mode.
  */
-export type ActionPhase = "sending" | "pending" | "active" | "rejected" | "failed" | "expired" | "revoked" | "done" | "simulated";
+export type ActionPhase = "planning" | "review" | "sending" | "pending" | "active" | "rejected" | "failed" | "expired" | "revoked" | "done" | "simulated";
+
+/** The exact grant the controller proposes (moat.grant.v1 plan); critical scope is rendered from this, never from prose. */
+export interface GrantPlanView {
+  plan_id: string;
+  digest: string;
+  approval_expires_at: string;
+  grant_id: string | null;
+  plan: {
+    grant_id: string;
+    kind: string;
+    scope: { kind: "task"; device_id: string; boot_id?: string | null; task_id: string } | { kind: "app_on_device"; device_id: string; executable: { path: string } };
+    destination: { kind: "address"; address: string } | { kind: "hostname"; hostname: string };
+    transport: string;
+    port: number;
+    issued_at: string;
+    admission_until: string;
+    stream_policy: string;
+    base_policy_digest: string;
+  };
+}
 export interface ActionState {
   kind: "allow_once" | "keep_blocked" | "acknowledge";
   phase: ActionPhase;
   steps: { label: string; state: "done" | "active" | "pending" | "failed"; at?: string; detail?: string }[];
   grantId?: string;
+  plan?: GrantPlanView;
   revision?: number;
   authorizedBy?: string | null;
   expiresAt?: string;
@@ -109,7 +130,7 @@ export interface Revision {
   title: string;
   author: string;
   /** From the signer's recorded answer; null when the controller did not record it (older revisions). */
-  authorizedBy: "owner_key" | "narrowing" | "temporary_grant_overlay" | null;
+  authorizedBy: "owner_key" | "narrowing" | "temporary_grant_overlay" | "delegated_issuer" | null;
   ownerKeyId?: string | null;
   createdAt: string;
   rollbackOf?: number;

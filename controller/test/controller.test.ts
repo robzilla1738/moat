@@ -190,8 +190,11 @@ test("allow once for this session: bound to incident, revision, session and owne
   assert.equal(g.authorized_by, "temporary_grant_overlay");
   assert.equal(Date.parse(g.expires_at) - f.clock.t, 8 * 3600_000, "TTL clamped to the maximum");
   const effective = f.c.currentRevision()!.effective_source;
-  assert.match(effective, /session_ids = \["20261026-a1b2"\]/);
-  assert.match(effective, /cidrs = \["203\.0\.113\.50\/32"\]/);
+  const eff = JSON.parse(effective) as { device_groups: Record<string, string[]>; rules: { id: string; selector: { device_groups: string[]; session?: { session_ids: string[] } }; destinations: { cidrs: string[] } }[] };
+  const rule = eff.rules.find((r) => r.id.startsWith("grant-"))!;
+  assert.deepEqual(rule.selector.session!.session_ids, ["20261026-a1b2"]);
+  assert.deepEqual(rule.destinations.cidrs, ["203.0.113.50/32"]);
+  assert.deepEqual(eff.device_groups[rule.selector.device_groups[0]!], ["omarchy"], "scoped to exactly the incident's device");
   assert.equal((await f.moatctl.validate(effective)).ok, true);
   // the same action again is stale (policy moved to revision 2)
   await assert.rejects(f.c.allowOnce(owner, { incident_id: inc.id, incident_revision: inc.revision, policy_revision: 1 }), /stale: policy/);
@@ -207,7 +210,7 @@ test("allow once for this session: bound to incident, revision, session and owne
 
 test("signer refuses grants that are not bounded, and grant inputs are validated", async () => {
   const now = new Date("2026-10-26T12:00:00Z");
-  const base = { id: "g", action: "allow", layer: "override", expires_at: "2026-10-26T13:00:00Z", selector: { session: { session_ids: ["s1"] } }, destinations: { cidrs: ["203.0.113.5/32"] }, provenance: { kind: "owner_action", audit_ref: "audit:1" } };
+  const base = { id: "g", action: "allow", layer: "override", expires_at: "2026-10-26T13:00:00Z", selector: { session: { session_ids: ["s1"] } }, destinations: { cidrs: ["203.0.113.5/32"] }, ports: [443], provenance: { kind: "owner_action", audit_ref: "audit:1" } };
   assert.equal(Signer.boundedGrant(base, now), null);
   assert.match(String(Signer.boundedGrant({ ...base, destinations: { cidrs: ["203.0.113.0/24"] } }, now)), /single address/);
   assert.match(String(Signer.boundedGrant({ ...base, expires_at: "2026-10-28T12:00:00Z" }, now)), /within 24h/);
@@ -215,12 +218,16 @@ test("signer refuses grants that are not bounded, and grant inputs are validated
   assert.match(String(Signer.boundedGrant({ ...base, destinations: { any: true } }, now)), /exactly one/);
   assert.match(String(Signer.boundedGrant({ ...base, layer: "explicit" }, now)), /override/);
   assert.match(String(Signer.boundedGrant({ ...base, selector: { session: { any_protected: true } } }, now)), /every protected session/);
+  assert.match(String(Signer.boundedGrant({ ...base, ports: [] }, now)), /exactly one port/);
+  assert.match(String(Signer.boundedGrant({ ...base, selector: { session: { session_ids: ["s1", "s2"] } } }, now)), /exactly one session/);
+  assert.deepEqual(Signer.grantDevice(base as never, { rules: [] }), { error: "not scoped to exactly one device (reserved moat-grant-* group)" });
+  assert.deepEqual(Signer.grantDevice({ ...base, selector: { device_groups: ["moat-grant-g"], session: { session_ids: ["s1"] } } } as never, { rules: [], device_groups: { "moat-grant-g": ["a", "b"] } }), { error: "device group moat-grant-g must have exactly one member" });
   const f = fixture();
   await bootstrap(f);
   const owner = f.c.authenticate(f.ownerToken)!;
-  await assert.rejects(f.c.createGrant(owner, { session_id: "s1", destination: "10.0.0.0/8", port: 443 }), /one IP address or one hostname/);
-  await assert.rejects(f.c.createGrant(owner, { destination: "203.0.113.5", port: 443 }), /scoped to a session or an application/);
-  await assert.rejects(f.c.createGrant(owner, { session_id: "s1", destination: "203.0.113.5", port: 0 }), /port/);
+  await assert.rejects(f.c.createGrant(owner, { session_id: "s1", destination: "10.0.0.0/8", port: 443 }), /operation_id/);
+  await assert.rejects(f.c.createGrant(owner, { device_id: "nope", session_id: "s1", destination: "203.0.113.5", port: 443, operation_id: "op-12345678" }), /one enrolled device/);
+  await assert.rejects(f.c.createGrant(owner, { session_id: "s1", destination: "203.0.113.5", port: 0, operation_id: "op-22345678", process_instance: "x/b/1@2" }), /process-scoped grants are unavailable/);
 });
 
 test("harness launch API: profiles from policy and capabilities; self-reports can only assert intent; close is a typed action", async () => {

@@ -15,11 +15,11 @@ export const HOME = readFileSync(join(ROOT, "conformance/policies/home.toml"), "
 
 export interface Fixture { c: Controller; signer: Signer; signerKey: KeyPair; owner: KeyPair; ownerToken: string; moatctl: Moatctl; clock: { t: number } }
 
-export function fixture(start = "2026-10-26T12:00:00Z"): Fixture {
+export function fixture(start = "2026-10-26T12:00:00Z", opts: { controllerAttestedGrants?: boolean } = {}): Fixture {
   const moatctl = new Moatctl(MOATCTL);
   const signerKey = generateKeyPair();
   const owner = generateKeyPair();
-  const signer = new Signer({ seedHex: signerKey.seedHex, ownerPublicKeysHex: [owner.publicHex], moatctl });
+  const signer = new Signer({ seedHex: signerKey.seedHex, ownerPublicKeysHex: [owner.publicHex], moatctl, controllerAttestedGrants: opts.controllerAttestedGrants ?? true });
   const clock = { t: Date.parse(start) };
   const c = new Controller({ dataDir: ":memory:", signer, moatctl, now: () => new Date(clock.t) });
   const ownerToken = c.createToken("robert", "owner").token;

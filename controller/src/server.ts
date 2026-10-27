@@ -48,7 +48,14 @@ r("GET", "/v1/r/:ref", ({ c, p, params }) => {
   if (!iid) throw new HttpError(404, "unknown reference");
   return c.incident(iid);
 });
+r("POST", "/v1/actions/allow-once/plan", ({ c, p, json }) => c.planAllowOnce(c.require(p, "owner"), json));
 r("POST", "/v1/actions/allow-once", ({ c, p, json }) => c.allowOnce(c.require(p, "owner"), json));
+r("POST", "/v1/grants/plan", ({ c, p, json }) => c.planGrant(c.require(p, "owner"), json));
+r("POST", "/v1/grants/commit", ({ c, p, json }) => c.commitGrant(c.require(p, "owner"), json));
+r("GET", "/v1/issuers", ({ c, p }) => (c.require(p, "owner", "viewer"), c.issuers()));
+r("POST", "/v1/issuers", ({ c, p, json }) => c.registerIssuer(c.require(p, "owner"), json));
+r("POST", "/v1/issuers/:id/revoke", ({ c, p, params }) => c.revokeIssuer(c.require(p, "owner"), params[0]!));
+r("GET", "/v1/publications", ({ c, p }) => (c.require(p, "owner", "viewer"), c.publications()));
 r("GET", "/v1/flows", ({ c, p, query }) => (c.require(p, "owner", "viewer"), c.flows.recent({ deviceId: query.get("device") ?? undefined, verdict: query.get("verdict") ?? undefined, limit: Number(query.get("limit") ?? 100) })));
 r("GET", "/v1/rollups", ({ c, p, query }) => (c.require(p, "owner", "viewer"), c.flows.rollups({ sinceHour: query.get("since") ?? new Date(Date.now() - 86400_000).toISOString(), deviceId: query.get("device") ?? undefined })));
 r("GET", "/v1/policy/revisions", ({ c, p }) => (c.require(p, "owner", "viewer"), c.revisions()));
@@ -57,7 +64,7 @@ r("GET", "/v1/policy/proposals/:id", ({ c, p, params }) => (c.require(p, "owner"
 r("POST", "/v1/policy/proposals/:id/approve", ({ c, p, params, json }) => c.approve(c.require(p, "owner"), params[0]!, (json.owner_authorization as never) ?? null));
 r("POST", "/v1/policy/rollback", ({ c, p, json }) => c.rollback(c.require(p, "owner"), Number(json.to_revision), String(json.message ?? "")));
 r("GET", "/v1/grants", ({ c, p }) => (c.require(p, "owner", "viewer"), c.grants()));
-r("POST", "/v1/grants", ({ c, p, json }) => c.createGrant(c.require(p, "owner"), json));
+r("POST", "/v1/grants", ({ c, p, json }) => c.createGrant(c.require(p, "owner"), json as never));
 r("GET", "/v1/grants/:id", ({ c, p, params }) => (c.require(p, "owner", "viewer"), c.grantStatus(params[0]!)));
 r("POST", "/v1/grants/:id/revoke", ({ c, p, params }) => c.revokeGrant(c.require(p, "owner"), params[0]!));
 r("GET", "/v1/sessions", ({ c, p, query }) => (c.require(p, "owner", "viewer", "launcher"), c.sessions(query.get("device") ?? undefined)));

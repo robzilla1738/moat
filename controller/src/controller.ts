@@ -6,11 +6,11 @@
  */
 import { isIP } from "node:net";
 import { audit, CONTROL_MIGRATIONS, HttpError, openDb, tx, type DB } from "./db.ts";
-import { generateKeyPair, id, keyIdOf, keyPairFromSeed, publicFromHex, requestString, responseString, sha256hex, signB64, token, verifyB64, type KeyPair } from "./crypto.ts";
+import { canonicalJson, generateKeyPair, id, keyIdOf, keyPairFromSeed, publicFromHex, requestString, responseString, sha256hex, signB64, token, verifyB64, type KeyPair } from "./crypto.ts";
 import { FlowStore, type FlowRecord } from "./flows.ts";
 import { Notifier, type FetchLike, type Urgency } from "./notify.ts";
 import type { Moatctl } from "./moatctl.ts";
-import type { OwnerAuthorization, SignResult } from "./signer.ts";
+import { GRANT_GROUP_PREFIX, planDigest, type Delegation, type GrantApproval, type GrantPlan, type OwnerAuthorization, type SignResult } from "./signer.ts";
 
 export type Role = "owner" | "viewer" | "launcher" | "agent";
 export interface Principal { id: string; name: string; role: Role }
@@ -20,7 +20,9 @@ export interface Proposal { id: string; message: string; author: string; status:
 export interface SignerLike {
   keyId: string;
   publicHex: string;
-  sign(req: { subject: string; source: string; revision: number; rollbackOf?: number | null; platforms: ("linux" | "macos" | "dns")[]; ownerAuthorization?: OwnerAuthorization | null; ownerSessionAttested?: boolean; issuedAt: Date }): Promise<SignResult>;
+  sign(req: { publicationId?: string; subject: string; source: string; revision: number; rollbackOf?: number | null; platforms: ("linux" | "macos" | "dns")[]; ownerAuthorization?: OwnerAuthorization | null; ownerSessionAttested?: boolean; grantApprovals?: GrantApproval[]; issuedAt: Date }): Promise<SignResult>;
+  /** Lost-reply recovery: the result the signer journaled for a publication id, or null if it never signed it. */
+  publication?(id: string): Promise<SignResult | null>;
 }
 
 export interface ControllerOptions {
@@ -36,6 +38,8 @@ export interface ControllerOptions {
 export const DEVICE_ACTIONS = ["close_session"] as const;
 export const ALLOW_ONCE_DEFAULT_SECONDS = 3600;
 export const ALLOW_ONCE_MAX_SECONDS = 8 * 3600;
+/** A grant plan must be approved within this window; the approval then fixes its deadline (retries never extend it). */
+export const PLAN_VALID_MS = 5 * 60_000;
 const CLOCK_SKEW_MS = 5 * 60_000;
 /** A device that has not synced for this long is stale: its last report no longer supports a coverage claim. */
 export const STALE_AFTER_MS = 10 * 60_000;
@@ -390,7 +394,7 @@ export class Controller {
   }
 
   private activeGrants() {
-    return this.db.prepare("SELECT * FROM grants WHERE revoked_at IS NULL AND expires_at > ? ORDER BY created_at").all(this.iso()) as Record<string, unknown>[];
+    return this.db.prepare("SELECT * FROM grants WHERE revoked_at IS NULL AND expires_at > ? AND committed = 1 ORDER BY created_at").all(this.iso()) as Record<string, unknown>[];
   }
 
   private platformsNeeded(): ("linux" | "macos" | "dns")[] {
@@ -400,23 +404,111 @@ export class Controller {
     return [...set];
   }
 
-  /** Build source + grant overlay, have the signer authorize and sign it, store the revision. */
-  private async publish(actor: Principal, base: string, subject: string, opts: { proposalId?: string; rollbackOf?: number | null; ownerAuthorization?: OwnerAuthorization | null; ownerSessionAttested?: boolean }) {
-    const grants = this.activeGrants();
-    const effective = base + grants.map(grantToml).join("");
-    const revision = (this.currentRevision()?.revision ?? 0) + 1;
+  /**
+   * The effective policy: the reviewed base plus each live grant as an exact override rule. Every grant is scoped to
+   * one device through a reserved one-member device group, and to one session/task or one app executable. JSON, so
+   * the overlay never depends on where TOML tables happen to sit in the base.
+   */
+  async effectiveSource(base: string, grants: Record<string, unknown>[]): Promise<string> {
+    if (!grants.length) return base;
     const norm = await this.moatctl.run(["normalize", "@p.toml"], { "p.toml": base });
-    const profiles = norm.code === 0 ? ((JSON.parse(norm.stdout) as { profiles: { id: string }[] }).profiles ?? []).map((p) => p.id) : [];
-    const res = await this.signer.sign({ subject, source: effective, revision, rollbackOf: opts.rollbackOf ?? null, platforms: this.platformsNeeded(), ownerAuthorization: opts.ownerAuthorization ?? null, ownerSessionAttested: opts.ownerSessionAttested ?? false, issuedAt: this.now() });
+    if (norm.code !== 0) throw new HttpError(422, `base policy invalid: ${(norm.stderr || norm.stdout).trim()}`);
+    const p = JSON.parse(norm.stdout) as { device_groups?: Record<string, string[]>; rules: unknown[] };
+    p.device_groups ??= {};
+    for (const g of grants) {
+      const group = `${GRANT_GROUP_PREFIX}${String(g.id)}`;
+      p.device_groups[group] = [String(g.device_id)];
+      p.rules.push(grantRule(g, group));
+    }
+    return JSON.stringify(p, null, 1);
+  }
+
+  /** Serialized publication: one signer request at a time, in revision order. */
+  private publishChain: Promise<unknown> = Promise.resolve();
+  private serialized<T>(f: () => Promise<T>): Promise<T> {
+    const run = this.publishChain.then(f, f);
+    this.publishChain = run.catch(() => undefined);
+    return run;
+  }
+
+  /**
+   * Build base + grant overlay, journal the publication, have the signer authorize and sign it, store the revision.
+   * A lost signer reply leaves the journal row "uncertain"; recoverPublications() asks the signer for that
+   * publication id and commits the same revision, so a retry never produces a conflicting one.
+   */
+  private publish(actor: Principal, base: string, subject: string, opts: { proposalId?: string; rollbackOf?: number | null; ownerAuthorization?: OwnerAuthorization | null; ownerSessionAttested?: boolean; grantApprovals?: GrantApproval[]; includeGrant?: string }) {
+    return this.serialized(async () => {
+      await this.recoverPublications();
+      const grants = this.activeGrants();
+      if (opts.includeGrant) {
+        const g = this.db.prepare("SELECT * FROM grants WHERE id = ?").get(opts.includeGrant) as Record<string, unknown> | undefined;
+        if (g && !grants.some((x) => x.id === g.id)) grants.push(g);
+      }
+      const effective = await this.effectiveSource(base, grants);
+      const revision = (this.currentRevision()?.revision ?? 0) + 1;
+      const norm = await this.moatctl.run(["normalize", "@p.toml"], { "p.toml": base });
+      const profiles = norm.code === 0 ? ((JSON.parse(norm.stdout) as { profiles: { id: string }[] }).profiles ?? []).map((p) => p.id) : [];
+      const pubId = id("pub");
+      const platforms = this.platformsNeeded();
+      const intent = { revision, subject, base, effective, grants: grants.map((g) => String(g.id)), profiles, proposal_id: opts.proposalId ?? null, rollback_of: opts.rollbackOf ?? null, actor: actor.id, owner_key_id: opts.ownerAuthorization?.key_id ?? null, platforms };
+      this.db.prepare("INSERT INTO publications (id, revision, subject, status, intent, created_at) VALUES (?, ?, ?, 'signing', ?, ?)").run(pubId, revision, subject, JSON.stringify(intent), this.iso());
+      let res: SignResult;
+      try {
+        res = await this.signer.sign({ publicationId: pubId, subject, source: effective, revision, rollbackOf: opts.rollbackOf ?? null, platforms, ownerAuthorization: opts.ownerAuthorization ?? null, ownerSessionAttested: opts.ownerSessionAttested ?? false, grantApprovals: opts.grantApprovals, issuedAt: this.now() });
+      } catch (e) {
+        const st = (e as { status?: number }).status;
+        // a refusal is final (nothing was signed); anything else may have been signed: keep it for recovery
+        this.db.prepare("UPDATE publications SET status = ?, error = ?, finished_at = ? WHERE id = ?").run(st && st < 500 ? "refused" : "uncertain", String((e as Error).message).slice(0, 500), this.iso(), pubId);
+        throw e;
+      }
+      this.commitPublication(pubId, intent, res);
+      return { revision, publication_id: pubId, authorized_by: res.authorizedBy, broadening: res.broadening, platforms: res.snapshots.map((s) => ({ platform: s.platform, report: s.report })) };
+    });
+  }
+
+  private commitPublication(pubId: string, intent: { revision: number; subject: string; base: string; effective: string; grants: string[]; profiles: string[]; proposal_id: string | null; rollback_of: number | null; actor: string; owner_key_id: string | null }, res: SignResult) {
     tx(this.db, () => {
       this.db.prepare("INSERT INTO policy_revisions (revision, proposal_id, source, source_digest, effective_source, rollback_of, grants, profiles, approved_by, owner_key_id, created_at, authorized_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-        .run(revision, opts.proposalId ?? null, base, sha256hex(base), effective, opts.rollbackOf ?? null, JSON.stringify(grants.map((g) => g.id)), JSON.stringify(profiles), actor.id, res.authorizedBy === "owner_key" ? opts.ownerAuthorization?.key_id ?? null : null, this.iso(), res.authorizedBy);
-      for (const s of res.snapshots) this.db.prepare("INSERT INTO snapshots (revision, platform, signed, report) VALUES (?, ?, ?, ?)").run(revision, s.platform, JSON.stringify(s.signed), JSON.stringify(s.report));
-      for (const d of this.db.prepare("SELECT id FROM devices WHERE revoked_at IS NULL").all() as { id: string }[]) this.recordRevisionState(d.id, revision, "approved", null);
-      for (const g of grants) this.db.prepare("UPDATE grants SET revision = COALESCE(revision, ?) WHERE id = ?").run(revision, String(g.id));
+        .run(intent.revision, intent.proposal_id, intent.base, sha256hex(intent.base), intent.effective, intent.rollback_of, JSON.stringify(intent.grants), JSON.stringify(intent.profiles), intent.actor, res.authorizedBy === "owner_key" ? intent.owner_key_id : null, this.iso(), res.authorizedBy);
+      for (const s of res.snapshots) this.db.prepare("INSERT INTO snapshots (revision, platform, signed, report) VALUES (?, ?, ?, ?)").run(intent.revision, s.platform, JSON.stringify(s.signed), JSON.stringify(s.report));
+      for (const d of this.db.prepare("SELECT id FROM devices WHERE revoked_at IS NULL").all() as { id: string }[]) this.recordRevisionState(d.id, intent.revision, "approved", null);
+      for (const g of intent.grants) this.db.prepare("UPDATE grants SET revision = COALESCE(revision, ?), committed = 1, authorized_by = COALESCE(authorized_by, ?) WHERE id = ?").run(intent.revision, res.authorizedBy, g);
+      if (intent.proposal_id) this.db.prepare("UPDATE policy_proposals SET status = 'approved', decided_at = ?, decided_by = ? WHERE id = ? AND status = 'open'").run(this.iso(), intent.actor, intent.proposal_id);
+      this.db.prepare("UPDATE publications SET status = 'committed', finished_at = ?, error = NULL WHERE id = ?").run(this.iso(), pubId);
     });
-    audit(this.db, this.now(), actor.id, "policy.publish", String(revision), { subject, authorized_by: res.authorizedBy, broadening: res.broadening, grants: grants.length });
-    return { revision, authorized_by: res.authorizedBy, broadening: res.broadening, platforms: res.snapshots.map((s) => ({ platform: s.platform, report: s.report })) };
+    audit(this.db, this.now(), intent.actor, "policy.publish", String(intent.revision), { subject: intent.subject, publication: pubId, authorized_by: res.authorizedBy, issuers: res.issuers ?? [], broadening: res.broadening, grants: intent.grants.length });
+  }
+
+  /**
+   * Reconcile journaled publications whose outcome is unknown (crash or lost reply): commit what the signer signed,
+   * abandon what it never signed. Runs at startup and before every publication.
+   */
+  async recoverPublications() {
+    const rows = this.db.prepare("SELECT id, intent FROM publications WHERE status IN ('signing', 'uncertain') ORDER BY rowid").all() as { id: string; intent: string }[];
+    const out: { id: string; outcome: string }[] = [];
+    for (const r of rows) {
+      if (!this.signer.publication) {
+        out.push({ id: r.id, outcome: "unknown (signer has no journal API)" });
+        continue;
+      }
+      const res = await this.signer.publication(r.id);
+      const intent = JSON.parse(r.intent) as Parameters<Controller["commitPublication"]>[1];
+      if (res && !this.db.prepare("SELECT 1 FROM policy_revisions WHERE revision = ?").get(intent.revision)) {
+        this.commitPublication(r.id, intent, res);
+        out.push({ id: r.id, outcome: `recovered revision ${intent.revision}` });
+      } else if (res) {
+        this.db.prepare("UPDATE publications SET status = 'conflict', finished_at = ? WHERE id = ?").run(this.iso(), r.id);
+        out.push({ id: r.id, outcome: "conflict: revision already stored" });
+      } else {
+        this.db.prepare("UPDATE publications SET status = 'abandoned', finished_at = ? WHERE id = ?").run(this.iso(), r.id);
+        out.push({ id: r.id, outcome: "abandoned: never signed" });
+      }
+    }
+    return out;
+  }
+
+  publications() {
+    return this.db.prepare("SELECT id, revision, subject, status, error, created_at, finished_at FROM publications ORDER BY rowid DESC LIMIT 50").all();
   }
 
   async approve(actor: Principal, pid: string, ownerAuthorization?: OwnerAuthorization | null) {
@@ -432,7 +524,6 @@ export class Controller {
       const err = e as { status?: number; message?: string };
       throw new HttpError(err.status ?? 500, err.message ?? String(e));
     }
-    this.db.prepare("UPDATE policy_proposals SET status = 'approved', decided_at = ?, decided_by = ? WHERE id = ?").run(this.iso(), actor.id, pid);
     return out;
   }
 
@@ -456,8 +547,25 @@ export class Controller {
   }
 
   // ------------------------------------------------------------------ temporary grants
-  async createGrant(actor: Principal, b: { device_id?: unknown; session_id?: unknown; profile?: unknown; process_instance?: unknown; app_executable?: unknown; destination?: unknown; transport?: unknown; port?: unknown; ttl_seconds?: unknown; reason?: unknown; incident_id?: unknown; kind?: string }) {
+  /**
+   * Turn a grant request into an exact plan (a `moat.grant.v1` record): one device, one session/task or one app,
+   * one destination, one transport and port, and a deadline fixed now. The same idempotency key returns the same
+   * plan (or the grant it became), so a retry never mints a fresh lease.
+   */
+  planGrant(actor: Principal, b: { kind?: string; device_id?: unknown; session_id?: unknown; boot_id?: unknown; process_instance?: unknown; app_executable?: unknown; destination?: unknown; transport?: unknown; port?: unknown; ttl_seconds?: unknown; reason?: unknown; incident?: { id: string; revision: number } | null; operation_id?: unknown }) {
     this.require(actor, "owner");
+    const cur = this.currentRevision();
+    if (!cur) throw new HttpError(409, "no policy revision exists yet");
+    const opKey = typeof b.operation_id === "string" && /^[A-Za-z0-9:._-]{8,120}$/.test(b.operation_id) ? b.operation_id : b.incident ? `incident:${b.incident.id}:r${b.incident.revision}:p${cur.revision}:${b.kind ?? "temporary"}` : null;
+    if (!opKey) throw new HttpError(400, "operation_id (8-120 chars of [A-Za-z0-9:._-]) is required for a grant not tied to an incident");
+    const existing = this.db.prepare("SELECT * FROM grant_plans WHERE idempotency_key = ?").get(opKey) as { id: string; plan: string; digest: string; expires_at: string; grant_id: string | null; created_by: string } | undefined;
+    if (existing) {
+      if (existing.created_by !== actor.id) throw new HttpError(409, "this operation id belongs to another principal");
+      return this.planView(existing);
+    }
+    if (b.process_instance !== undefined && b.process_instance !== null) throw new HttpError(422, "process-scoped grants are unavailable: no endpoint enforces a process-generation selector yet");
+    const device = typeof b.device_id === "string" ? b.device_id : "";
+    if (!this.db.prepare("SELECT 1 FROM devices WHERE id = ? AND revoked_at IS NULL").get(device)) throw new HttpError(400, "a grant must name one enrolled device (device_id)");
     const dest = String(b.destination ?? "");
     const isAddr = isIP(dest) !== 0;
     if (!isAddr && !/^(?=.{1,253}$)([a-z0-9-]{1,63}\.)+[a-z]{2,63}$/.test(dest)) throw new HttpError(400, "destination must be one IP address or one hostname");
@@ -468,27 +576,101 @@ export class Controller {
     const session = typeof b.session_id === "string" && b.session_id ? b.session_id : null;
     const exe = typeof b.app_executable === "string" && b.app_executable.startsWith("/") ? b.app_executable : null;
     if (!session && !exe) throw new HttpError(400, "a grant must be scoped to a session or an application");
+    if (session && exe) throw new HttpError(400, "a grant is scoped to a session or an application, not both");
     if (session && !/^[a-z0-9-]{1,64}$/.test(session)) throw new HttpError(400, "invalid session id");
-    const gid = id("grant").replace("_", "-");
-    const expires = new Date(this.now().getTime() + ttl * 1000).toISOString();
-    const auditId = audit(this.db, this.now(), actor.id, "grant.create", gid, { session, exe, dest, transport, port, ttl, incident: b.incident_id ?? null, reason: b.reason ?? null });
-    this.db.prepare("INSERT INTO grants (id, kind, device_id, session_id, profile, process_instance, destination, transport, port, expires_at, reason, incident_id, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-      .run(gid, b.kind ?? "temporary", typeof b.device_id === "string" ? b.device_id : null, session, typeof b.profile === "string" ? b.profile : null, typeof b.process_instance === "string" ? b.process_instance : exe, dest, transport, port, expires, `${String(b.reason ?? "").slice(0, 200)}|audit:${auditId}`, typeof b.incident_id === "string" ? b.incident_id : null, actor.id, this.iso());
+    const now = this.now();
+    const gid = `grant-${token(9).toLowerCase().replace(/[^a-z0-9]/g, "x")}`;
+    const plan: GrantPlan = {
+      schema: "moat.grant.v1",
+      grant_id: gid,
+      idempotency_key: opKey,
+      kind: b.kind === "allow_once" ? "allow_once" : "temporary",
+      scope: session ? { kind: "task", device_id: device, boot_id: typeof b.boot_id === "string" ? b.boot_id : null, task_id: session } : { kind: "app_on_device", device_id: device, executable: { path: exe! } },
+      destination: isAddr ? { kind: "address", address: dest } : { kind: "hostname", hostname: dest },
+      transport,
+      port,
+      issued_at: now.toISOString(),
+      not_before: now.toISOString(),
+      admission_until: new Date(now.getTime() + ttl * 1000).toISOString(),
+      stream_policy: "admission_only",
+      base_policy_digest: `sha256:${sha256hex(cur.source)}`,
+      incident: b.incident ?? null,
+      reason: String(b.reason ?? "").slice(0, 200),
+    };
+    const pid = id("plan");
+    const digest = planDigest(plan);
+    this.db.prepare("INSERT INTO grant_plans (id, idempotency_key, plan, digest, policy_revision, created_by, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(pid, opKey, canonicalJson(plan), digest, cur.revision, actor.id, this.iso(), new Date(now.getTime() + PLAN_VALID_MS).toISOString());
+    audit(this.db, now, actor.id, "grant.plan", pid, { grant_id: gid, digest });
+    return this.planView(this.db.prepare("SELECT * FROM grant_plans WHERE id = ?").get(pid) as never);
+  }
+
+  private planView(r: { id: string; plan: string; digest: string; expires_at: string; grant_id: string | null }) {
+    const plan = JSON.parse(r.plan) as GrantPlan;
+    return { plan_id: r.id, plan, digest: r.digest, approval_expires_at: r.expires_at, grant_id: r.grant_id, signing_string: `moat-grant-approval-v1\n${r.digest}\n`, committed: !!r.grant_id };
+  }
+
+  /**
+   * Commit an approved plan: re-check that nothing it was based on has changed, store the grant with the plan's
+   * original deadline and publish. Committing the same plan again returns the original grant.
+   */
+  async commitGrant(actor: Principal, b: { plan_id?: unknown; issuer_key_id?: unknown; issuer_signature?: unknown }) {
+    this.require(actor, "owner");
+    const row = this.db.prepare("SELECT * FROM grant_plans WHERE id = ?").get(String(b.plan_id ?? "")) as { id: string; plan: string; digest: string; policy_revision: number; created_by: string; expires_at: string; grant_id: string | null } | undefined;
+    if (!row) throw new HttpError(404, "no such grant plan");
+    if (row.created_by !== actor.id) throw new HttpError(403, "this plan was prepared for another principal");
+    if (row.grant_id) return { ...this.grantResult(row.grant_id), idempotent_replay: true };
+    if (row.expires_at <= this.iso()) throw new HttpError(409, "stale: this plan's approval window passed; review it again");
+    const plan = JSON.parse(row.plan) as GrantPlan;
     const cur = this.currentRevision();
-    if (!cur) throw new HttpError(409, "no policy revision exists yet");
+    if (!cur || cur.revision !== row.policy_revision) throw new HttpError(409, `stale: policy is now revision ${cur?.revision}; review again`);
+    if (plan.incident) {
+      const inc = this.db.prepare("SELECT revision FROM incidents WHERE id = ?").get(plan.incident.id) as { revision: number } | undefined;
+      if (!inc || inc.revision !== plan.incident.revision) throw new HttpError(409, "stale: the incident changed since this action was offered; review it again");
+    }
+    if (plan.scope.kind === "task") {
+      const sess = this.db.prepare("SELECT state FROM sessions WHERE device_id = ? AND id = ?").get(plan.scope.device_id, plan.scope.task_id) as { state: string } | undefined;
+      if (!sess || sess.state !== "running") throw new HttpError(409, "stale: that session is no longer running");
+    }
+    let approvals: GrantApproval[] | undefined;
+    let issuer: string | null = null;
+    if (b.issuer_signature !== undefined) {
+      const del = this.db.prepare("SELECT delegation FROM issuers WHERE key_id = ? AND revoked_at IS NULL").get(String(b.issuer_key_id ?? "")) as { delegation: string } | undefined;
+      if (!del) throw new HttpError(403, "unknown or revoked issuer");
+      approvals = [{ plan, delegation: JSON.parse(del.delegation) as Delegation, issuer_signature: String(b.issuer_signature) }];
+      issuer = String(b.issuer_key_id);
+    }
+    const g = plan;
+    const target = g.scope;
+    const auditId = audit(this.db, this.now(), actor.id, "grant.create", g.grant_id, { plan: row.id, digest: row.digest, issuer });
+    this.db.prepare("INSERT INTO grants (id, kind, device_id, session_id, profile, process_instance, destination, transport, port, expires_at, reason, incident_id, created_by, created_at, boot_id, plan_id, plan_digest, issuer_key_id, committed) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)")
+      .run(g.grant_id, g.kind, target.device_id, target.kind === "task" ? target.task_id : null, target.kind === "app_on_device" ? target.executable.path : null, g.destination.kind === "address" ? g.destination.address : g.destination.hostname, g.transport, g.port, g.admission_until, `${g.reason}|audit:${auditId}`, g.incident?.id ?? null, actor.id, this.iso(), target.kind === "task" ? target.boot_id ?? null : null, row.id, row.digest, issuer);
     try {
-      const pub = await this.publish(actor, cur.source, gid, { ownerSessionAttested: actor.role === "owner" });
-      return { grant_id: gid, expires_at: expires, ...pub, delivery: "queued for devices; see revision states for received/applied" };
+      await this.publish(actor, cur.source, g.grant_id, { ownerSessionAttested: !approvals && actor.role === "owner", grantApprovals: approvals, includeGrant: g.grant_id });
     } catch (e) {
-      this.db.prepare("UPDATE grants SET revoked_at = ? WHERE id = ?").run(this.iso(), gid);
+      // nothing was signed for this grant (or the outcome is journaled for recovery): it never becomes active by retry
+      const pub = this.db.prepare("SELECT status FROM publications WHERE subject = ? ORDER BY rowid DESC LIMIT 1").get(g.grant_id) as { status: string } | undefined;
+      if (pub?.status !== "uncertain") this.db.prepare("DELETE FROM grants WHERE id = ? AND committed = 0").run(g.grant_id);
       const err = e as { status?: number; message?: string };
       throw new HttpError(err.status ?? 500, err.message ?? String(e));
     }
+    this.db.prepare("UPDATE grant_plans SET grant_id = ? WHERE id = ?").run(g.grant_id, row.id);
+    return this.grantResult(g.grant_id);
+  }
+
+  private grantResult(gid: string) {
+    const g = this.db.prepare("SELECT id, revision, expires_at, authorized_by, issuer_key_id FROM grants WHERE id = ?").get(gid) as { id: string; revision: number; expires_at: string; authorized_by: string; issuer_key_id: string | null };
+    return { grant_id: g.id, revision: g.revision, expires_at: g.expires_at, authorized_by: g.authorized_by, issuer_key_id: g.issuer_key_id, delivery: "queued for devices; see GET /v1/grants/:id for received/applied" };
+  }
+
+  /** One-call grant through the controller-attested path (only if the signer allows it). Prefer plan + issuer signature. */
+  async createGrant(actor: Principal, b: Parameters<Controller["planGrant"]>[1]) {
+    const p = this.planGrant(actor, b);
+    return this.commitGrant(actor, { plan_id: p.plan_id });
   }
 
   async revokeGrant(actor: Principal, gid: string) {
     this.require(actor, "owner");
-    const r = this.db.prepare("UPDATE grants SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL").run(this.iso(), gid);
+    const r = this.db.prepare("UPDATE grants SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL AND committed = 1").run(this.iso(), gid);
     if (!r.changes) throw new HttpError(404, "no such active grant");
     audit(this.db, this.now(), actor.id, "grant.revoke", gid, null);
     const cur = this.currentRevision()!;
@@ -496,7 +678,38 @@ export class Controller {
   }
 
   grants(): (Record<string, unknown> & { id: string; state: string })[] {
-    return (this.db.prepare("SELECT * FROM grants ORDER BY created_at DESC LIMIT 100").all() as (Record<string, unknown> & { id: string })[]).map((g) => ({ ...g, state: g.revoked_at ? "revoked" : String(g.expires_at) <= this.iso() ? "expired" : "active" }));
+    return (this.db.prepare("SELECT * FROM grants WHERE committed = 1 ORDER BY created_at DESC LIMIT 100").all() as (Record<string, unknown> & { id: string })[]).map((g) => ({ ...g, state: g.revoked_at ? "revoked" : String(g.expires_at) <= this.iso() ? "expired" : "active" }));
+  }
+
+  // ------------------------------------------------------------------ delegated issuers (phone approvals)
+  /** Register an owner-signed delegation. The signer verifies it on every use; this only records it. */
+  registerIssuer(actor: Principal, b: { delegation?: unknown }) {
+    this.require(actor, "owner");
+    const d = b.delegation as Delegation | undefined;
+    if (!d || d.schema !== "moat.delegation.v1" || typeof d.issuer_public_hex !== "string" || typeof d.signature !== "string" || !Array.isArray(d.scope?.devices) || !Array.isArray(d.scope?.kinds)) throw new HttpError(400, "delegation must be a moat.delegation.v1 object from `moat-controller delegate-issuer`");
+    try {
+      publicFromHex(d.issuer_public_hex);
+    } catch {
+      throw new HttpError(400, "issuer_public_hex is not an Ed25519 public key");
+    }
+    if (keyIdOf(d.issuer_public_hex) !== d.issuer_key_id) throw new HttpError(400, "issuer key id does not match its public key");
+    if (Date.parse(d.not_after) <= this.now().getTime()) throw new HttpError(400, "delegation already expired");
+    this.db.prepare("INSERT OR REPLACE INTO issuers (key_id, label, delegation, registered_by, created_at, revoked_at) VALUES (?, ?, ?, ?, ?, NULL)").run(d.issuer_key_id, String(d.label ?? "").slice(0, 80), JSON.stringify(d), actor.id, this.iso());
+    audit(this.db, this.now(), actor.id, "issuer.register", d.issuer_key_id, { scope: d.scope, not_after: d.not_after });
+    return { key_id: d.issuer_key_id, label: d.label, scope: d.scope, not_after: d.not_after };
+  }
+  issuers() {
+    return (this.db.prepare("SELECT key_id, label, delegation, created_at, revoked_at FROM issuers ORDER BY created_at DESC").all() as { key_id: string; label: string; delegation: string; created_at: string; revoked_at: string | null }[]).map((r) => {
+      const d = JSON.parse(r.delegation) as Delegation;
+      return { key_id: r.key_id, label: r.label, scope: d.scope, not_after: d.not_after, created_at: r.created_at, revoked_at: r.revoked_at };
+    });
+  }
+  revokeIssuer(actor: Principal, keyId: string) {
+    this.require(actor, "owner");
+    const r = this.db.prepare("UPDATE issuers SET revoked_at = ? WHERE key_id = ? AND revoked_at IS NULL").run(this.iso(), keyId);
+    if (!r.changes) throw new HttpError(404, "no such active issuer");
+    audit(this.db, this.now(), actor.id, "issuer.revoke", keyId, null);
+    return { revoked: keyId, note: "Registered delegations stop being offered by this controller now. The delegation itself stays valid at the signer until its not_after; rotate the owner key to cut it sooner." };
   }
 
   /**
@@ -550,19 +763,40 @@ export class Controller {
    * and process instance, and the authenticated owner. Rejected when stale (newer policy, ended session, a different
    * process instance than the one the notification described, or an incident that has changed since).
    */
-  async allowOnce(actor: Principal, b: { incident_id?: unknown; incident_revision?: unknown; policy_revision?: unknown; ttl_seconds?: unknown }) {
+  /** Validate an allow-once request against current evidence and return the exact plan to approve. */
+  planAllowOnce(actor: Principal, b: { incident_id?: unknown; incident_revision?: unknown; policy_revision?: unknown; ttl_seconds?: unknown; operation_id?: unknown }) {
     this.require(actor, "owner");
+    // a retried operation is answered with its original plan (or grant) before anything newer can make it "stale"
+    if (typeof b.operation_id === "string") {
+      const prior = this.db.prepare("SELECT * FROM grant_plans WHERE idempotency_key = ?").get(b.operation_id) as { id: string; plan: string; digest: string; expires_at: string; grant_id: string | null; created_by: string } | undefined;
+      if (prior) {
+        if (prior.created_by !== actor.id) throw new HttpError(409, "this operation id belongs to another principal");
+        return this.planView(prior);
+      }
+    }
     const inc = this.db.prepare("SELECT * FROM incidents WHERE id = ?").get(String(b.incident_id ?? "")) as unknown as IncidentRow | undefined;
     if (!inc) throw new HttpError(404, "no such incident");
     if (inc.kind !== "blocked_connection" || !inc.session_id) throw new HttpError(422, "allow once applies to a blocked connection from a verified protected session");
     if (Number(b.incident_revision) !== inc.revision) throw new HttpError(409, "stale: the incident changed since this action was offered; review it again");
     const cur = this.currentRevision();
     if (!cur || Number(b.policy_revision) !== cur.revision) throw new HttpError(409, `stale: policy is now revision ${cur?.revision}; review again`);
-    const sess = this.db.prepare("SELECT * FROM sessions WHERE device_id = ? AND id = ?").get(inc.device_id, inc.session_id) as { state: string; root_pid: number; root_start: number } | undefined;
+    const sess = this.db.prepare("SELECT * FROM sessions WHERE device_id = ? AND id = ?").get(inc.device_id, inc.session_id) as { state: string } | undefined;
     if (!sess || sess.state !== "running") throw new HttpError(409, "stale: that session is no longer running");
     if (!inc.port || inc.destination === "rule-scoped") throw new HttpError(422, "this platform did not record the destination; create a reviewed policy change instead");
-    const ip = inc.destination;
-    return this.createGrant(actor, { kind: "allow_once", device_id: inc.device_id, session_id: inc.session_id, process_instance: inc.process_instance, destination: ip, transport: inc.transport ?? "tcp", port: inc.port, ttl_seconds: b.ttl_seconds ?? ALLOW_ONCE_DEFAULT_SECONDS, reason: `allow once for incident ${inc.id}`, incident_id: inc.id });
+    const boot = inc.process_instance?.split("/")[1] || null;
+    return this.planGrant(actor, { kind: "allow_once", device_id: inc.device_id, session_id: inc.session_id, boot_id: boot, destination: inc.destination, transport: inc.transport ?? "tcp", port: inc.port, ttl_seconds: b.ttl_seconds ?? ALLOW_ONCE_DEFAULT_SECONDS, reason: `allow once for incident ${inc.id}`, incident: { id: inc.id, revision: inc.revision }, operation_id: b.operation_id });
+  }
+
+  /**
+   * "Allow once for this session", one call: plan + commit through the controller-attested path. The signer only
+   * honors that path when started with controller-attested grants; otherwise use plan + a delegated issuer signature.
+   */
+  async allowOnce(actor: Principal, b: { incident_id?: unknown; incident_revision?: unknown; policy_revision?: unknown; ttl_seconds?: unknown; operation_id?: unknown; plan_id?: unknown; issuer_key_id?: unknown; issuer_signature?: unknown }) {
+    this.require(actor, "owner");
+    if (b.plan_id !== undefined) return this.commitGrant(actor, b);
+    const p = this.planAllowOnce(actor, b);
+    if (p.grant_id) return { ...this.grantResult(p.grant_id), idempotent_replay: true };
+    return this.commitGrant(actor, { plan_id: p.plan_id });
   }
 
   // ------------------------------------------------------------------ Harness / Dispatch launch API
@@ -639,25 +873,24 @@ export class Controller {
   }
 }
 
-/** Render one grant as an override rule (owner_action provenance, audit ref, expiry). */
-export function grantToml(g: Record<string, unknown>): string {
+/** One grant as an exact override rule (owner_action provenance, audit ref, original expiry, one device). */
+export function grantRule(g: Record<string, unknown>, deviceGroup: string): Record<string, unknown> {
   const dest = String(g.destination);
-  const destToml = isIP(dest) ? `{ cidrs = [${JSON.stringify(dest + (isIP(dest) === 6 ? "/128" : "/32"))}] }` : `{ hosts = [${JSON.stringify(dest)}] }`;
-  const selector = g.session_id
-    ? `{ session = { ${g.profile ? `profiles = [${JSON.stringify(g.profile)}], ` : ""}session_ids = [${JSON.stringify(g.session_id)}] } }`
-    : `{ apps = [{ executable = ${JSON.stringify(g.process_instance)} }] }`;
+  const destinations = isIP(dest) ? { cidrs: [dest + (isIP(dest) === 6 ? "/128" : "/32")] } : { hosts: [dest] };
+  const selector = g.session_id ? { device_groups: [deviceGroup], session: { profiles: g.profile ? [String(g.profile)] : [], any_protected: false, session_ids: [String(g.session_id)] } } : { device_groups: [deviceGroup], apps: [{ executable: String(g.process_instance) }] };
   const auditRef = String(g.reason).split("|audit:")[1] ?? "unknown";
-  return `
-[[rules]]
-id = ${JSON.stringify(String(g.id))}
-description = ${JSON.stringify(`Temporary grant (${g.kind}) by ${g.created_by}`)}
-action = "allow"
-layer = "override"
-selector = ${selector}
-destinations = ${destToml}
-transport = ${JSON.stringify(g.transport)}
-ports = [${Number(g.port)}]
-expires_at = ${JSON.stringify(g.expires_at)}
-provenance = { kind = "owner_action", reference = ${JSON.stringify(`grant:${g.id}`)}, author = ${JSON.stringify(String(g.created_by))}, audit_ref = ${JSON.stringify(`audit:${auditRef}`)} }
-`;
+  return {
+    id: String(g.id),
+    description: `Temporary grant (${g.kind}) by ${g.created_by}`,
+    action: "allow",
+    layer: "override",
+    selector,
+    destinations,
+    transport: String(g.transport),
+    ports: [Number(g.port)],
+    expires_at: String(g.expires_at),
+    provenance: { kind: "owner_action", reference: `grant:${g.id}`, author: String(g.created_by), audit_ref: `audit:${auditRef}` },
+    // an allow left out on a platform that cannot enforce its selector is stricter, never weaker
+    on_unsupported: "skip_with_report",
+  };
 }

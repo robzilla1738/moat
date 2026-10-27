@@ -72,7 +72,7 @@ export function Home({ go }: { go: (to: string) => void }) {
                 <Ident value={latest.title} kind="text" />
               </div>
               <div className="muted small">
-                <Ident value={latest.author} /> · {ago(latest.createdAt)} · {latest.authorizedBy === "owner_key" ? "signed with an owner key" : latest.authorizedBy === "narrowing" ? "narrowing change" : latest.authorizedBy === "temporary_grant_overlay" ? "temporary grant" : "authorizer not recorded"}
+                <Ident value={latest.author} /> · {ago(latest.createdAt)} · {latest.authorizedBy === "owner_key" ? "signed with an owner key" : latest.authorizedBy === "narrowing" ? "narrowing change" : latest.authorizedBy === "temporary_grant_overlay" ? "temporary grant" : latest.authorizedBy === "delegated_issuer" ? "delegated approval" : "authorizer not recorded"}
               </div>
               <div className="rollout">
                 <div className="rollout-bar">

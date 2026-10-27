@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
 import { Controller } from "../src/controller.ts";
-import { generateKeyPair } from "../src/crypto.ts";
+import { delegationString, generateKeyPair, keyIdOf, signB64 } from "../src/crypto.ts";
 import { Moatctl } from "../src/moatctl.ts";
 import { Signer } from "../src/signer.ts";
 import { startServer } from "../src/server.ts";
@@ -24,6 +24,8 @@ export interface Harness {
   /** One device sync over HTTP, signed with the device key; returns the controller's (verified) answer. */
   sync(body: Record<string, unknown>): Promise<Record<string, unknown>>;
   owner(method: string, path: string, body?: unknown): Promise<{ status: number; json: Record<string, unknown> }>;
+  /** What `moat-controller delegate-issuer` prints, made with the harness's owner key (off the page, as in real use). */
+  delegate(issuerPublicHex: string, devices: string[], maxTtl?: number): string;
   stop(): Promise<void>;
 }
 
@@ -31,7 +33,8 @@ export async function startHarness(webDir: string): Promise<Harness> {
   const dir = mkdtempSync(join(tmpdir(), "moat-live-"));
   const moatctl = new Moatctl(MOATCTL);
   const owner = generateKeyPair();
-  const signer = new Signer({ seedHex: generateKeyPair().seedHex, ownerPublicKeysHex: [owner.publicHex], moatctl, statePath: join(dir, "signer.json") });
+  // production default: temporary grants need a delegated issuer's signature (no controller-attested path)
+  const signer = new Signer({ seedHex: generateKeyPair().seedHex, ownerPublicKeysHex: [owner.publicHex], moatctl, statePath: join(dir, "signer.json"), controllerAttestedGrants: false });
   const c = new Controller({ dataDir: join(dir, "data"), signer, moatctl, publicUrl: "https://moat.test" });
   const ownerToken = c.createToken("robert", "owner").token;
   const viewerToken = c.createToken("tv", "viewer").token;
@@ -61,6 +64,10 @@ export async function startHarness(webDir: string): Promise<Harness> {
       return r.json;
     },
     owner: ownerCall,
+    delegate(pub, devices, maxTtl = 3600) {
+      const body = { schema: "moat.delegation.v1", issuer_key_id: keyIdOf(pub), issuer_public_hex: pub, label: "phone", scope: { kinds: ["allow_once"], devices, max_ttl_seconds: maxTtl }, not_after: new Date(Date.now() + 86400_000).toISOString(), owner_key_id: owner.keyId };
+      return JSON.stringify({ ...body, signature: signB64(owner.privateKey, delegationString(body)) });
+    },
     stop: () => new Promise((r) => srv.close(() => r())),
   };
 }

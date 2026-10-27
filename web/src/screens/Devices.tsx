@@ -1,5 +1,6 @@
 import { SubNav, Badge, Card, CoverageBadge, DeviceIcon, Icon, SectionTitle, SupportBadge } from "../components/ui";
 import { useData, useFreshness } from "../data/store";
+import { ApprovalsCard } from "./Approvals";
 import { ago, compact, COVERAGE } from "../format";
 
 export function Devices({ go }: { go: (to: string) => void }) {
@@ -32,6 +33,7 @@ export function Devices({ go }: { go: (to: string) => void }) {
           </Card>
         ))}
       </div>
+      <ApprovalsCard />
     </div>
   );
 }
