@@ -106,9 +106,11 @@ pub fn hidden_paths(iso: &BrokerIsolation, uid: u32, env: &BTreeMap<String, Stri
 /// PID 1's mount namespace, when this process runs in a different one (a systemd service sandbox, a test's private
 /// mount namespace). `None` when they are the same or when /proc does not let us compare (then nothing changes).
 pub fn host_mount_namespace() -> std::io::Result<Option<OwnedFd>> {
-    let (Ok(me), Ok(init)) = (std::fs::read_link("/proc/self/ns/mnt"), std::fs::read_link("/proc/1/ns/mnt")) else {
-        return Ok(None);
-    };
+    let Ok(me) = std::fs::read_link("/proc/self/ns/mnt") else { return Ok(None) };
+    // Reading PID 1's namespace link is a ptrace-mode access check: under the systemd unit (reduced capability
+    // bounding set) it needs CAP_SYS_PTRACE. Failing to compare is an error, never a silent "same namespace".
+    let init = std::fs::read_link("/proc/1/ns/mnt")
+        .map_err(|e| std::io::Error::new(e.kind(), format!("cannot compare with the host mount namespace (/proc/1/ns/mnt): {e}")))?;
     if me == init {
         return Ok(None);
     }
@@ -156,6 +158,12 @@ pub fn spawn(spec: LaunchSpec) -> std::io::Result<Child> {
     // SAFETY: only async-signal-safe libc calls between fork and exec; all allocations happened above.
     unsafe {
         cmd.pre_exec(move || {
+            // The session cgroup is opened in the daemon's own mount namespace, before switching, so no mount in
+            // the namespace the workload will see can redirect the cgroup join.
+            let procs_fd = libc::open(procs.as_ptr(), libc::O_WRONLY | libc::O_CLOEXEC);
+            if procs_fd < 0 {
+                return Err(errno("open cgroup.procs"));
+            }
             // 0. the user's real filesystem, not the daemon's service sandbox.
             if let Some(fd) = host_mnt_fd {
                 if libc::setns(fd, libc::CLONE_NEWNS) != 0 {
@@ -166,10 +174,7 @@ pub fn spawn(spec: LaunchSpec) -> std::io::Result<Child> {
                 }
             }
             // 1. join the session cgroup before anything else runs.
-            let fd = libc::open(procs.as_ptr(), libc::O_WRONLY | libc::O_CLOEXEC);
-            if fd < 0 {
-                return Err(errno("open cgroup.procs"));
-            }
+            let fd = procs_fd;
             let zero = b"0";
             if libc::write(fd, zero.as_ptr().cast(), 1) != 1 {
                 libc::close(fd);

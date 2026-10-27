@@ -29,7 +29,7 @@ From source: `cargo build --release -p moatd -p moatctl`, then install `moatd`, 
 **The service sandbox does not leak into workloads (W11).** The unit runs `moatd` with `ProtectSystem=strict`,
 `ProtectHome=read-only` and `PrivateTmp=yes`. A protected workload is spawned by `moatd`, so it would inherit that
 private mount namespace and could not write its project under `$HOME` (D-SYSTEMD-WORKSPACE). Before anything else,
-the workload's child process joins PID 1's mount namespace (`setns`, which is why the unit keeps `CAP_SYS_CHROOT`)
+the workload's child process joins PID 1's mount namespace (`setns`; the unit keeps `CAP_SYS_CHROOT` for that and `CAP_SYS_PTRACE` to open `/proc/1/ns/mnt`; the session cgroup is opened before the switch)
 and re-enters its working directory there; then it joins the session cgroup, hides brokers in its own mount
 namespace and drops privileges as before. The daemon stays sandboxed. CI installs the packaged unit on a GitHub
 runner, starts it with `systemctl`, and checks with a real non-root user that the workload writes its project and

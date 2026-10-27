@@ -96,7 +96,7 @@ launch() { # profile, command → exit code
 TAG=$RANDOM
 # --- the workload can do its job ---------------------------------------------------------------------------------
 R=$(launch w11-coding "echo edited-$TAG > src.txt && mkdir -p sub && echo more > sub/x && echo t > /tmp/moat-w11-$TAG")
-[[ "$R" == "0" ]] && ok "protected workload ran under the installed unit" || bad "protected workload exit $R"
+[[ "$R" == "0" ]] && ok "protected workload ran under the installed unit" || { bad "protected workload exit $R"; as_user "/usr/bin/moat-launch --profile w11-coding --no-pty -- bash -c 'touch probe; ls -la /tmp | head -3'" || true; }
 [[ "$(cat "$H/project/src.txt" 2>/dev/null)" == "edited-$TAG" && -f "$H/project/sub/x" ]] \
   && ok "W11: the workload wrote its intended project under \$HOME (not the service's read-only view)" || bad "W11: project write under \$HOME"
 [[ -f "/tmp/moat-w11-$TAG" ]] && ok "W11: the workload's /tmp is the user's real /tmp, not the service's PrivateTmp" || bad "W11: /tmp is private to the service"
