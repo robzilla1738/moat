@@ -51,9 +51,13 @@ const shots = [
   { name: "desktop-home-dark", hash: "", theme: "dark", vp: desktop },
   { name: "desktop-rules-dark", hash: "rules", theme: "dark", vp: desktop },
   { name: "desktop-activity-dark", hash: "activity", theme: "dark", vp: desktop },
+  { name: "mobile-learning-candidate-dark", hash: "learning/c/cand-demo-1", theme: "dark", vp: phone },
+  { name: "mobile-learning-light", hash: "learning", theme: "light", vp: phone },
+  { name: "desktop-packs-dark", hash: "learning/packs", theme: "dark", vp: desktop },
+  { name: "desktop-learning-drift-light", hash: "learning/c/cand-demo-2", theme: "light", vp: desktop },
 ];
 // Every route is also checked (no screenshot) in both themes at phone size.
-const routes = ["", "activity", "activity/inc-8f2a", "activity/inc-7c31", "sessions", "rules", "devices", "devices/omarchy", "devices/tcl-tv", "apps", "coverage"];
+const routes = ["", "activity", "activity/inc-8f2a", "activity/inc-7c31", "sessions", "rules", "devices", "devices/omarchy", "devices/tcl-tv", "apps", "coverage", "learning", "learning/c/cand-demo-1", "learning/c/cand-demo-2", "learning/b/base-demo-1", "learning/packs"];
 
 const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined, args: ["--font-render-hinting=none"] });
 const problems = [];

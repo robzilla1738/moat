@@ -11,6 +11,7 @@ import { Rules } from "./screens/Rules";
 import { DeviceDetail, Devices } from "./screens/Devices";
 import { AppDetail, AppsHome, Diagnostics, WhatChanged } from "./screens/Standalone";
 import { CoverageScreen } from "./screens/Coverage";
+import { BaselineView, CandidateReview, Learning, Packs } from "./screens/Learning";
 
 export function useRoute(): [string[], (to: string) => void] {
   const parse = () => (typeof window === "undefined" ? "" : window.location.hash.replace(/^#\/?/, "") || "").split("/").filter(Boolean);
@@ -32,6 +33,7 @@ const NAV: { key: string; label: string; icon: IconName; mobile: boolean }[] = [
   { key: "sessions", label: "Tasks", icon: "sessions", mobile: true },
   { key: "rules", label: "Rules", icon: "rules", mobile: true },
   { key: "devices", label: "Devices", icon: "devices", mobile: true },
+  { key: "learning", label: "Learning & packs", icon: "spark", mobile: false },
   { key: "coverage", label: "Coverage & recovery", icon: "coverage", mobile: false },
 ];
 /** A one-computer user does not land in fleet administration: "Devices" reads "This computer". */
@@ -177,6 +179,9 @@ function Shell() {
     case "rules":
       screen = <Rules go={go} />;
       break;
+    case "learning":
+      screen = parts[1] === "packs" ? <Packs /> : parts[1] === "c" && parts[2] ? <CandidateReview id={decodeURIComponent(parts[2])} go={go} /> : parts[1] === "b" && parts[2] ? <BaselineView id={decodeURIComponent(parts[2])} go={go} /> : <Learning go={go} />;
+      break;
     case "devices":
       screen = parts[1] ? <DeviceDetail id={decodeURIComponent(parts[1])} go={go} /> : <Devices go={go} />;
       break;
@@ -250,7 +255,7 @@ function Shell() {
       </div>
       <nav className="tabbar" aria-label="Primary">
         {NAV.filter((n) => n.mobile).map((n) => (
-          <a key={n.key} href={`#/${n.key}`} className={`tab ${section === n.key || (n.key === "" && section === "apps") || (n.key === "devices" && (section === "coverage" || section === "diagnostics" || section === "changed" || section === "overview")) || (n.key === "activity" && section === "r") ? "active" : ""}`}>
+          <a key={n.key} href={`#/${n.key}`} className={`tab ${section === n.key || (n.key === "" && section === "apps") || (n.key === "devices" && (section === "coverage" || section === "diagnostics" || section === "changed" || section === "overview")) || (n.key === "activity" && section === "r") || (n.key === "rules" && section === "learning") ? "active" : ""}`}>
             <span className="tab-icon">
               <Icon name={n.icon} size={21} />
               {n.key === "activity" && open > 0 && <span className="tab-badge">{open}</span>}

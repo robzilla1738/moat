@@ -53,6 +53,11 @@ export interface Store {
   incidentById: (id: string) => Incident | undefined;
   /** Live read of a controller view (W12 detail screens). Rejects in demo mode: sample data is never fetched as live. */
   fetchLive: <T>(path: string) => Promise<T>;
+  /** Owner action against a controller view (W14 review screens). Never runs in demo mode or without an owner sign-in;
+   * the controller re-checks the role and every precondition. */
+  postLive: <T>(path: string, body: unknown) => Promise<T>;
+  /** Show a refusal or result in the toast (screens that call postLive report through it). */
+  say: (msg: string) => void;
   toast: string | null;
   dismissToast: () => void;
 }
@@ -466,6 +471,12 @@ export function StoreProvider({ children, options = {} }: { children: ReactNode;
     closeSession,
     resolveRef,
     incidentById,
+    postLive: <T,>(path: string, body: unknown) => {
+      if (mode !== "live" || !api) return Promise.reject(new Error("Demo: nothing was sent."));
+      if (!canAct.ok) return Promise.reject(new Error(canAct.reason ?? "Owner sign-in required."));
+      return api.post<T>(path, body).catch((e) => Promise.reject(new Error(describe(e))));
+    },
+    say: (msg: string) => setToast(msg),
     fetchLive: <T,>(path: string) => (mode === "live" && api ? api.get<T>(path) : Promise.reject(new Error("Sign in to a controller: sample data has no live view."))),
     toast,
     dismissToast: () => setToast(null),

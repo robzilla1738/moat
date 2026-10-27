@@ -2348,3 +2348,155 @@ body {
 .tab-label {
   white-space: nowrap;
 }
+
+/* W14 learning and packs (same cards, badges and chips as the rest of the UI) */
+@media (min-width: 960px) {
+  .subnav.learn-nav {
+    display: flex;
+  }
+}
+.strong {
+  font-weight: 620;
+}
+.learn-row-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.learn-row-title {
+  font-weight: 620;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.learn-block {
+  display: grid;
+  gap: 6px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.gap-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+.gap-list li {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.gap-list li .badge {
+  flex: none;
+}
+.diff-list {
+  display: grid;
+  gap: 2px;
+}
+.diff-row {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  align-items: start;
+  gap: 10px;
+  padding: 10px 4px;
+  border-top: 1px solid var(--border);
+  cursor: pointer;
+}
+.diff-row:first-child {
+  border-top: 0;
+}
+.diff-row input {
+  margin-top: 3px;
+}
+.diff-sign {
+  font-family: var(--mono, ui-monospace, monospace);
+  font-weight: 700;
+  color: var(--amber);
+}
+.diff-main {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.diff-dest {
+  overflow-wrap: anywhere;
+}
+.check-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.pack-effective {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+.pack-effective > div {
+  display: grid;
+  gap: 2px;
+}
+.pack-module {
+  display: grid;
+  gap: 6px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.pack-module .chip {
+  margin-right: 4px;
+}
+.cell-grid {
+  display: grid;
+  gap: 6px;
+}
+.cell {
+  display: grid;
+  grid-template-columns: minmax(90px, auto) auto 1fr;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+}
+.cell-off {
+  border-style: dashed;
+}
+@media (max-width: 520px) {
+  .cell {
+    grid-template-columns: 1fr auto;
+  }
+  .cell > :last-child {
+    grid-column: 1 / -1;
+  }
+}
+.learn-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 0;
+  border: 0;
+  border-top: 1px solid var(--border);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+.learn-row-button {
+  cursor: pointer;
+}
+.learn-row-button:hover .learn-row-title {
+  color: var(--accent);
+}
+.learn-row-main {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+.learn-row > .btn {
+  flex: none;
+}
