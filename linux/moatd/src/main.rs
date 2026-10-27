@@ -82,7 +82,17 @@ enum Cmd {
         device_id: String,
     },
     /// Trust a policy signer public key (hex file).
-    Trust { pubkey: PathBuf },
+    Trust {
+        pubkey: PathBuf,
+        /// This is the device owner's local key: revisions it signs are reported to the controller as a
+        /// `local_change` (fleet distribution to this device is then held until the owner resolves it).
+        #[arg(long)]
+        local_owner: bool,
+    },
+    /// Fleet sync: record the controller's contiguous `acked_seq` (the daemon removes acknowledged spool segments).
+    SpoolAck { seq: u64 },
+    /// Fleet sync: print `spool/sync-state.json` (spool_low_seq, acked_seq, next_seq, local_change).
+    SyncState,
     /// Local recovery (root, on this device). Works with the daemon stopped.
     #[command(subcommand)]
     Recover(Recover),
@@ -244,15 +254,32 @@ fn run(cli: Cli) -> Result<(), String> {
             eprintln!("{}", serde_json::to_string_pretty(&rep).unwrap());
             Ok(())
         }
-        Cmd::Trust { pubkey } => {
+        Cmd::Trust { pubkey, local_owner } => {
             require_root()?;
             let hexs = fs::read_to_string(&pubkey).map_err(|e| e.to_string())?;
             let vk = moat_core::signing::verifying_key_from_hex(&hexs)?;
             let id = moat_core::signing::key_id(&vk);
             let dir = cli.state.join("trusted");
             fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-            fs::write(dir.join(format!("{id}.pub")), hexs.trim()).map_err(|e| e.to_string())?;
-            println!("trusted signer {id}");
+            let name = if local_owner { format!("{id}{}", moatd::endpoint::LOCAL_OWNER_SUFFIX) } else { format!("{id}.pub") };
+            fs::write(dir.join(name), hexs.trim()).map_err(|e| e.to_string())?;
+            println!("trusted {} {id}", if local_owner { "local owner key" } else { "signer" });
+            Ok(())
+        }
+        Cmd::SpoolAck { seq } => {
+            require_root()?;
+            let dir = cli.state.join("spool");
+            fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+            let tmp = dir.join(format!("{}.tmp", moatd::spool::ACKED_FILE));
+            fs::write(&tmp, seq.to_string()).map_err(|e| e.to_string())?;
+            fs::rename(&tmp, dir.join(moatd::spool::ACKED_FILE)).map_err(|e| e.to_string())?;
+            println!("acknowledged through {seq}; the daemon applies it on its next tick (never lowered, never beyond what it wrote)");
+            Ok(())
+        }
+        Cmd::SyncState => {
+            let p = cli.state.join("spool").join(moatd::spool::SYNC_STATE_FILE);
+            let t = fs::read_to_string(&p).map_err(|e| format!("{}: {e} (is moatd running?)", p.display()))?;
+            println!("{}", t.trim());
             Ok(())
         }
         Cmd::Recover(r) => recover(&cli.state, r),
