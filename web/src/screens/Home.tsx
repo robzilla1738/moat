@@ -1,5 +1,5 @@
 import { Badge, Card, Chain, CoverageBadge, DeviceIcon, Empty, Icon, Ident, SectionTitle } from "../components/ui";
-import { BarStrip, HeatGrid, HexMap, Kpi, Ring, SampleTag, Spark } from "../components/charts";
+import { BarStrip, HeatGrid, HexMap, hexFill, Kpi, Ring, SampleTag, Spark } from "../components/charts";
 import { useData, useFreshness } from "../data/store";
 import { STALE_AFTER_MS } from "../data/freshness";
 import { ago, compact } from "../format";
@@ -54,10 +54,10 @@ export function Home({ go }: { go: (to: string) => void }) {
         </h1>
       </div>
 
-      <div className="bento bento-stretch">
+      <div className="bento bento-stretch bento-kpis">
         <Card className="b-3 kpi-card">
           <Kpi
-            label="Coverage confirmed"
+            label="Covered"
             icon="coverage"
             tone="allowed"
             value={covered}
@@ -74,7 +74,7 @@ export function Home({ go }: { go: (to: string) => void }) {
         </Card>
         <Card className="b-3 kpi-card">
           <Kpi
-            label="Protected sessions"
+            label="Protected"
             icon="lock"
             tone="allowed"
             value={verified}
@@ -170,10 +170,9 @@ export function Home({ go }: { go: (to: string) => void }) {
               <HexMap points={t} />
               <div className="heat-scale" aria-hidden>
                 <span>none</span>
-                <i style={{ background: "var(--surface-3)" }} />
-                <i style={{ background: "color-mix(in srgb, var(--chart-3) 30%, color-mix(in srgb, var(--chart-1) 30%, var(--surface-3)))" }} />
-                <i style={{ background: "color-mix(in srgb, var(--chart-3) 60%, color-mix(in srgb, var(--chart-1) 30%, var(--surface-3)))" }} />
-                <i style={{ background: "var(--chart-3)" }} />
+                {[0, 0.33, 0.66, 1].map((f) => (
+                  <i key={f} style={{ background: hexFill(f) }} />
+                ))}
                 <span>most</span>
               </div>
             </>
@@ -253,7 +252,14 @@ export function Home({ go }: { go: (to: string) => void }) {
                   <span className="age-name">
                     <Ident value={d.name} />
                   </span>
-                  <span className="small muted">{f.ageMs === null ? "never reported" : ago(d.lastSeen)}</span>
+                  <span className="small muted">
+                    {f.stale && (
+                      <>
+                        <Badge tone="amber">stale</Badge>{" "}
+                      </>
+                    )}
+                    {f.ageMs === null ? "never reported" : ago(d.lastSeen)}
+                  </span>
                   <span className={`age-bar ${f.stale ? "tone-amber" : "tone-allowed"}`} role="img" aria-label={f.stale ? "stale" : "current"}>
                     <span style={{ width: `${Math.max(3, frac * 100)}%` }} />
                   </span>

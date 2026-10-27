@@ -115,7 +115,7 @@ export function AppsHome({ go }: { go: (to: string) => void }) {
   const t = data.timeline;
   const blocked = t.reduce((s, p) => s + p.blocked, 0);
   const flows = t.reduce((s, p) => s + p.allowed + p.observed + p.blocked, 0);
-  const leaders = [...data.apps].map((a) => ({ a, n: appBlocked(a) })).filter((x) => x.n > 0).sort((x, y) => y.n - x.n).slice(0, 3);
+  const leaders = [...data.apps].map((a) => ({ a, n: appFlows(a), blocked: appBlocked(a) })).filter((x) => x.n > 0).sort((x, y) => y.n - x.n).slice(0, 4);
   return (
     <div className="page page-wide">
       <StatusLine />
@@ -161,7 +161,7 @@ export function AppsHome({ go }: { go: (to: string) => void }) {
             </a>
           )}
         </Card>
-        <div className="b-4 bento-col">
+        <div className="b-4 bento-col bento-kpis-col">
           <Card className="kpi-card">
             <Kpi label="Blocked" icon="x" tone="blocked" value={compact(blocked)} sub={t.length ? `last ${t.length} h` : "no flow history yet"} chart={<Spark values={t.map((p) => p.blocked)} label="Blocked attempts per hour" />} />
           </Card>
@@ -172,36 +172,36 @@ export function AppsHome({ go }: { go: (to: string) => void }) {
         <Card className="b-4">
           <div className="card-head">
             <h2>
-              <Icon name="trophy" size={16} /> Most blocked
+              <Icon name="trophy" size={16} /> Most active
             </h2>
             <SampleTag />
           </div>
           <div className="qual">
             <span>Apps</span>
             <span>
-              <strong>by blocked attempts</strong>
+              <strong>by recorded flows</strong>
             </span>
           </div>
           {leaders.length ? (
             <ol className="leader">
-              {leaders.map(({ a, n }, i) => (
+              {leaders.map(({ a, n, blocked }, i) => (
                 <li key={a.id}>
                   <span className="leader-rank">#{i + 1}</span>
                   <span className="leader-main">
                     <span className="leader-name">{a.name}</span>
                     <span className="leader-sub">
-                      <Ident value={a.destinations.find((d) => d.verdict === "deny")?.host ?? a.exe} kind="host" />
+                      <Ident value={[...a.destinations].sort((x, y) => y.count - x.count)[0]?.host ?? a.exe} kind="host" />
                     </span>
                   </span>
                   <span className="leader-value">
-                    {n}
-                    <small>of {appFlows(a)}</small>
+                    {compact(n)}
+                    <small>{blocked ? `${blocked} blocked` : "flows"}</small>
                   </span>
                 </li>
               ))}
             </ol>
           ) : (
-            <div className="muted small">Nothing blocked in the recorded evidence.</div>
+            <div className="muted small">No app activity recorded yet.</div>
           )}
         </Card>
       </div>

@@ -149,6 +149,14 @@ export function HeatGrid({ points, bucketHours = 4 }: { points: TimelinePoint[];
   );
 }
 
+/** Periwinkle (few) to amber (most); a zero hour stays an empty cell. */
+export function hexFill(f: number) {
+  if (f <= 0) return "var(--surface-3)";
+  const warm = Math.round(f * 100);
+  const strength = Math.round(40 + f * 60);
+  return `color-mix(in oklab, color-mix(in oklch, var(--chart-3) ${warm}%, var(--chart-1)) ${strength}%, var(--surface-3))`;
+}
+
 /** One hexagon per hour of blocked attempts, oldest top left, the current hour outlined. */
 export function HexMap({ points }: { points: TimelinePoint[] }) {
   if (!points.length) return null;
@@ -171,9 +179,8 @@ export function HexMap({ points }: { points: TimelinePoint[] }) {
         const col = i % cols;
         const cx = 2 + hw / 2 + col * hw + (row % 2 ? hw / 2 : 0);
         const cy = 2 + R + row * R * 1.5;
-        const lvl = p.blocked ? 18 + Math.round((p.blocked / max) * 72) : 0;
         return (
-          <polygon key={p.hour} points={hex(cx, cy)} className={`hex ${i === points.length - 1 ? "hex-now" : ""}`} style={{ fill: `color-mix(in srgb, var(--chart-3) ${lvl}%, color-mix(in srgb, var(--chart-1) ${lvl ? 30 : 0}%, var(--surface-3)))` }}>
+          <polygon key={p.hour} points={hex(cx, cy)} className={`hex ${i === points.length - 1 ? "hex-now" : ""}`} style={{ fill: hexFill(p.blocked / max) }}>
             <title>{`${hourLabel(p.hour)}: ${p.blocked} blocked`}</title>
           </polygon>
         );
