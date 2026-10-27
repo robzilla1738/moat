@@ -19,7 +19,7 @@ asks = [r for r in sensor if r["kind"] == "ask"]
 stats = [r["stats"] for r in sensor if r["kind"] == "stats"]
 alerts = [r for r in sensor if r["kind"] == "alert"]
 native = []
-for l in open(os.path.join(OUT, "native.log")):
+for l in (open(os.path.join(OUT, "native.log")) if os.path.exists(os.path.join(OUT, "native.log")) else []):
     p = l.split()
     if len(p) >= 9 and p[0] in ("tcp", "udp"):
         native.append({"proto": p[0], "mono": int(p[1]), "pid": int(p[2]), "uid": int(p[3]), "comm": p[4],
@@ -74,6 +74,11 @@ def summary(s, n, expected):
         "native_comms": dict(collections.Counter(x["comm"] for x in n).most_common(5)),
         "native_uids": sorted({x["uid"] for x in n}),
         "native_cgroup_ids": len({x["cgroup"] for x in n}),
+        # identity Moat could not attribute: no pid or no executable path
+        "opensnitch_unknown_identity": sum(1 for c in s if not int(c.get("process_id", 0) or 0) or not c.get("process_path")),
+        # independent cross-check: native records whose pid OpenSnitch also reported
+        "native_pids_seen_by_opensnitch": sum(1 for x in n if x["pid"] in {int(c.get("process_id", 0) or 0) for c in s}),
+        "opensnitch_args_distinct": len({tuple(c.get("process_args", [])) for c in s}),
     }
 
 R = {}
@@ -112,16 +117,19 @@ meta = {
     "connection_fields_populated": dict(fields),
     "last_stats": stats[-1] if stats else {},
     "native_records": len(native),
-    "nft_tables_with_opensnitch": [l.strip() for l in open(os.path.join(OUT, "nft-ruleset.txt")) if l.startswith("table")],
+    "nft_tables_with_opensnitch": [l.strip() for l in open(os.path.join(OUT, "nft-ruleset.txt")) if l.startswith("table")] if os.path.exists(os.path.join(OUT, "nft-ruleset.txt")) else [],
+    "exit_code": open(os.path.join(OUT, "exit-code.txt")).read().strip() if os.path.exists(os.path.join(OUT, "exit-code.txt")) else "?",
+    "scenarios_completed": sorted(k for k, v in win.items() if "start" in v and "end" in v),
     "nft_tables_after_stop": [l.strip() for l in open(os.path.join(OUT, "nft-ruleset-stopped.txt")) if l.startswith("table")] if os.path.exists(os.path.join(OUT, "nft-ruleset-stopped.txt")) else [],
     "browser": open(os.path.join(OUT, "browser.txt")).read().strip() if os.path.exists(os.path.join(OUT, "browser.txt")) else "?",
 }
 json.dump({"meta": meta, "scenarios": R}, open(os.path.join(OUT, "results.json"), "w"), indent=2)
 with open(os.path.join(OUT, "results.md"), "w") as f:
     f.write(f"# W09 results\n\nOpenSnitch: {meta['opensnitch_version']}; sensor events {len(events)}, AskRule {len(asks)}, alerts {len(alerts)}; native records {len(native)}\n\n")
-    f.write("| scenario | expected | OpenSnitch | with pid | with path | paths | native | native comms |\n|---|---|---|---|---|---|---|---|\n")
+    f.write(f"exit code {meta['exit_code']}; scenarios completed: {meta['scenarios_completed']}\n\n")
+    f.write("| scenario | expected | OpenSnitch | with pid | with path | unknown identity | distinct args | paths | native | native pids seen by OpenSnitch | native comms |\n|---|---|---|---|---|---|---|---|---|---|---|\n")
     for k, v in R.items():
-        f.write(f"| {k} | {v['expected']} | {v['opensnitch_records']} | {v['opensnitch_with_pid']} | {v['opensnitch_with_path']} | {v['opensnitch_paths']} | {v['native_records']} | {v['native_comms']} |\n")
+        f.write(f"| {k} | {v['expected']} | {v['opensnitch_records']} | {v['opensnitch_with_pid']} | {v['opensnitch_with_path']} | {v['opensnitch_unknown_identity']} | {v['opensnitch_args_distinct']} | {v['opensnitch_paths']} | {v['native_records']} | {v['native_pids_seen_by_opensnitch']} | {v['native_comms']} |\n")
     f.write("\nFields populated (count of records): " + json.dumps(meta["connection_fields_populated"]) + "\n")
     f.write("\nLast stats: " + json.dumps(meta["last_stats"])[:1500] + "\n")
     f.write("\nnft tables (running / stopped): " + json.dumps(meta["nft_tables_with_opensnitch"]) + " / " + json.dumps(meta["nft_tables_after_stop"]) + "\n")

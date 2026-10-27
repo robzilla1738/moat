@@ -16,7 +16,15 @@ out = open(out_path, "a", buffering=1)
 lock = threading.Lock()
 seen = set()
 
+def redact(d):
+    """OpenSnitch sends each process's full environment (tokens, keys). Keep only the variable count."""
+    c = d.get("conn")
+    if isinstance(c, dict) and "process_env" in c:
+        c["process_env"] = {"_redacted_variable_count": len(c["process_env"] or {})}
+    return d
+
 def emit(kind, d):
+    d = redact(d)
     with lock:
         out.write(json.dumps({"kind": kind, "rx": time.time(), **d}) + "\n")
 

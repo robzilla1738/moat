@@ -13,7 +13,7 @@ jobs:
   experiment:
     name: OpenSnitch 1.8.0 sensor vs bpftrace (ubuntu runner)
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
       - name: Install bpftrace, jq, python venv
@@ -21,6 +21,7 @@ jobs:
       - name: Host facts
         run: uname -a; bpftrace --version; cat /etc/os-release | head -3; command -v google-chrome || true
       - name: Run experiment
+        timeout-minutes: 20
         run: sudo OUT=/tmp/w09-out linux/experiments/w09/run.sh
       - name: Collect
         if: always()
@@ -37,4 +38,5 @@ jobs:
             /tmp/w09-out/scenarios.jsonl
             /tmp/w09-out/*.txt
             /tmp/w09-out/opensnitch-config.json
+            /tmp/w09-out/opensnitchd.log
           retention-days: 30
