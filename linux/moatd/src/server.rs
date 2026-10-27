@@ -19,7 +19,7 @@ use crate::launch::{spawn, BrokerIsolation, LaunchSpec};
 use crate::nft::NftBackend;
 
 pub fn serve<B: NftBackend + Send + 'static>(ep: Endpoint<B>, socket: PathBuf, tick: Duration) -> std::io::Result<()> {
-    serve_with(ep, socket, tick, None)
+    serve_with(ep, socket, tick, None, None)
 }
 
 /// `serve`, plus the observe-only ordinary-app inventory (W10) sampled every `inventory` interval when set. The
@@ -29,8 +29,44 @@ pub fn serve_with<B: NftBackend + Send + 'static>(
     socket: PathBuf,
     tick: Duration,
     inventory: Option<Duration>,
+    bpftrace: Option<String>,
 ) -> std::io::Result<()> {
     let ep = Arc::new(Mutex::new(ep));
+    if let Some(bin) = bpftrace {
+        // W10 increment 2: connect-time attribution (observe-only). Runs outside the endpoint lock; a tracer that
+        // cannot start or stops is spooled as inventory_loss, never silently absent.
+        let ep = ep.clone();
+        std::thread::spawn(move || {
+            use crate::inventory::Source;
+            let src = crate::inventory::ProcFs::default();
+            let spool = |evs: Vec<crate::inventory::InventoryEvent>| {
+                if evs.is_empty() {
+                    return;
+                }
+                let mut e = ep.lock().unwrap();
+                for ev in evs {
+                    let record = serde_json::to_value(&ev).unwrap_or(serde_json::Value::Null);
+                    e.spool.append(crate::spool::Event::Inventory { coverage: crate::inventory::COVERAGE.into(), record });
+                }
+            };
+            ep.lock().unwrap().spool.append(crate::spool::Event::CoverageChanged {
+                level: format!("ordinary_inventory_ebpf:{}", crate::inventory::COVERAGE),
+                detail: crate::ebpf::coverage_note().into(),
+            });
+            let mut tracer = match crate::ebpf::Tracer::start(&bin, None) {
+                Ok(t) => t,
+                Err(err) => {
+                    spool(vec![crate::ebpf::Decoder::new(100).stopped(&format!("{bin} could not start: {err}"))]);
+                    return;
+                }
+            };
+            let ident = |pid: u32| src.identity(pid);
+            loop {
+                spool(tracer.drain(&ident));
+                std::thread::sleep(Duration::from_millis(200));
+            }
+        });
+    }
     if let Some(every) = inventory {
         let ep = ep.clone();
         std::thread::spawn(move || {
