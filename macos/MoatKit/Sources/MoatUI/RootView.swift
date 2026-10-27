@@ -25,7 +25,12 @@ public struct RootView: View {
                 if scrollable {
                     ScrollView { content.padding(28) }
                 } else {
-                    content.padding(28).frame(maxHeight: .infinity, alignment: .top)
+                    // Fixed frame, top-aligned: overflow is clipped at the bottom, like a window that needs scrolling.
+                    GeometryReader { geo in
+                        content.padding(28)
+                            .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
+                            .clipped()
+                    }
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)

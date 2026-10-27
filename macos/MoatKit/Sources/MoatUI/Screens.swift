@@ -107,7 +107,7 @@ struct FlowRow: View {
                 if !compact {
                     HStack(spacing: 10) {
                         Text(record.measurement.label)
-                        if record.facts.teamID == nil { Text("unsigned or ad-hoc signed") }
+                        if record.facts.teamID == nil { Text("no team ID (unsigned or ad-hoc)") }
                         Text("ancestry not available")
                     }
                     .font(.system(size: 11.5)).foregroundColor(p.muted)
