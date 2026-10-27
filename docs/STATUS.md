@@ -90,7 +90,7 @@ above is updated with the run that proves it.
 | W06 durable activation (Linux) | Lane A | done in CI netns: journal, fault injection at each persistence/backend step, retained rollback intent, independent replay high-water, stop-not-adopt restart; installed-unit proof is W11 |
 | W07 Mac engine | Lane B | see Lane B |
 | W08 truthful UI | Lane B | see Lane B |
-| W09 ordinary-app Linux experiment | Lane A | not started |
+| W09 ordinary-app Linux experiment | Lane A | done: measured in CI (run 40545113846); decision: native inventory, OpenSnitch not adopted, enforcement deferred ([decision](decisions/W09-linux-ordinary-apps.md)) |
 | W10 ordinary-app Linux inventory | Lane A | not started |
 | W11 installed-platform proofs | Lane A (Linux) / Robert | Linux: packaged unit proven under systemd on an Ubuntu runner (installed-unit.sh); Omarchy run and the `CAP_SYS_PTRACE` decision need Robert. Mac: Lane B |
 
