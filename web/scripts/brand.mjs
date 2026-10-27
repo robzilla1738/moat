@@ -65,7 +65,7 @@ if (process.argv.includes("--tokens")) {
 // ------------------------------------------------------------------------------------------------------------- rasters
 const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined });
 async function png(svgText, size, out, { tint } = {}) {
-  const page = await browser.newPage({ viewport: { width: size, height: size }, deviceScaleFactor: 1 });
+  const page = await browser.newPage({ viewport: { width: Math.max(size, 256), height: Math.max(size, 256) }, deviceScaleFactor: 1 }); // tiny viewports hang Chromium screenshots
   const body = svgText.replace("<svg", `<svg width="${size}" height="${size}" style="display:block${tint ? `;color:${tint}` : ""}"`);
   await page.setContent(`<html><body style="margin:0;background:transparent">${body}</body></html>`);
   await mkdir(dirname(out), { recursive: true });
