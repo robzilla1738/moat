@@ -67,7 +67,9 @@ struct MoatApp: App {
                 .appendingPathComponent("Moat/standalone-policy.json")
             applier = StandaloneApplier(authoring: CoreSnapshotAuthoring(), signer: signer, client: client, bookURL: book, deviceID: deviceID)
         }
-        _model = StateObject(wrappedValue: AppModel(client: client, isDemo: launch.demo, screen: launch.screen, ownerSigner: signer, applier: applier))
+        let m = AppModel(client: client, isDemo: launch.demo, screen: launch.screen, ownerSigner: signer, applier: applier)
+        if launch.demo || launch.screenshotMode { m.applyUnavailableReason = AppModel.demoApplyNote }
+        _model = StateObject(wrappedValue: m)
         if launch.screenshotMode {
             NotificationCenter.default.addObserver(forName: NSApplication.didFinishLaunchingNotification, object: nil, queue: .main) { _ in
                 ScreenshotReporter.report(launch)

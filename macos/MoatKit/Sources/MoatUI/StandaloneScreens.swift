@@ -174,7 +174,7 @@ struct RuleAuthoringCard: View {
                 if let a = model.lastAuthorization { Pill(text: "signed by \(a.keyID)", tone: .green) }
                 if let r = model.lastApplied { Pill(text: "installed as revision \(r.summary.revision)", tone: .green) }
             }
-            Text("macOS asks for your fingerprint or password and shows this exact plan. A typed phrase is never accepted as authorization. \(model.canApplyStandalone ? AppModel.standaloneApplyHow : AppModel.standaloneApplyUnavailable)").font(.caption).foregroundStyle(p.muted)
+            Text("macOS asks for your fingerprint or password and shows this exact plan. A typed phrase is never accepted as authorization. \(model.canApplyStandalone ? AppModel.standaloneApplyHow : model.applyUnavailableReason)").font(.caption).foregroundStyle(p.muted)
         }
     }
 }

@@ -77,6 +77,9 @@ public final class AppModel: ObservableObject {
     /// build has no policy compiler; the UI then says a rule can be authorized but not applied from this Mac alone.
     public var applier: StandaloneApplier?
     @Published public var lastApplied: StandaloneApplyResult?
+    /// Why apply is not available in this run when there is no applier (no compiler in this build, or a demo run that
+    /// never touches the Keychain). Shown verbatim.
+    public var applyUnavailableReason: String = AppModel.standaloneApplyUnavailable
     public let client: ControlClient
     public let isDemo: Bool
 
@@ -131,7 +134,7 @@ public final class AppModel: ObservableObject {
         do {
             if signer.keyID == nil { try signer.createKey() }
             lastAuthorization = try await signer.authorize(plan.ownerPlan(id: id))
-            notice = "Authorized with your owner key \(signer.keyID ?? ""). \(Self.standaloneApplyUnavailable)"
+            notice = "Authorized with your owner key \(signer.keyID ?? ""). \(applyUnavailableReason)"
             lastError = nil
         } catch {
             lastError = "\(error)"
@@ -140,6 +143,9 @@ public final class AppModel: ObservableObject {
 
     /// Shown only when this build has no policy compiler (no applier): never replaced by a pretend success.
     public static let standaloneApplyUnavailable = "This build has no policy compiler, so the rule is authorized but not applied from this Mac; apply it through your controller or with moatctl."
+
+    /// Demo and screenshot runs: no owner key is touched, nothing is signed or applied.
+    public static let demoApplyNote = "Demo: no owner key is used and nothing is signed or applied. In the real app, Moat compiles the rule, your owner key signs that exact snapshot, and the filter extension verifies it before enforcing it."
 
     /// Shown under the plan when standalone apply is available.
     public static let standaloneApplyHow = "Moat compiles the rule with its policy core, your owner key signs that exact snapshot, and the filter extension verifies it against your trusted keys before enforcing it. No controller is needed."

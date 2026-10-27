@@ -163,6 +163,8 @@ final class AppModelTests: XCTestCase {
         XCTAssertTrue(withApplier.canApplyStandalone)
         XCTAssertFalse(AppModel.standaloneApplyHow.contains("not available"), "once the path exists the UI no longer says apply is unavailable")
         XCTAssertTrue(AppModel.standaloneApplyUnavailable.contains("no policy compiler"))
+        XCTAssertEqual(plain.applyUnavailableReason, AppModel.standaloneApplyUnavailable)
+        XCTAssertTrue(AppModel.demoApplyNote.hasPrefix("Demo:"), "a demo run says it signs nothing instead of claiming the compiler is missing")
     }
 }
 
