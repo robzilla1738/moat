@@ -228,21 +228,24 @@
     },
     {
       "id": "linux.spool.gaps",
-      "capability": "sequenced event spool with restart and gap markers and quota",
+      "capability": "sequenced event spool with restart and gap markers, bounded disk use (eviction with exact gap records), durable acknowledgements and the W13 sync outbox (spool_low_seq, local_change)",
       "backend": "moatd spool 0.1.0",
       "evidence_level": "component",
       "disposition": "implemented_unproven",
       "tests": [
-        "linux/moatd/src/spool.rs::tests"
+        "linux/moatd/src/spool.rs::tests",
+        "linux/moatd/src/endpoint.rs::tests::local_owner_revisions_are_reported_as_local_changes_until_the_fleet_supersedes_them",
+        "linux/moatd/src/endpoint.rs::tests::sync_outbox_accepts_the_agents_ack_and_refuses_a_future_one",
+        "linux/tests/netns-enforcement.sh (W13: …)"
       ],
-      "environment": "unit",
+      "environment": "ci-ubuntu-26.04-x86_64",
       "last_result": {
         "result": "pass",
-        "run": "rust 40493342610",
-        "commit": "d5270bd",
+        "run": "linux-endpoint 40555180765",
+        "commit": "e02658c",
         "date": "2026-10-27"
       },
-      "limits": "Spool events do not yet carry the W01 event envelope (boot, clock uncertainty, producer authority).",
+      "limits": "Spool events do not yet carry the W01 event envelope. No real controller round trip: the sync agent (Lane B) must read sync-state.json and write spool/acked; two real endpoints across an outage are unproven (W13 acceptance).",
       "open_defects": []
     },
     {
@@ -1125,12 +1128,14 @@
       "case": "Offline local change",
       "status": "ci",
       "environments": [
-        "ci-netns"
+        "ci-netns",
+        "unit"
       ],
       "tests": [
         "local disable recorded",
         "resume re-enforces last policy",
-        "restart restores last valid policy offline"
+        "restart restores last valid policy offline",
+        "local_owner_revisions_are_reported_as_local_changes_until_the_fleet_supersedes_them"
       ]
     },
     {
@@ -1232,11 +1237,15 @@
       "case": "Log quota",
       "status": "ci",
       "environments": [
+        "ci-netns",
         "unit"
       ],
       "tests": [
-        "quota_drops_and_records_gap",
-        "unexplained_gap_detection"
+        "quota_evicts_the_oldest_unacknowledged_segment_with_an_exact_gap",
+        "acknowledged_segments_go_first_and_need_no_gap",
+        "an_event_that_cannot_fit_is_dropped_with_a_gap",
+        "unexplained_gap_detection",
+        "W13: an acknowledgement beyond what was written is refused"
       ]
     },
     {

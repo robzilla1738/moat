@@ -413,6 +413,21 @@ start_daemon
 wait_for '.revision == 8 and .enforcement_active' && ok "restart restores last valid policy offline" || bad "restart restore"
 stream_bg rst2 2
 stream_started rst2 && ok "W05: after restart a new session's stream is admitted again" || bad "W05: rst2 admitted after restart"
+
+# --- W13 fleet-sync outbox: spool_low_seq / acked_seq published by the running daemon ----------------------------
+SYNC="$S/spool/sync-state.json"
+for _ in $(seq 20); do [[ -s "$SYNC" ]] && break; sleep 0.25; done
+jq -e '.schema == "moat.spool_sync_state.v1" and .spool_low_seq >= 1 and .next_seq > .spool_low_seq and .acked_seq == 0' "$SYNC" >/dev/null \
+  && ok "W13: daemon publishes spool_low_seq, acked_seq and next_seq ($(jq -c '{spool_low_seq, acked_seq, next_seq}' "$SYNC"))" \
+  || bad "W13: sync-state ($(cat "$SYNC" 2>/dev/null | tr -d '\n' | cut -c1-200))"
+# Acknowledge only the first record: acknowledged segments are deleted, and the spool checks below read them all.
+ACK=$(jq .spool_low_seq "$SYNC")
+A "$BIN/moatd" --state "$S" spool-ack "$ACK" >/dev/null
+for _ in $(seq 20); do jq -e ".acked_seq == $ACK" "$SYNC" >/dev/null 2>&1 && break; sleep 0.25; done
+jq -e ".acked_seq == $ACK" "$SYNC" >/dev/null && ok "W13: the daemon accepts the controller's acked_seq ($ACK)" || bad "W13: spool-ack not applied ($(jq -c . "$SYNC"))"
+A "$BIN/moatd" --state "$S" spool-ack 99999999 >/dev/null
+sleep 1.5
+jq -e ".acked_seq == $ACK" "$SYNC" >/dev/null && ok "W13: an acknowledgement beyond what was written is refused" || bad "W13: future ack accepted ($(jq -c . "$SYNC"))"
 pgrep -u nobody -f "sleep 45" >/dev/null && bad "W06: a session from before the restart is still running" || ok "W06: sessions from before the restart are stopped (not adopted)"
 status | jq -e '.activation.phase == "confirmed" and .activation.active == 8 and .activation.durability == "durable" and .activation.replay_high_water >= 8' >/dev/null \
   && ok "W06: activation journal reports confirmed revision 8, durable, high-water >= 8" || bad "W06: activation status ($(status | jq -c .activation))"

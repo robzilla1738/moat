@@ -263,6 +263,34 @@ only `clear-isolation` does. If either Moat table is removed outside Moat, the d
 Uninstall: `sudo systemctl disable --now moatd && sudo nft delete table inet moat; sudo nft delete table inet
 moat_local_emergency`, then remove the package. The Arch package's `pre_remove` hook does this for you.
 
+
+## Fleet-sync outbox (W13)
+
+The spool is the endpoint's durable outbox for the controller's `POST /v1/device/sync` (contract: `docs/fleet-sync.md`,
+Lane B). moatd does not talk to the controller itself; the sync agent reads the spool and these files:
+
+* `spool/sync-state.json` (`moat.spool_sync_state.v1`), rewritten by the daemon when it changes:
+  `spool_low_seq` (lowest sequence still held: everything below it was acknowledged or is covered by a `gap`
+  record), `acked_seq`, `next_seq`, and `local_change` (`{revision, digest: "sha256:…", broadening, authorized_by}`
+  or null). The agent sends `spool_low_seq` and `local_change` in the sync body.
+* `spool/acked`: the agent writes the controller's contiguous `acked_seq` here (or `moatd spool-ack N`). The daemon
+  accepts it on its next tick into its own durable copy, never lowers it, refuses a value beyond the last sequence
+  it wrote (recorded as a `coverage_changed` `fleet-sync` event) and deletes whole acknowledged segments.
+* Disk use is bounded by `--spool-mib`. Acknowledged segments are removed first; if that is not enough the oldest
+  unacknowledged segment is evicted and a `gap` record names exactly the unacknowledged sequences it held (newest
+  evidence kept, loss explicit). An event that still cannot fit is dropped with a `gap` record, as before.
+  Enforcement never waits for the spool.
+* `local_change`: a revision signed by a key trusted with `moatd trust --local-owner` is a local owner change the
+  controller did not distribute. It is recorded durably (`local-change.json`) with `broadening` computed by
+  moat-core's diff against the previous revision (from no policy, broadening is assumed), emitted as a
+  `local_change` spool event and reported until a revision from a non-local signer supersedes it. moatd cannot tell
+  whether the controller was reachable; every local-owner revision is reported, and the controller decides.
+
+Evidence: `spool.rs` and `endpoint.rs` unit tests (eviction keeps the "held or covered by a gap" invariant at every
+write; ack durability, monotonicity and bounds; local change lifecycle across a restart) and netns checks
+(`W13: daemon publishes spool_low_seq…`, `W13: the daemon accepts the controller's acked_seq`, future ack refused).
+Not proven: a real controller round trip with two endpoints (W13 acceptance needs real devices).
+
 ## Tests
 
 | Test | Where it runs | What it proves |

@@ -90,6 +90,7 @@ pub fn serve_with<B: NftBackend + Send + 'static>(
                 e.drain_inbox();
                 e.reconcile();
                 e.poll_counters();
+                e.sync_outbox();
             }
             std::thread::sleep(tick);
         });

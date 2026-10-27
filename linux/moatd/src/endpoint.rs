@@ -22,7 +22,7 @@ use crate::journal::{self, FsStore, Journal, Loaded, Phase, Store};
 use crate::nft::{self, CgroupLayout, NftBackend, ProxiedSession, ProxyLayout, RenderReport};
 use crate::proxy::{ProxyManager, ProxyPolicy};
 use crate::recovery::RecoveryState;
-use crate::spool::{Event, Spool};
+use crate::spool::{Event, LocalChangeReport, Spool, SyncState};
 use crate::trial::{self, TrialState};
 
 pub const CURRENT: &str = "current.signed.json";
@@ -109,6 +109,30 @@ pub struct Endpoint<B: NftBackend> {
     journal_uncertain: Option<String>,
     /// Last rollback failure reported, so a retried rollback does not flood the spool.
     rollback_error: Option<String>,
+    /// Key ids trusted as the device owner's local key (`moatd trust --local-owner`): revisions they sign are local
+    /// changes the controller did not distribute (W13 `local_change`).
+    local_owner_keys: std::collections::BTreeSet<String>,
+    /// The pending local change reported to the controller (durable in LOCAL_CHANGE_FILE).
+    local_change: Option<LocalChangeReport>,
+    last_sync_state: Option<SyncState>,
+    last_ack_error: Option<String>,
+}
+
+/// Durable record of the pending local change (W13).
+pub const LOCAL_CHANGE_FILE: &str = "local-change.json";
+/// Suffix of trusted key files that belong to the device owner's local key.
+pub const LOCAL_OWNER_SUFFIX: &str = ".local-owner.pub";
+
+pub fn load_local_owner_keys(dir: &Path) -> std::collections::BTreeSet<String> {
+    let mut out = std::collections::BTreeSet::new();
+    for e in fs::read_dir(dir).into_iter().flatten().flatten() {
+        if e.file_name().to_string_lossy().ends_with(LOCAL_OWNER_SUFFIX) {
+            if let Ok(vk) = fs::read_to_string(e.path()).map_err(|e| e.to_string()).and_then(|s| verifying_key_from_hex(&s)) {
+                out.insert(moat_core::signing::key_id(&vk));
+            }
+        }
+    }
+    out
 }
 
 pub fn lookup_uid(name: &str) -> Option<u32> {
@@ -130,6 +154,9 @@ pub fn load_trust(dir: &Path) -> TrustStore {
 impl<B: NftBackend> Endpoint<B> {
     pub fn new(state_dir: PathBuf, device_id: String, backend: B, cgroups: Cgroups, spool: Spool, adv: CapabilityAdvertisement) -> Self {
         let trust = load_trust(&state_dir.join("trusted"));
+        let local_owner_keys = load_local_owner_keys(&state_dir.join("trusted"));
+        let local_change =
+            fs::read(state_dir.join(LOCAL_CHANGE_FILE)).ok().and_then(|b| serde_json::from_slice::<LocalChangeReport>(&b).ok());
         Endpoint {
             recovery: RecoveryState::load(&state_dir),
             state_dir,
@@ -156,6 +183,56 @@ impl<B: NftBackend> Endpoint<B> {
             journal: Journal::default(),
             journal_uncertain: None,
             rollback_error: None,
+            local_owner_keys,
+            local_change,
+            last_sync_state: None,
+            last_ack_error: None,
+        }
+    }
+
+    /// Fleet-sync outbox (docs/fleet-sync.md): accept the sync agent's acknowledgement and publish
+    /// `spool/sync-state.json` (`spool_low_seq`, `acked_seq`, `next_seq`, `local_change`) when it changed.
+    pub fn sync_outbox(&mut self) {
+        let err = self.spool.consume_ack_file();
+        if err.is_some() && err != self.last_ack_error {
+            self.spool.append(Event::CoverageChanged {
+                level: "fleet-sync".into(),
+                detail: format!("acknowledgement refused: {}", err.clone().unwrap_or_default()),
+            });
+        }
+        self.last_ack_error = err;
+        let st = self.spool.sync_state(self.local_change.clone());
+        if self.last_sync_state.as_ref() != Some(&st) && self.spool.write_sync_state(self.local_change.clone()).is_ok() {
+            self.last_sync_state = Some(st);
+        }
+    }
+
+    pub fn local_change(&self) -> Option<&LocalChangeReport> {
+        self.local_change.as_ref()
+    }
+
+    /// After a revision is committed: a revision signed by a local-owner key is a local change (reported until a
+    /// controller-distributed revision supersedes it); any other trusted signer's revision clears it.
+    fn note_local_change(&mut self, signed: &SignedSnapshot, snap: &Snapshot, prior: Option<&Snapshot>) {
+        if self.local_owner_keys.contains(&signed.key_id) {
+            // From no policy at all, any policy is treated as broadening (conservative).
+            let broadening = prior.map(|p| moat_core::diff::diff(&p.policy, &snap.policy).is_broadening()).unwrap_or(true);
+            let lc = LocalChangeReport {
+                revision: snap.revision,
+                digest: format!("sha256:{}", snap.policy_digest),
+                broadening,
+                authorized_by: format!("local-owner:{}", signed.key_id),
+            };
+            let _ = self.store.write_atomic(&self.state_dir, LOCAL_CHANGE_FILE, &serde_json::to_vec_pretty(&lc).unwrap());
+            self.spool.append(Event::LocalChange {
+                revision: lc.revision,
+                digest: lc.digest.clone(),
+                broadening: lc.broadening,
+                authorized_by: lc.authorized_by.clone(),
+            });
+            self.local_change = Some(lc);
+        } else if self.local_change.take().is_some() {
+            let _ = self.store.remove(&self.state_dir, LOCAL_CHANGE_FILE);
         }
     }
 
@@ -762,6 +839,7 @@ impl<B: NftBackend> Endpoint<B> {
             policy_digest: snap.policy_digest.clone(),
             skipped_allows: rep.skipped_allows.iter().map(|(id, _)| id.clone()).collect(),
         });
+        self.note_local_change(&signed, &snap, prior_snap.as_ref());
         self.current = Some((signed, snap, rep));
         if !self.recovery.enforcement_disabled {
             self.set_enforcement(true, "policy enforced");
@@ -1182,6 +1260,83 @@ pub(crate) mod tests {
 
     pub fn events(ep: &Endpoint<FakeNft>) -> Vec<Event> {
         ep.spool.read_after(0, 1000).into_iter().map(|r| r.event).collect()
+    }
+
+    fn signed_text(key: &ed25519_dalek::SigningKey, rev: u64, text: &str) -> SignedSnapshot {
+        let p = Policy::parse(text).unwrap();
+        let s = compile(
+            &p,
+            &CapabilityAdvertisement::linux_nftables_cgroup(),
+            &CompileOptions {
+                target_devices: vec![],
+                revision: rev,
+                rollback_of: None,
+                issued_at: Utc::now() - Duration::seconds(5),
+                not_after: None,
+            },
+        )
+        .unwrap();
+        sign_snapshot(&s, key)
+    }
+
+    const EXTRA_ALLOW: &str = "\n[[rules]]\nid = \"local-extra\"\naction = \"allow\"\nselector = { session = { profiles = [\"coding-session\"] } }\ndestinations = { hosts = [\"example.org\"] }\ntransport = \"tcp\"\nports = [443]\nprovenance = { kind = \"git\", reference = \"local\" }\n";
+
+    #[test]
+    fn local_owner_revisions_are_reported_as_local_changes_until_the_fleet_supersedes_them() {
+        let (f, _) = fixture();
+        let owner = generate_key();
+        fs::write(f.dir.path().join(format!("trusted/owner{LOCAL_OWNER_SUFFIX}")), hex::encode(owner.verifying_key().to_bytes())).unwrap();
+        let mut ep = make(f.dir.path());
+        ep.startup();
+        let home = include_str!("../../../conformance/policies/home.toml");
+        // fleet revision: not a local change
+        assert_eq!(ep.offer(signed(&f.key, 3)).unwrap(), 3);
+        assert!(ep.local_change().is_none());
+        // the owner's local key adds an allow while the controller is away: a broadening local change
+        let broader = format!("{home}{EXTRA_ALLOW}");
+        assert_eq!(ep.offer(signed_text(&owner, 4, &broader)).unwrap(), 4);
+        let lc = ep.local_change().cloned().expect("local change recorded");
+        assert_eq!(lc.revision, 4);
+        assert!(lc.broadening, "an added allow is broadening");
+        assert!(lc.digest.starts_with("sha256:") && lc.digest.len() == 7 + 64, "{}", lc.digest);
+        assert!(lc.authorized_by.starts_with("local-owner:"));
+        assert!(events(&ep).iter().any(|e| matches!(e, Event::LocalChange { revision: 4, broadening: true, .. })));
+        // durable: a restarted daemon still reports it, and the sync state carries it
+        let mut ep = make(f.dir.path());
+        ep.startup();
+        assert_eq!(ep.local_change().map(|l| l.revision), Some(4));
+        ep.sync_outbox();
+        let st: crate::spool::SyncState =
+            serde_json::from_slice(&fs::read(f.dir.path().join("spool").join(crate::spool::SYNC_STATE_FILE)).unwrap()).unwrap();
+        assert_eq!(st.local_change.as_ref().map(|l| l.revision), Some(4));
+        assert!(st.spool_low_seq >= 1 && st.next_seq > st.spool_low_seq);
+        // the owner narrows it again locally: still a local change, not broadening
+        assert_eq!(ep.offer(signed_text(&owner, 5, home)).unwrap(), 5);
+        assert_eq!(ep.local_change().map(|l| (l.revision, l.broadening)), Some((5, false)));
+        // a controller-distributed revision supersedes it (the owner resolved it on the controller)
+        assert_eq!(ep.offer(signed(&f.key, 6)).unwrap(), 6);
+        assert!(ep.local_change().is_none());
+        assert!(!f.dir.path().join(LOCAL_CHANGE_FILE).exists());
+    }
+
+    #[test]
+    fn sync_outbox_accepts_the_agents_ack_and_refuses_a_future_one() {
+        let (f, mut ep) = fixture();
+        ep.startup();
+        ep.offer(signed(&f.key, 3)).unwrap();
+        let spool = f.dir.path().join("spool");
+        let last = ep.spool.next_seq() - 1;
+        fs::write(spool.join(crate::spool::ACKED_FILE), last.to_string()).unwrap();
+        ep.sync_outbox();
+        assert_eq!(ep.spool.acked_seq(), last);
+        let st: crate::spool::SyncState = serde_json::from_slice(&fs::read(spool.join(crate::spool::SYNC_STATE_FILE)).unwrap()).unwrap();
+        assert_eq!(st.acked_seq, last);
+        fs::write(spool.join(crate::spool::ACKED_FILE), "999999").unwrap();
+        ep.sync_outbox();
+        assert_eq!(ep.spool.acked_seq(), last, "an acknowledgement beyond what was written is refused");
+        assert!(events(&ep)
+            .iter()
+            .any(|e| matches!(e, Event::CoverageChanged { level, detail } if level == "fleet-sync" && detail.contains("refused"))));
     }
 
     #[test]
