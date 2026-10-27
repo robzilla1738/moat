@@ -15,5 +15,11 @@ Measured on ubuntu-latest (scratch runs 40552513209 and the run for 4208c96, 202
 
 In the netns test this happened only when the daemon's 1 s tick ended the stream *after* `recover isolate` had
 installed the table (it saves the state file first, then the table), hence the intermittency. The fix is in
-`render_local_emergency` (moatd/src/nft.rs); the netns test now pauses moatd across `recover isolate` so the
-previously failing order runs every time, with the unchanged 3 s bound measured from SIGCONT.
+`render_local_emergency` (moatd/src/nft.rs). The netns test reproduces the failing condition on every run: the
+rules `recover isolate` installs (`moatd render-isolation`, under a probe table name moatd does not manage) are in the
+kernel while the stream flows for 1.5 s, then isolation is requested; the 3 s bound is unchanged.
+
+A first version of the test paused moatd with SIGSTOP across `recover isolate`. A negative control (draft PR #39:
+that test against the unfixed renderer) still passed, because the pause also stopped the proxy's pump threads, so
+no data was in flight. That version did not reproduce the failure and was replaced; the negative control was re-run
+against the replacement (see PR #40's description for the run).
