@@ -4,6 +4,11 @@
  * localhost is not treated as trusted — every route authenticates.
  */
 import { apps, appDetail, diagnostics, whatChanged } from "./standalone.ts";
+import { approveCandidate, baseline, candidate, closeCapture, driftReview, importCandidate, muteIncident, proposeBaseline, retireBaseline, startCapture } from "./learning.ts";
+import { loadPacks, packProblems, proposePack, type WorkflowPack } from "./packs.ts";
+import { fileURLToPath } from "node:url";
+let packCache: WorkflowPack[] | null = null;
+const workflowPacks = () => (packCache ??= loadPacks(join(fileURLToPath(new URL("../../packs/workflows", import.meta.url)))));
 import { advanceRollout, createRollout, reconciliation, resolveLocalChange, rolloutStatus } from "./fleet.ts";
 export const CONTROLLER_VERSION = "0.1.0";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
@@ -89,6 +94,19 @@ r("POST", "/v1/rollouts", ({ c, p, json }) => createRollout(c, c.require(p, "own
 r("GET", "/v1/rollouts/:rev", ({ c, p, params }) => (c.require(p, "owner", "viewer"), rolloutStatus(c, Number(params[0]))));
 r("POST", "/v1/rollouts/:rev/advance", ({ c, p, params }) => advanceRollout(c, c.require(p, "owner"), Number(params[0])));
 r("POST", "/v1/devices/:id/local-change/resolve", ({ c, p, params, json }) => resolveLocalChange(c, c.require(p, "owner"), params[0]!, json.resolution));
+// W14 learning: bounded capture → candidate → owner review → immutable baseline → drift (a new candidate) → proposal.
+r("POST", "/v1/learning/captures", ({ c, p, json }) => startCapture(c, c.require(p, "owner"), json));
+r("POST", "/v1/learning/captures/:id/close", ({ c, p, params }) => closeCapture(c, c.require(p, "owner"), params[0]!));
+r("GET", "/v1/learning/candidates/:id", ({ c, p, params }) => (c.require(p, "owner", "viewer"), candidate(c, params[0]!)));
+r("POST", "/v1/learning/candidates/:id/approve", ({ c, p, params, json }) => approveCandidate(c, c.require(p, "owner"), params[0]!, json));
+r("POST", "/v1/learning/import", ({ c, p, json }) => importCandidate(c, c.require(p, "owner"), json));
+r("GET", "/v1/learning/baselines/:id", ({ c, p, params }) => (c.require(p, "owner", "viewer"), baseline(c, params[0]!)));
+r("POST", "/v1/learning/baselines/:id/drift", ({ c, p, params }) => driftReview(c, c.require(p, "owner"), params[0]!));
+r("POST", "/v1/learning/baselines/:id/propose", ({ c, p, params }) => proposeBaseline(c, c.require(p, "owner"), params[0]!));
+r("POST", "/v1/learning/baselines/:id/retire", ({ c, p, params, json }) => retireBaseline(c, c.require(p, "owner"), params[0]!, json.reason));
+r("GET", "/v1/packs", ({ c, p }) => (c.require(p, "owner", "viewer"), workflowPacks().map((x) => ({ ...x, problems: packProblems(x) }))));
+r("POST", "/v1/packs/propose", ({ c, p, json }) => proposePack(c, c.require(p, "owner"), workflowPacks(), json));
+r("POST", "/v1/incidents/:id/mute", ({ c, p, params, json }) => muteIncident(c, c.require(p, "owner"), params[0]!, json.minutes));
 r("GET", "/v1/dns/clients", ({ c, p }) => (c.require(p, "owner", "viewer"), dnsClients(c.db)));
 r("GET", "/v1/notifications", ({ c, p }) => (c.require(p, "owner"), { destinations: c.notifier.list(), status: c.notifier.status() }));
 r("POST", "/v1/notifications/destinations", ({ c, p, json }) => (c.require(p, "owner"), c.notifier.addDestination(json)));

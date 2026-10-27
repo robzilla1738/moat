@@ -9,6 +9,7 @@ import { audit, CONTROL_MIGRATIONS, HttpError, openDb, tx, type DB } from "./db.
 import { canonicalJson, generateKeyPair, id, keyIdOf, keyPairFromSeed, publicFromHex, requestString, responseString, sha256hex, signB64, token, verifyB64, type KeyPair } from "./crypto.ts";
 import { FlowStore, type FlowRecord } from "./flows.ts";
 import { desiredSnapshot, holdReason, recordLocalChange } from "./fleet.ts";
+import { ensureLearning, isMuted } from "./learning.ts";
 import { Notifier, type FetchLike, type Urgency } from "./notify.ts";
 import type { Moatctl } from "./moatctl.ts";
 import { contextDigest, contractTime, grantDigest, policyDigest, type ApprovalContext, type Delegation, type GrantApproval, type GrantV1, type OwnerAuthorization, type SignResult } from "./signer.ts";
@@ -72,6 +73,7 @@ export class Controller {
     this.signer = o.signer;
     this.moatctl = o.moatctl;
     this.key = o.controllerSeedHex ? keyPairFromSeed(o.controllerSeedHex) : generateKeyPair();
+    ensureLearning(this);
   }
   private iso() {
     return this.now().toISOString();
@@ -365,14 +367,14 @@ export class Controller {
       this.db.prepare("UPDATE incidents SET occurrences = occurrences + 1, last_at = ?, state = 'open', resolved_at = CASE WHEN ? THEN NULL ELSE resolved_at END, process_instance = COALESCE(?, process_instance), policy_revision = COALESCE(?, policy_revision), revision = revision + 1 WHERE id = ?")
         .run(s.at, reopen ? 1 : 0, s.process ?? null, s.revision ?? null, existing.id);
       this.db.prepare("INSERT INTO incident_log (incident_id, type, source_ref, at) VALUES (?, ?, ?, ?)").run(existing.id, reopen ? "reopened" : "occurrence", s.ref, this.iso());
-      if (reopen) this.notifier.enqueue(existing.id, `${key}#${existing.revision + 1}`, s.urgency, s.kind);
+      if (reopen && !isMuted(this, key)) this.notifier.enqueue(existing.id, `${key}#${existing.revision + 1}`, s.urgency, s.kind);
       return existing.id;
     }
     const iid = id("inc");
     this.db.prepare("INSERT INTO incidents (id, dedup_key, kind, device_id, session_id, process_instance, app, destination, port, transport, reason, rule, policy_revision, urgency, state, occurrences, first_at, last_at, facts) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', 1, ?, ?, ?)")
       .run(iid, key, s.kind, s.device, s.session ?? null, s.process ?? null, s.app ?? null, s.destination, s.port ?? null, s.transport ?? null, s.reason, s.rule ?? null, s.revision ?? null, s.urgency, s.at, s.at, JSON.stringify(s.facts ?? {}));
     this.db.prepare("INSERT INTO incident_log (incident_id, type, source_ref, at) VALUES (?, 'raised', ?, ?)").run(iid, s.ref, this.iso());
-    this.notifier.enqueue(iid, key, s.urgency, s.kind);
+    if (!isMuted(this, key)) this.notifier.enqueue(iid, key, s.urgency, s.kind);
     return iid;
   }
 
