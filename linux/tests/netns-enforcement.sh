@@ -240,6 +240,38 @@ expect "proxy: CONNECT to denied.lab refused" blocked "$(launch lab-hosts connec
 expect "proxy: plain HTTP Host allowed.lab allowed" 0 "$(launch lab-hosts http_allowed)"
 expect "proxy: plain HTTP Host denied.lab answered 403 by the proxy" 0 "$(launch lab-hosts http_denied)"
 expect "proxy: TLS to a bare IP (no SNI) blocked" blocked "$(launch lab-hosts ip_no_sni)"
+# Shared infrastructure / fronting (adversarial matrix, Destinations). A visible mismatch is refused; the encrypted
+# Host is a documented limit, shown here: it reaches the allowed name's own server and never another address.
+cat > "$WORK/s/front.py" <<'FRONT'
+import os, socket, ssl, sys
+connect_host, sni = sys.argv[1], sys.argv[2]
+hp = os.environ["HTTPS_PROXY"].split("//")[-1].strip("/")
+host, port = hp.rsplit(":", 1)
+s = socket.create_connection((host.strip("[]"), int(port)), timeout=5)
+s.sendall(f"CONNECT {connect_host}:8443 HTTP/1.1\r\nHost: {connect_host}:8443\r\n\r\n".encode())
+head = b""
+while b"\r\n\r\n" not in head:
+    c = s.recv(1)
+    if not c:
+        sys.exit(3)
+    head += c
+if not head.startswith(b"HTTP/1.1 200"):
+    sys.exit(4)
+ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT); ctx.check_hostname = False; ctx.verify_mode = ssl.CERT_NONE
+t = ctx.wrap_socket(s, server_hostname=sni)
+t.sendall(f"GET / HTTP/1.1\r\nHost: {sni}\r\n\r\n".encode())
+print(t.recv(4096).decode(errors="replace"))
+FRONT
+chmod 644 "$WORK/s/front.py"
+mk front_mismatch "python3 $WORK/s/front.py allowed.lab denied.lab | grep -q lab-tls"
+mk front_match "python3 $WORK/s/front.py allowed.lab allowed.lab | grep -q lab-tls-real"
+mk front_inner_host "$C --noproxy '*' -H 'Host: denied.lab' https://allowed.lab:8443/"
+expect "proxy: CONNECT tunnel whose SNI matches the CONNECT host reaches the real host (control)" 0 "$(launch lab-hosts front_match)"
+expect "proxy: CONNECT allowed.lab carrying TLS SNI denied.lab is refused (host/SNI mismatch)" blocked "$(launch lab-hosts front_mismatch)"
+as_nobody "MOAT_QUIET=1 $BIN/moat-launch --socket $SOCK --profile lab-hosts -- bash $WORK/s/front_inner_host.sh" > "$WORK/front_inner.out" 2>/dev/null || true
+grep -q 'lab-tls-real host=denied.lab' "$WORK/front_inner.out" && ! grep -q lab-tls-evil "$WORK/front_inner.out" \
+  && ok "proxy LIMIT (documented): an encrypted Host behind an allowed SNI reaches only the allowed name's own server" \
+  || bad "fronting limit case ($(cat "$WORK/front_inner.out"))"
 as_nobody "MOAT_QUIET=1 $BIN/moat-launch --socket $SOCK --profile lab-hosts -- bash $WORK/s/hold.sh" >/dev/null 2>&1 &
 HOLD=$!
 wait_for '.egress_proxy | length == 1' || true

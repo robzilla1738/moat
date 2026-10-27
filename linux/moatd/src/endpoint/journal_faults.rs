@@ -357,3 +357,68 @@ fn sessions_running_across_a_restart_are_stopped_not_adopted() {
             if session_id == "20261027-old" && profile == "coding-session" && reason.contains("not adopted"))));
     assert!(ep2.status().sessions.is_empty());
 }
+
+/// Slow disk (adversarial matrix, Load): every durable step takes 300 ms. The activation still commits only after
+/// its durable steps, in the same order, and a trial whose deadline passes while the slow writes are still running
+/// is reverted on the next tick instead of being treated as confirmed.
+#[test]
+fn a_slow_disk_delays_activation_but_never_reorders_or_outlives_a_trial_deadline() {
+    let (f, _) = fixture();
+    let crashed = Arc::new(AtomicBool::new(false));
+    let mut ep = faulty(&f, &crashed, vec![]);
+    ep.startup();
+    ep.offer(signed(&f.key, 1)).unwrap();
+    let mut st = FaultStore::new(crashed.clone());
+    st.latency = std::time::Duration::from_millis(300);
+    ep.store = Box::new(st);
+    let t0 = std::time::Instant::now();
+    assert_eq!(ep.offer(signed(&f.key, 2)), Ok(2));
+    assert!(t0.elapsed() >= std::time::Duration::from_millis(5 * 300), "the latency was really paid: {:?}", t0.elapsed());
+    consistent(&ep, 2, "slow plain apply");
+    assert_eq!(ep.status().activation.unwrap().durability, "durable");
+    // trial of 1 s: the deadline is fixed when the candidate is staged; four more slow writes (~1.2 s) follow
+    assert_eq!(ep.offer_with(signed(&f.key, 3), Some(1)), Ok(3));
+    let t = ep.status().trial.expect("trial recorded");
+    assert!(Utc::now() > t.deadline, "the deadline passed during the slow activation");
+    ep.tick_trial(Utc::now());
+    consistent(&ep, 2, "trial whose deadline passed during a slow activation is reverted");
+    assert!(ep.status().trial.is_none());
+    // restart on the same (slow) disk: the revert is what survives
+    let ep2 = restart(ep, f.dir.path());
+    consistent(&ep2, 2, "after restart");
+    assert!(hw(&ep2) >= 3, "replay high-water kept: revision 3 cannot come back");
+}
+
+/// Interrupted upgrade, then a downgrade to this binary (adversarial matrix, Updates): a newer moatd left an
+/// activation journal with a schema this binary does not know and a higher replay high-water. No on-disk migration
+/// exists yet, so this is the version-mismatch half of "interrupted migration": the unknown state is kept for
+/// diagnosis, never reset to a fresh bootstrap, the last verified snapshot stays enforced, and replay protection
+/// does not go backwards.
+#[test]
+fn state_left_by_a_newer_schema_is_kept_and_refused_not_reset() {
+    let (f, mut ep) = fixture();
+    ep.startup();
+    ep.offer(signed(&f.key, 1)).unwrap();
+    ep.offer(signed(&f.key, 2)).unwrap();
+    let path = f.dir.path().join(journal::FILE);
+    let mut j: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    j["schema"] = "moatd.activation_journal.v2".into();
+    j["phase"] = "applying".into();
+    j["target"] = 4.into();
+    j["replay_high_water"] = 4.into();
+    j["migration"] = serde_json::json!({ "from": "v1", "to": "v2", "step": 2, "of": 3 });
+    let newer = serde_json::to_vec_pretty(&j).unwrap();
+    std::fs::write(&path, &newer).unwrap();
+    let ep2 = restart(ep, f.dir.path());
+    assert_eq!(phase(&ep2), Phase::RecoveryRequired);
+    assert_eq!(ep2.status().coverage, "recovery-required");
+    assert!(ep2.status().activation.unwrap().detail.unwrap_or_default().contains("unknown schema"));
+    assert_eq!(ep2.status().revision, Some(2), "the last verified snapshot stays enforced");
+    assert_eq!(kernel_rev(&ep2), Some(2));
+    assert!(ep2.backend.deleted.is_empty(), "nothing enforced is removed");
+    assert_eq!(std::fs::read(f.dir.path().join("activation.json.corrupt")).unwrap(), newer, "the newer state is kept byte for byte");
+    let mut ep2 = ep2;
+    assert!(ep2.offer(signed(&f.key, 2)).is_err(), "replay of an already-applied revision still refused");
+    assert_eq!(ep2.offer(signed(&f.key, 5)), Ok(5), "a newer signed revision restores a known state");
+    assert_eq!(phase(&ep2), Phase::Confirmed);
+}

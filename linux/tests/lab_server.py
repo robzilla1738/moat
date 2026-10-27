@@ -60,6 +60,12 @@ def respond(conn, body):
             if not chunk:
                 break
             data += chunk
+        # Echo the Host the server received, so a check can show what reached it (shared-infrastructure limit case).
+        host = b""
+        for line in data.split(b"\r\n")[1:]:
+            if line.lower().startswith(b"host:"):
+                host = line[5:].strip()
+        body = body + b" host=" + host
         conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s" % (len(body), body))
     except Exception:
         pass
