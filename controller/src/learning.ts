@@ -265,3 +265,69 @@ export function isMuted(c: Controller, dedupKey: string): boolean {
   const r = c.db.prepare("SELECT until FROM incident_mutes WHERE subject = ?").get(subject) as { until: string } | undefined;
   return !!r && r.until > c.now().toISOString();
 }
+
+// ------------------------------------------------------------------------------------------------ review surfaces
+
+export type CaptureState = "capturing" | "window_ended" | "closed";
+export interface CaptureView { id: string; device_id: string; exe: string; signer: string | null; workflow: string; network_context: string; started_at: string; ends_at: string; max_records: number; status: string; state: CaptureState; created_by: string; candidate_id: string | null }
+
+/**
+ * The permission diff a reviewer sees for a candidate: which entries would broaden the identity's current reviewed
+ * baseline, which it already covers, and which were only ever refused. Exact destinations; never collapsed to a group.
+ */
+export function permissionDiff(c: Controller, cand: CandidateView) {
+  const prev = c.db.prepare("SELECT b.id, b.entries FROM baselines b WHERE b.device_id = ? AND b.exe = ? AND IFNULL(b.signer,'') = ? AND NOT EXISTS (SELECT 1 FROM baseline_retirements r WHERE r.baseline_id = b.id) ORDER BY b.approved_at DESC LIMIT 1")
+    .get(cand.device_id, cand.exe, cand.signer ?? "") as { id: string; entries: string } | undefined;
+  const covered = new Set((prev ? (JSON.parse(prev.entries) as Entry[]) : []).map((e) => `${e.destination}|${e.port}|${e.transport}`));
+  const rows = cand.entries.map((e, index) => ({
+    index,
+    destination: e.destination,
+    port: e.port,
+    transport: e.transport,
+    occurrences: e.occurrences,
+    change: covered.has(`${e.destination}|${e.port}|${e.transport}`) ? ("in_baseline" as const) : ("adds" as const),
+    unknown_destination: e.destination === "unknown",
+    denied_only: e.verdicts.length === 1 && e.verdicts[0] === "deny",
+  }));
+  return {
+    baseline_id: prev?.id ?? null,
+    adds: rows.filter((r) => r.change === "adds").length,
+    rows,
+    removals: cand.removal_proposals,
+    note: "Accepting an entry adds an exact allow for this identity once you enforce the baseline with your owner key. Denies keep precedence.",
+  };
+}
+
+/** Everything the learning screens list: captures, the review queue, the drift queue and baselines. */
+export function learningOverview(c: Controller) {
+  ensureLearning(c);
+  const now = c.now().toISOString();
+  const caps = (c.db.prepare("SELECT * FROM captures ORDER BY started_at DESC LIMIT 50").all() as unknown as Omit<CaptureView, "state" | "candidate_id">[]).map((x) => ({
+    ...x,
+    state: (x.status === "closed" ? "closed" : x.ends_at <= now ? "window_ended" : "capturing") as CaptureState,
+    candidate_id: (c.db.prepare("SELECT id FROM candidates WHERE capture_id = ?").get(x.id) as { id: string } | undefined)?.id ?? null,
+  }));
+  const cands = (c.db.prepare("SELECT id FROM candidates ORDER BY created_at DESC LIMIT 100").all() as { id: string }[]).map((r) => {
+    const v = candidate(c, r.id);
+    return { ...v, permission_diff: permissionDiff(c, v) };
+  });
+  const bases = (c.db.prepare("SELECT id FROM baselines ORDER BY approved_at DESC LIMIT 100").all() as { id: string }[]).map((r) => baseline(c, r.id));
+  return {
+    captures: caps,
+    review_queue: cands.filter((x) => x.status === "open" && x.kind !== "drift"),
+    drift_queue: cands.filter((x) => x.status === "open" && x.kind === "drift"),
+    reviewed: cands.filter((x) => x.status !== "open").slice(0, 20),
+    baselines: bases,
+    limits: { max_capture_hours: MAX_CAPTURE_HOURS, max_capture_records: MAX_CAPTURE_RECORDS, unused_removal_days: UNUSED_REMOVAL_DAYS },
+  };
+}
+
+/** Owner discards a candidate ("more evidence needed"): nothing is accepted, the baseline is untouched. */
+export function discardCandidate(c: Controller, actor: Principal, cid: string) {
+  principalOwner(c, actor);
+  const cand = candidate(c, cid);
+  if (cand.status !== "open") throw new HttpError(409, "candidate already reviewed");
+  c.db.prepare("UPDATE candidates SET status = 'discarded' WHERE id = ?").run(cid);
+  audit(c.db, c.now(), actor.id, "learning.candidate.discard", cid, {});
+  return candidate(c, cid);
+}
