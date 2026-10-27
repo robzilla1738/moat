@@ -269,6 +269,26 @@
       "open_defects": []
     },
     {
+      "id": "linux.ordinary-apps.connect-attribution",
+      "capability": "observe-only connect-time attribution of ordinary-app TCP connects (pid, uid, comm, cgroup id from the kernel; executable identity from /proc when the process still exists), with buffer loss, stalls, unparsed tracer output and tracer exit reported as inventory_loss",
+      "backend": "moatd ebpf 0.1.0 via bpftrace 0.25.0 (tracepoint sock:inet_sock_set_state)",
+      "evidence_level": "native_ci",
+      "disposition": "implemented_unproven",
+      "tests": [
+        "linux/moatd/src/ebpf.rs::tests",
+        "linux/tests/ordinary-inventory-ebpf.sh"
+      ],
+      "environment": "ci-ubuntu-26.04-x86_64",
+      "last_result": {
+        "result": "pass",
+        "run": "linux-endpoint 40559834509",
+        "commit": "f64a4ad",
+        "date": "2026-10-27"
+      },
+      "limits": "observe_only: nothing is enforced and app rules stay unsupported_rejected (docs/decisions/W10-enforcement.md, W10-increment-3-loader.md). TCP connects only; UDP not attributed by this path; the network namespace is not reported; comm is process-set. Every connect to the independent receiver was attributed (20/20 short-lived processes, IPv6, non-root uid) and a 20,000-connect flood was fully accounted against the kernel's ActiveOpens. The forced-loss path (1-page buffer) produced no loss on this runner, so native loss reporting is unexercised; the decoder's loss handling is unit-tested only. bpftrace is an optional runtime dependency. The daemon spool path (`moatd run --ordinary-inventory-bpftrace`) has no native check. Not run on Omarchy or under the installed unit.",
+      "open_defects": []
+    },
+    {
       "id": "linux.ordinary-apps.app-rules",
       "capability": "per-application rules for ordinary Linux apps",
       "backend": "moatd-nftables 0.1.0",
