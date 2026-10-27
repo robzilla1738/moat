@@ -1,13 +1,14 @@
 import { SubNav, Badge, Card, CoverageBadge, DeviceIcon, SectionTitle, SupportBadge } from "../components/ui";
-import { useStore } from "../data/store";
+import { useData, useFreshness } from "../data/store";
 import type { Coverage } from "../data/types";
 import { COVERAGE } from "../format";
 
-const ORDER: Coverage[] = ["protected-session", "enforced", "monitoring", "dns-only", "degraded", "isolated"];
+const ORDER: Coverage[] = ["protected-session", "enforced", "monitoring", "dns-only", "degraded", "isolated", "unknown"];
 const KEYS = ["session_enforcement", "app_enforcement", "process_identity", "ancestor_attribution", "hostname_enforcement", "session_hostname_proxy", "byte_counters", "existing_flow_revocation", "telemetry_completeness"];
 
 export function CoverageScreen({ go }: { go: (to: string) => void }) {
-  const { data } = useStore();
+  const data = useData();
+  const fresh = useFreshness();
   const endpoints = data.devices.filter((d) => d.platform === "linux" || d.platform === "macos");
   return (
     <div className="page">
@@ -18,7 +19,7 @@ export function CoverageScreen({ go }: { go: (to: string) => void }) {
       </div>
       <div className="levels">
         {ORDER.map((c) => {
-          const n = data.devices.filter((d) => d.coverage === c);
+          const n = data.devices.filter((d) => fresh(d).coverage === c);
           return (
             <Card key={c} className={`level ${n.length ? "" : "level-empty"}`}>
               <div className="level-top">

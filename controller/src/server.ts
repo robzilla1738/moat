@@ -30,14 +30,18 @@ const routes: Route[] = [];
 const r = (method: string, path: string, h: Handler, device = false) => routes.push({ method, re: new RegExp(`^${path.replace(/:[a-z_]+/g, "([^/]+)")}$`), h, device });
 
 // --- owner / viewer
+r("GET", "/v1/me", ({ c, p }) => {
+  const me = c.require(p, "owner", "viewer", "launcher", "agent");
+  return { id: me.id, name: me.name, role: me.role };
+});
 r("GET", "/v1/overview", ({ c, p }) => (c.require(p, "owner", "viewer"), c.overview()));
 r("GET", "/v1/devices", ({ c, p }) => (c.require(p, "owner", "viewer"), c.devices()));
 r("POST", "/v1/devices/:id/revoke", ({ c, p, params }) => c.revokeDevice(c.require(p, "owner"), params[0]!));
 r("POST", "/v1/enrollment-codes", ({ c, p, json }) => c.createEnrollmentCode(c.require(p, "owner"), Array.isArray(json.device_groups) ? (json.device_groups as string[]) : []));
 r("GET", "/v1/incidents", ({ c, p, query }) => (c.require(p, "owner", "viewer"), c.incidents(query.get("state") ?? undefined)));
 r("GET", "/v1/incidents/:id", ({ c, p, params }) => (c.require(p, "owner", "viewer"), c.incident(params[0]!)));
-r("POST", "/v1/incidents/:id/acknowledge", ({ c, p, params }) => c.acknowledge(c.require(p, "owner"), params[0]!));
-r("POST", "/v1/incidents/:id/resolve", ({ c, p, params }) => c.resolve(c.require(p, "owner"), params[0]!));
+r("POST", "/v1/incidents/:id/acknowledge", ({ c, p, params, json }) => c.acknowledge(c.require(p, "owner"), params[0]!, json.expected_revision));
+r("POST", "/v1/incidents/:id/resolve", ({ c, p, params, json }) => c.resolve(c.require(p, "owner"), params[0]!, json.expected_revision));
 r("GET", "/v1/r/:ref", ({ c, p, params }) => {
   c.require(p, "owner", "viewer");
   const iid = c.notifier.resolveRef(params[0]!);
@@ -54,6 +58,7 @@ r("POST", "/v1/policy/proposals/:id/approve", ({ c, p, params, json }) => c.appr
 r("POST", "/v1/policy/rollback", ({ c, p, json }) => c.rollback(c.require(p, "owner"), Number(json.to_revision), String(json.message ?? "")));
 r("GET", "/v1/grants", ({ c, p }) => (c.require(p, "owner", "viewer"), c.grants()));
 r("POST", "/v1/grants", ({ c, p, json }) => c.createGrant(c.require(p, "owner"), json));
+r("GET", "/v1/grants/:id", ({ c, p, params }) => (c.require(p, "owner", "viewer"), c.grantStatus(params[0]!)));
 r("POST", "/v1/grants/:id/revoke", ({ c, p, params }) => c.revokeGrant(c.require(p, "owner"), params[0]!));
 r("GET", "/v1/sessions", ({ c, p, query }) => (c.require(p, "owner", "viewer", "launcher"), c.sessions(query.get("device") ?? undefined)));
 r("GET", "/v1/dns/clients", ({ c, p }) => (c.require(p, "owner", "viewer"), dnsClients(c.db)));

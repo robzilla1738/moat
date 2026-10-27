@@ -1,7 +1,7 @@
-export type Coverage = "protected-session" | "enforced" | "monitoring" | "dns-only" | "degraded" | "isolated";
+export type Coverage = "protected-session" | "enforced" | "monitoring" | "dns-only" | "degraded" | "isolated" | "unknown";
 export type Support = "supported" | "partial" | "untested" | "unsupported";
 export type Platform = "macos" | "linux" | "ios" | "android-tv";
-export type RevisionState = "approved" | "distributed" | "received" | "applied" | "verified" | "rejected";
+export type RevisionState = "approved" | "distributed" | "received" | "applied" | "verified" | "rejected" | "trial" | "confirmed" | "rolled_back";
 
 export interface Capability { key: string; label: string; support: Support; note?: string }
 
@@ -12,7 +12,8 @@ export interface Device {
   platform: Platform;
   coverage: Coverage;
   coverageNote: string;
-  lastSeen: string; // ISO
+  /** Last report time on the controller's clock; null when the device never reported. */
+  lastSeen: string | null;
   revision: number | null;
   revisionState: RevisionState | null;
   capabilities: Capability[];
@@ -51,10 +52,20 @@ export interface Incident {
   action?: ActionState;
 }
 
+/**
+ * The state of an owner action, as far as evidence supports it. "sending" and "pending" are never shown as applied;
+ * "active" needs an endpoint receipt; "simulated" exists only in demo mode.
+ */
+export type ActionPhase = "sending" | "pending" | "active" | "rejected" | "failed" | "expired" | "revoked" | "done" | "simulated";
 export interface ActionState {
-  kind: "allow_once" | "keep_blocked";
+  kind: "allow_once" | "keep_blocked" | "acknowledge";
+  phase: ActionPhase;
   steps: { label: string; state: "done" | "active" | "pending" | "failed"; at?: string; detail?: string }[];
+  grantId?: string;
+  revision?: number;
+  authorizedBy?: string | null;
   expiresAt?: string;
+  error?: string;
 }
 
 export interface Session {
@@ -65,6 +76,7 @@ export interface Session {
   boundaryKind: "linux_cgroup" | "instrumented_only" | "external_runtime";
   verified: boolean;
   state: "running" | "ended";
+  closeRequestedAt?: string;
   startedAt: string;
   endedAt?: string;
   launcher: string;
@@ -96,7 +108,9 @@ export interface Revision {
   revision: number;
   title: string;
   author: string;
-  authorizedBy: "owner_key" | "narrowing" | "temporary_grant_overlay";
+  /** From the signer's recorded answer; null when the controller did not record it (older revisions). */
+  authorizedBy: "owner_key" | "narrowing" | "temporary_grant_overlay" | null;
+  ownerKeyId?: string | null;
   createdAt: string;
   rollbackOf?: number;
   source: string;
@@ -123,13 +137,18 @@ export interface TimelinePoint { hour: string; allowed: number; blocked: number;
 export interface Snapshot {
   generatedAt: string;
   demo: boolean;
+  /** Controller clock at the time of the snapshot (demo: the browser clock). Freshness is computed from it. */
+  serverTime: string;
+  /** Browser clock when the snapshot was received. */
+  fetchedAt: string;
+  viewer?: { name: string; role: "owner" | "viewer" | "launcher" | "agent" };
   policyRevision: number;
   devices: Device[];
   incidents: Incident[];
   sessions: Session[];
   apps: App[];
   revisions: Revision[];
-  simulation: Simulation;
+  simulation: Simulation | null;
   timeline: TimelinePoint[];
-  grants: { id: string; destination: string; scope: string; expiresAt: string; by: string }[];
+  grants: { id: string; destination: string; scope: string; expiresAt: string; by: string; state?: string }[];
 }

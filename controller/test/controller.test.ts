@@ -136,7 +136,9 @@ test("incidents group repeats, ignore duplicate records, reopen after acknowledg
   f.c.sync(d as never, { events: [counter(2)] });
   assert.equal(f.c.incidents()[0]!.occurrences, 2, "same record twice is not a new occurrence");
   const owner = f.c.authenticate(f.ownerToken)!;
-  f.c.acknowledge(owner, inc.id);
+  assert.throws(() => f.c.acknowledge(owner, inc.id), /expected_revision is required/);
+  assert.throws(() => f.c.acknowledge(owner, inc.id, inc.revision + 1), /stale/);
+  f.c.acknowledge(owner, inc.id, inc.revision);
   assert.equal(f.c.incidents()[0]!.state, "acknowledged");
   f.c.sync(d as never, { events: [counter(7)] });
   inc = f.c.incidents().find((i) => i.kind === "blocked_connection")!;
@@ -283,4 +285,71 @@ test("trial revisions: start, confirm and rollback are recorded per device; a ro
   assert.ok(inc, "rollback raised");
   assert.equal(inc!.urgency, "high");
   assert.match(inc!.reason, /rolled back to 2/);
+});
+
+test("W08: grant status comes from endpoint receipts: pending until applied, rejected stays rejected, expiry is the original deadline", async () => {
+  const f = fixture();
+  const kp = enrollDevice(f);
+  await bootstrap(f);
+  const { d, inc } = await blockedSessionIncident(f, kp);
+  const owner = f.c.authenticate(f.ownerToken)!;
+  const g = (await f.c.allowOnce(owner, { incident_id: inc.id, incident_revision: inc.revision, policy_revision: 1, ttl_seconds: 600 })) as { grant_id: string; revision: number };
+  let st = f.c.grantStatus(g.grant_id);
+  assert.equal(st.state, "pending", "signed and queued is not active");
+  assert.equal(st.authorized_by, "temporary_grant_overlay", "authorizer is the signer's answer");
+  assert.equal(st.devices[0]!.state, "queued");
+  f.c.sync(d as never, { last_applied: 1 });
+  st = f.c.grantStatus(g.grant_id);
+  assert.equal(st.state, "pending", "delivery is not application");
+  assert.equal(st.devices[0]!.state, "delivered");
+  f.c.sync(d as never, { last_applied: 1, receipts: [{ revision: g.revision, state: "rejected", detail: "signature ok, compile failed" }] });
+  st = f.c.grantStatus(g.grant_id);
+  assert.equal(st.state, "rejected");
+  f.c.sync(d as never, { last_applied: g.revision, receipts: [{ revision: g.revision + 0, state: "applied" }] });
+  // a later 'applied' receipt for the same revision supersedes nothing: rejected and applied both exist for rev 2,
+  // the most specific evidence (rejection at or after the applied revision) keeps it rejected
+  assert.equal(f.c.grantStatus(g.grant_id).state, "rejected");
+  f.clock.t += 601_000;
+  assert.equal(f.c.grantStatus(g.grant_id).state, "expired");
+  const revs = f.c.revisions();
+  assert.equal(revs[0]!.authorized_by, "temporary_grant_overlay");
+  assert.equal(revs[1]!.authorized_by, "owner_key");
+});
+
+test("W08: a grant becomes active only with an applied receipt for its revision", async () => {
+  const f = fixture();
+  const kp = enrollDevice(f);
+  await bootstrap(f);
+  const { d, inc } = await blockedSessionIncident(f, kp);
+  const owner = f.c.authenticate(f.ownerToken)!;
+  const g = (await f.c.allowOnce(owner, { incident_id: inc.id, incident_revision: inc.revision, policy_revision: 1, ttl_seconds: 600 })) as { grant_id: string; revision: number };
+  f.c.sync(d as never, { last_applied: 1, receipts: [{ revision: 1, state: "applied" }] });
+  assert.equal(f.c.grantStatus(g.grant_id).state, "pending", "an older revision's receipt says nothing about the grant");
+  f.c.sync(d as never, { last_applied: g.revision, receipts: [{ revision: g.revision, state: "applied" }] });
+  const st = f.c.grantStatus(g.grant_id);
+  assert.equal(st.state, "active");
+  assert.equal(st.devices[0]!.evidence!.revision, g.revision);
+  f.clock.t += 11 * 60_000;
+  assert.equal(f.c.grantStatus(g.grant_id).devices[0]!.stale, true, "a silent device is marked stale");
+});
+
+test("W08: a notification reference opens exactly its incident; new or reordered incidents never retarget it; a deleted one is not substituted", async () => {
+  const f = fixture();
+  const kp = enrollDevice(f);
+  f.c.notifier.addDestination({ name: "phone", kind: "ntfy", url: "https://ntfy.example/moat", min_urgency: "low" });
+  const d = f.c.authenticateDevice("POST", "/v1/device/sync", deviceHeaders(kp, "omarchy", "{}", new Date(f.clock.t).toISOString()), "{}");
+  const ev = (seq: number, rule: string) => ({ seq, at: new Date(f.clock.t).toISOString(), event: { type: "rule_counter", rule, packets: 1, bytes: 60, scope: "rule" } });
+  f.c.sync(d as never, { events: [ev(1, "default:a")] });
+  const first = f.c.incidents()[0]!;
+  const ref = (f.c.db.prepare("SELECT opaque_ref FROM notify_outbox WHERE incident_id = ?").get(first.id) as { opaque_ref: string }).opaque_ref;
+  for (let i = 2; i < 8; i++) {
+    f.clock.t += 60_000;
+    f.c.sync(d as never, { events: [ev(i, `default:r${i}`)] });
+  }
+  assert.notEqual(f.c.incidents()[0]!.id, first.id, "the list order changed");
+  assert.equal(f.c.notifier.resolveRef(ref), first.id);
+  assert.equal(f.c.notifier.resolveRef("not-a-ref"), null);
+  f.c.db.prepare("DELETE FROM incidents WHERE id = ?").run(first.id);
+  assert.equal(f.c.notifier.resolveRef(ref), first.id, "the reference still names the deleted incident");
+  assert.throws(() => f.c.incident(first.id), /no such incident/, "and the API refuses rather than substituting another");
 });

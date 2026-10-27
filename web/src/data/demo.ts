@@ -51,6 +51,9 @@ const timeline = Array.from({ length: 24 }, (_, i) => {
 
 export const demo: Snapshot = {
   generatedAt: new Date(NOW).toISOString(),
+  serverTime: new Date(NOW).toISOString(),
+  fetchedAt: new Date(NOW).toISOString(),
+  viewer: { name: "Robert", role: "owner" },
   demo: true,
   policyRevision: 14,
   devices,
@@ -331,3 +334,6 @@ export const demo: Snapshot = {
   },
   grants: [],
 };
+
+/** Opaque notification references in the demo. An unknown reference opens nothing. */
+export const demoRefs: Record<string, string> = { "n7Kq2xVb9LmA": "inc-8f2a", "Q4wz81RtpHc0": "inc-31c0" };
