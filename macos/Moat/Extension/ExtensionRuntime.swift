@@ -23,12 +23,12 @@ final class ExtensionRuntime: NSObject, NSXPCListenerDelegate {
         let deviceID = (try? String(contentsOf: Self.supportDir.appendingPathComponent("device-id"), encoding: .utf8))?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ProcessInfo.processInfo.hostName
         engine = FilterEngine(deviceID: deviceID, spool: EventSpool(capacity: 5000))
-        store = PolicyStore(directory: Self.supportDir.appendingPathComponent("state"), verifier: CoreVerifier(trust: trust.config))
+        store = PolicyStore(directory: Self.supportDir.appendingPathComponent("state"), verifier: CoreVerifier(trust: trust.config, deviceID: deviceID))
         self.trust = trust
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
         var running: () -> Bool = { false }
         // The running verifier follows the trusted-keys file: tick() re-reads it every 15 s and reload_trust on demand.
-        handler = ControlHandler(engine: engine, store: store, version: version, filterEnabled: { running() }, makeEvaluator: { try CoreEvaluator(policyJSON: $0) }, trust: trust, makeVerifier: { CoreVerifier(trust: $0) })
+        handler = ControlHandler(engine: engine, store: store, version: version, filterEnabled: { running() }, makeEvaluator: { try CoreEvaluator(policyJSON: $0) }, trust: trust, makeVerifier: { CoreVerifier(trust: $0, deviceID: deviceID) })
         super.init()
         running = { [weak self] in self?.isFilterRunning ?? false }
         for p in trust.problems { log.error("trust: \(p, privacy: .public)") }

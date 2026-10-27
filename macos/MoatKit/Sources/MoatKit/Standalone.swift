@@ -264,15 +264,19 @@ public struct LocalRulePlan: Equatable, Sendable {
     public var host: String
     public var port: UInt16
     public var expires: Date
+    /// This Mac's device id when known. The rule is then scoped to it, so a mixed-fleet compile for other devices
+    /// leaves it out instead of refusing (issue #26), and it can never select another device's flows.
+    public var deviceID: String?
 
     public static let maxDuration: TimeInterval = 8 * 3600
 
-    public init(action: Action, app: AppSummary, host: String, port: UInt16, expires: Date) {
+    public init(action: Action, app: AppSummary, host: String, port: UInt16, expires: Date, deviceID: String? = nil) {
         self.action = action
         self.app = app
         self.host = host
         self.port = port
         self.expires = expires
+        self.deviceID = deviceID
     }
 
     /// Problems that make the plan unauthorizable (never silently widened to make it "work").
@@ -286,6 +290,11 @@ public struct LocalRulePlan: Equatable, Sendable {
     }
 
     var selectorTOML: String {
+        let dev = deviceID.map { "devices = [\"\($0)\"], " } ?? ""
+        return dev + appSelectorTOML
+    }
+
+    var appSelectorTOML: String {
         if let s = app.signingID { return "apps = [{ signing_id = \"\(s)\"\(app.teamID.map { ", team_id = \"\($0)\"" } ?? "") }]" }
         return "apps = [{ executable = \"\(app.executable ?? "")\" }]"
     }
@@ -303,7 +312,7 @@ public struct LocalRulePlan: Equatable, Sendable {
         transport = "tcp"
         ports = [\(port)]
         expires_at = "\(f.string(from: expires))"
-        provenance = { kind = "local_owner", reference = "this mac" }
+        provenance = { kind = "owner_action", reference = "local-rule:\(id)", author = "owner on this mac", audit_ref = "\(id)" }
         """
     }
 
