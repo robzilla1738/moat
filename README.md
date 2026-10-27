@@ -17,11 +17,14 @@ machines, enforced locally on each device, coordinated by an optional controller
 </p>
 <p align="center"><sub>The macOS app on macOS 26, captured from the real app window on the CI runner in demo mode (no signed install).</sub></p>
 
-> **Read this first.** Moat states exactly what it covers and nothing more. The Linux protected-session boundary is
-> proven in CI on a real kernel; the macOS content filter builds and is unit-tested but **has not yet run as a signed
-> system extension on a real Mac**, so every macOS capability is labeled *untested*. There is no fail-closed claim,
-> no VPN-compatibility claim, no TLS interception, and phones and the TV get **DNS-only** coverage, labeled as such.
-> See [docs/STATUS.md](docs/STATUS.md) for every item.
+> **Read this first.** Moat is an **experimental build** and has not met its first release gate. Known open
+> defects include temporary grants that lose device and process scope, a launcher path a contained Linux workload can
+> use to request a looser session, and activation state that is not durably journaled; they are listed, with the work
+> package that closes each one, in the [claim ledger](docs/STATUS.md). The Linux protected-session boundary passes its
+> tests on a CI runner kernel but has not been proven through the installed service; the macOS content filter has
+> never run as a signed system extension. Nothing is marked *supported* until installed or real-workflow evidence
+> exists. There is no fail-closed claim, no VPN-compatibility claim and no TLS interception; phones and the TV get
+> **DNS-only** coverage, labeled as such.
 
 ## Three things, never blended
 
@@ -144,14 +147,18 @@ node controller/src/main.ts init ~/moat-data     # prints the next steps (owner 
 npm run dev -w web                               # or the static demo: npm run build:demo -w web
 ```
 
-## Guarantees the code enforces
+## Design rules (and where they do not hold yet)
+
+These are the rules the code is built around. Where a rule is not yet true, the [claim ledger](docs/STATUS.md)
+names the defect and the regression test that will close it.
 
 * **No silent weakening.** A rule needing a capability the device lacks is rejected, or (allow rules only) left out
-  *with a report*.
+  *with a report*. Profiles are not yet capability-checked (`D-PROFILE-CAPABILITY`).
 * **No scripts in policy.** Strict, versioned data; unknown fields rejected.
 * **Signed, platform-matched, replay-protected snapshots.** Trust is owner configuration; nothing promotes it.
 * **Agents cannot authorize themselves.** Broadening needs the owner key; agents can only propose a diff and assert
-  intent, never a verified block.
+  intent. The broadening classifier still misses some changes (`D-DIFF-*`), and generated grants lose scope
+  (`D-GRANT-SCOPE-LOSS`).
 * **Isolation is sticky.** No heartbeat loss, restart, new policy or canary rollback reopens it.
 * **Gaps are visible.** Sequence numbers, restart and gap records; enforcement never waits on logging.
 * **No invented measurements.** No "0 bytes" without a measurement, never an intended upload size.

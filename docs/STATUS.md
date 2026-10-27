@@ -1,170 +1,109 @@
-# Status
+# Status: claim ledger
 
-Every roadmap item, tracked honestly. Updated with each batch; the commit history is the audit trail.
+Moat is an **experimental build**. Release gate G0 ("truthful experimental build", MASTER_ROADMAP §13) is **not yet
+met**: the open defects below include grant scope loss, a launcher path a contained caller can use to broaden itself,
+and activation state that is not durably journaled. Until they are closed, treat every protection below as
+unproven outside the environment named next to it.
 
-| Mark | Meaning |
+The machine-readable source is [`claim-ledger.json`](claim-ledger.json). A test
+(`core/moat-core/tests/claim_ledger.rs`) fails CI if a claim is marked supported without installed or
+real-workflow evidence, if a claim cites a defect that does not exist, or if this page leaves a claim out.
+
+## How to read a claim
+
+| Field | Meaning |
 | --- | --- |
-| ✅ **done** | Implemented and covered by automated tests in CI. |
-| 🔬 **done, needs real-device proof** | Implemented and tested in CI, but the claim depends on Robert's hardware (signed macOS install, Omarchy kernel, his VPNs, his services). The UI keeps saying *untested* until the proof is recorded here. |
-| 🔑 **blocked on Robert** | Needs an account, credential, decision, or physical action only Robert can take. |
-| ⏭ **later** | Deliberately out of the MVP scope by the roadmap (v1/v2 or excluded). Not started. |
+| Claim | The smallest testable capability cell (backend + mode + subject + destination evidence + transport + lifecycle + environment). |
+| Disposition | `supported_installed` · `implemented_unproven` · `unsupported_rejected` · `omitted_accepted` · `unknown_degraded` (MASTER_ROADMAP §5.2). |
+| Evidence | `semantic` (pure functions) · `component` (real protocol boundary) · `native_ci` (real OS hooks on a CI runner) · `installed` (the shipped package/extension) · `real_workflow` (Robert's devices and daily use). |
+| Environment | Where the last result came from (see below). |
+| Last result | What the test actually reported, with the CI run. `not_run` is not a pass. |
 
-CI workflows: `rust` (fmt, clippy, tests, conformance), `linux-endpoint` (privileged cgroup tests + netns
-enforcement on a real kernel), `controller` (TypeScript against the Rust `moatctl`), `web` (typecheck, tests, demo
-build, screenshots with overflow/clipping/WCAG AA contrast checks via axe-core, Pages deploy when enabled), `macos`
-(MoatKit build + 44 XCTest tests on macOS 26 with Xcode 26; unsigned `xcodebuild` of the app + system extension; real
-window screenshots captured in demo mode).
+**Nothing is `supported_installed` today**: no claim has installed or real-workflow evidence yet.
 
-## Product contract and documents
+## Environments
 
-| Item | Status | Where |
-| --- | --- | --- |
-| Protection contract, three capabilities, coverage levels | ✅ | [protection-contract.md](protection-contract.md) |
-| Failure table with per-platform behavior | ✅ | [failure-behavior.md](failure-behavior.md) |
-| Policy semantics (precedence, selectors, capabilities, signing) | ✅ | [policy-semantics.md](policy-semantics.md) |
-| Threat model | ✅ | [threat-model.md](threat-model.md) |
-| Privacy, audit fields, retention | ✅ | [privacy.md](privacy.md) |
-| VPN coexistence test matrix (written) | ✅ | [vpn-test-matrix.md](vpn-test-matrix.md) |
-| VPN coexistence results | 🔬 none run yet: **no VPN claim** | same |
-| Compatibility + adversarial suite (written) | ✅ | [compatibility-suite.md](compatibility-suite.md) |
-| Licensing note (Apache-2.0, no GPL code copied) | ✅ | [licensing.md](licensing.md) |
-| Phase 0 feasibility checklist | ✅ written; device items open | [feasibility-checklist.md](feasibility-checklist.md) |
-
-## Shared core (`core/`)
-
-| Item | Status | Notes |
-| --- | --- | --- |
-| Strict declarative policy schema, no scripts, unknown fields rejected | ✅ | `moat-core::policy` |
-| Precedence: safety > emergency (deny) > override (allow, expiring, narrow, audited) > explicit (deny beats allow) > profile default; explanation lists overridden rules | ✅ | `eval.rs`, conformance |
-| Capability contracts; strict policy fails on missing capability; `skip_with_report` only for allows | ✅ | `compile.rs`, conformance |
-| Per-platform compiler (macOS, Linux, Linux IP-only, DNS resolver) | ✅ | 6 compile conformance cases |
-| `session_hostname_proxy` capability: session hostname rules compile for TCP; hostname denies must be TCP-only; ordinary hostname rules never use it | ✅ | `compile.rs`, conformance `linux-session-proxy-*` |
-| Ed25519 signed snapshots; replay protection; platform check; expiry; rollback as a new revision | ✅ | `signing.rs` |
-| Revision states approved → distributed → received → applied → verified | ✅ | `revision.rs`, controller |
-| Policy diff and broadening detection | ✅ | `diff.rs` |
-| Simulation against recorded observations (estimate, not proof) | ✅ | `simulate.rs`, `moatctl simulate` |
-| Process-instance identity and process graph (device, boot, start generation) | ✅ | `identity.rs` |
-| Recognizer packs and service packs (data-only, versioned) | ✅ | `packs/` |
-| Enrichment: provider / ASN / region facts with source and uncertainty; batch importers | ✅ | `enrichment.rs` |
-| Deterministic alert templates; no byte claims without measurement | ✅ | `explain.rs` |
-| Producer authority (agents can only assert intent; no self-reported verified blocks) | ✅ | `authority.rs` |
-| Implementation-independent conformance suite (31 cases) | ✅ | `conformance/` |
-| C ABI for native apps (verify, evaluate, parse) | ✅ | `core/moat-ffi` |
-| `moatctl` CLI | ✅ | validate, compile, diff, simulate, keygen, sign, verify, explain, normalize, conformance |
-
-## Linux endpoint (`linux/moatd`)
-
-| Item | Status | Notes |
-| --- | --- | --- |
-| nftables adapter: verify → render → `nft -c` → one atomic transaction; last working revision kept | 🔬 | CI on GitHub's Ubuntu kernel; Omarchy untested |
-| Protected sessions: cgroup v2 placement before exec, broker hiding, uid drop, `no_new_privs`, CLOEXEC, `cgroup.kill` teardown | 🔬 | privileged tests + netns script in CI; Omarchy untested |
-| Escape attempts (cgroup move, setuid, preopened sockets, detached children) | 🔬 | CI |
-| IPv4/IPv6/UDP enforcement within the session boundary | 🔬 | netns script in CI |
-| PTY proxy for interactive programs (`moat-launch --pty`, default on a terminal) | 🔬 | netns checks in CI; try with Claude Code / a TUI on Omarchy |
-| Capability probe that only downgrades | 🔬 | |
-| Sequenced spool with restart and gap records; quota | ✅ | |
-| Local recovery: disable / resume / isolate / clear-isolation; sticky isolation | 🔬 | CI; Omarchy untested |
-| Offline operation (last valid policy across restart without controller) | 🔬 | CI "offline restart" |
-| systemd unit, Arch PKGBUILD | 🔬 | packaging path written; build/install on Omarchy needed |
-| Signed Arch package | 🔑 | needs Robert's packaging key |
-| Timed trial (canary) rollback on Linux: `apply --trial-secs`, `recover confirm/rollback`, replay mark kept, first revision cannot be a trial, isolation untouched | 🔬 | unit tests + netns CI (broken trial reverts on its own, cannot be replayed; confirmed trial stays); Omarchy untested. Countdown needs `moatd` running |
-| OpenSnitch adapter feasibility | ✅ | [evaluated](platforms/opensnitch-adapter-feasibility.md); native `moatd` chosen |
-| Session egress proxy: hostname rules for TCP in protected sessions via TLS SNI / HTTP CONNECT / HTTP Host; no TLS interception; connects to the name it resolves; per-session listener fenced by nftables | 🔬 | unit + in-process tests, netns CI with a TLS lab (allowed/denied SNI, spoofed SNI, CONNECT, Host 403, bare IP, port fence); advertised `untested` until run on Omarchy. UDP stays IP-only; domain fronting remains possible |
-
-## macOS endpoint (`macos/`)
-
-| Item | Status | Notes |
-| --- | --- | --- |
-| SwiftUI app redesigned in Liquid Glass (macOS 26): NavigationSplitView glass sidebar, glass toolbar, `glassEffect` / `GlassEffectContainer` / `glassEffectID`, `.glass` buttons, `backgroundExtensionEffect` hero, soft scroll edges; macOS 14/15 fallback; Reduce Transparency / Increase Contrast / Reduce Motion | ✅ | builds on `macos-26` + Xcode 26 in CI; `docs/screenshots/macos-*.png` are captured from the real app window on the CI runner in demo mode (unsigned build, demo data). Not yet looked at on a real Mac |
-| Menu bar extra: status, recent blocks, isolate with a second explicit confirmation | ✅ | `MenuBarView.swift`; render test + window screenshot (the panel hosted in a window for capture; the live status-item popover is not captured in CI) |
-| First-run onboarding: honest coverage labels, extension approval, content filter, signer key (owner adds it with sudo; app only reads) | ✅ UI · 🔑🔬 flow | approval steps need a signed build on a real Mac |
-| NEFilterDataProvider system extension (outbound socket flows, audit-token identity, drop before data, reports for bytes) | 🔬 | builds unsigned in CI; never run as a signed extension |
-| Typed XPC control surface (7 operations, no trust changes), caller code-signing requirement, refuses all callers when unsigned | 🔬 | logic unit-tested; XPC path needs a signed build |
-| Policy store: verified atomic apply, last known good, canary auto-rollback, replay mark kept across rollback | ✅ | MoatKit tests |
-| Emergency isolation persisted, survives restart and canary rollback; exit needs typed phrase | 🔬 | unit-tested; device proof needed |
-| Event spool with overflow / restart gap markers | ✅ | |
-| Rust core via FFI (verify + evaluate) with real signed fixtures | ✅ | MoatCoreBridge tests on macOS runner |
-| Session rules omitted on macOS with a report; session profiles refused | ✅ | conformance `macos-omits-session-rules` |
-| Recovery UI and uninstall guidance | ✅ | |
-| Homebrew cask template + render script | ✅ | `macos/Casks`, `scripts/render-cask.sh` |
-| Signing / notarization / stapling script (refuses without Developer ID; checked in CI) | ✅ script · 🔑 run | `scripts/release.sh` |
-| Apple Developer Program, Developer ID certs, NE (content-filter-provider-systemextension) provisioning profiles | 🔑 | |
-| Signed, notarized release + private Homebrew tap | 🔑 | after the above |
-| Clean install on a second Mac; approval; blocking; restart; removal | 🔑🔬 | phase 0 item 2 |
-| Reboot / pre-login, sleep/wake, unattended mini, Apple Silicon, IPv6/UDP/QUIC, rapid exec chains, delegated helpers, existing sockets, extension crash/upgrade | 🔬 | none measured yet; **no fail-closed claim** |
-| Endpoint Security (process ancestry) | 🔑 decision | ancestry stays *unsupported* until requested and granted |
-| Existing-flow revocation | 🔬 | not tested; "block new connections" only |
-| macOS protected sessions | ⏭ | excluded as decided; no tested macOS boundary |
-
-## Controller and fleet (`controller/`, `web/`)
-
-| Item | Status | Notes |
-| --- | --- | --- |
-| Enrollment with device keys; mutually authenticated, signed, replay-protected sync | ✅ | |
-| Policy service with a separate signer identity/process; owner key required for broadening | ✅ | |
-| Temporary grant overlay; "Allow once for this session" bound to incident, revision, session instance, owner; stale rejected | ✅ | |
-| Flow store (separate SQLite) with 30/90-day retention and quota | ✅ | |
-| Attention queue: grouped incidents with counts; coverage loss and gaps raised | ✅ | |
-| Stale devices shown as degraded, never their last claim | ✅ | |
-| ntfy / webhook notifier with opaque references | ✅ | |
-| Harness/Dispatch launch contract API (typed; never launches itself) | ✅ | |
-| AdGuard Home / Pi-hole DNS-only adapters (phones/TV labeled DNS-only) | 🔬 | needs Robert's resolver + devices |
-| Digital Kingdom evidence feed (source authority preserved) | 🔬 | needs Robert's DK instance |
-| Reference sync agent for `moatd` | ✅ | end-to-end test over HTTP |
-| Phone-first web UI (Home, Activity, Sessions, Rules, Devices, Apps, Coverage), dark/light, demo + live API | ✅ | `docs/screenshots/` |
-| Web liquid-glass refresh: glass chrome only (top bar, floating tab bar, sidebar, segmented, decision bar, toasts); solid fallbacks for no `backdrop-filter`, `prefers-reduced-transparency`, `prefers-contrast`; reduced motion; AA contrast | ✅ | CI renders screenshots and fails on horizontal overflow, clipped text or axe-core contrast violations (20 route checks) |
-| Trial / rollback receipts per device; rollback raises attention | ✅ | controller migration 2, test |
-| Public demo on GitHub Pages | 🔑 | enable Settings → Pages → Source: GitHub Actions; the workflow then deploys (it skips with a notice until then) |
-| Optional APNs path via ntfy upstream | 🔑 decision | disclosed optional cloud dependency |
-
-## Milestones and gates
-
-| Milestone | Status |
+| ID | What it is |
 | --- | --- |
-| Phase 0 contract documents | ✅ |
-| Phase 0 signed Mac filter on a clean second Mac | 🔑🔬 |
-| Phase 0 child processes / helpers / VPN combinations; Endpoint Security decision | 🔬 / 🔑 |
-| Phase 0 Linux pre-launch session path | ✅ CI · 🔬 Omarchy |
-| Phase 0 real events into Digital Kingdom | 🔬 |
-| Phase 0 licensing + supported matrix | ✅ licensing · 🔑 matrix declaration |
-| M1 local Mac experience + private tap | ✅ app (Liquid Glass, menu bar, onboarding) · 🔑 signed release |
-| M2 private fleet policy (two Macs, signed snapshots, receipts, staged rollback) | ✅ software · 🔬 two real Macs |
-| M3 selected agent sessions (launch integration, one tested boundary, service packs, bounded grants) | ✅ Linux boundary + API · 🔬 Harness/Dispatch wiring on device |
-| M4 cross-device proof (Arch adapter, two-platform conformance, DNS, phone web UI) | ✅ software · 🔬 devices |
-| M5 thirty days of real workflows | 🔬 |
-| Release gate (bypass cases on the declared matrix, offline controller keeps isolation, gaps visible, grants expire, stale approvals rejected, revision state matches endpoints) | ✅ in CI where automatable · 🔬 declared matrix |
-| Adversarial harness | ✅ written (`tests/adversarial/`, refuses CI) · 🔬 run |
+| `ci-ubuntu-26.04-x86_64` | GitHub runner ubuntu-26.04, kernel 7.0.0-1017-azure, cgroup2fs, nftables 1.1.6; tests run as root in a netns lab. Not the installed package or the systemd unit. |
+| `ci-macos-26` | GitHub macos-26 runner, Xcode 26, unsigned builds, no activated system extension. |
+| `ci-node-22` | GitHub ubuntu runner, Node 22, controller tests against the Rust `moatctl`. |
+| `unit` | `cargo test`, no OS hooks. |
+| `omarchy-installed` | Robert's Omarchy machine with the packaged service. No result recorded. |
+| `mac-signed-installed` | Signed, notarized install on a real Mac. No result recorded. |
 
-## Not built, and why
+## Claims
 
-Everything buildable in the plan is built. What remains is either excluded by the roadmap (below), needs Robert's
-hardware, credentials or decisions (🔑 / 🔬 above), or was deliberately decided against:
+| Claim | Disposition | Evidence | Environment | Last result | Limits / open defects |
+| --- | --- | --- | --- | --- | --- |
+| `core.policy.schema-strict` | implemented_unproven | semantic | unit | pass, rust 40493342610 @ d5270bd | Semantics only. |
+| `core.policy.precedence` | implemented_unproven | semantic | unit | pass, rust 40493342610 @ d5270bd | First-match profile order: `D-PROFILE-ORDER`. |
+| `core.diff.broadening` | unknown_degraded | semantic | unit | tests pass, known misses | `D-DIFF-REORDER`, `D-DIFF-SHORTENED-DENY`, `D-DIFF-UNKNOWN-FIELDS`; the signer's owner-key gate inherits them. |
+| `core.compile.capability-gate` | implemented_unproven | semantic | unit | pass, rust 40493342610 @ d5270bd | Profiles not capability-checked: `D-PROFILE-CAPABILITY`. |
+| `core.signing.snapshot` | implemented_unproven | semantic | unit | pass, rust 40493342610 @ d5270bd | Digest not canonical, excludes overlays: `D-DIGEST-CANONICAL`. |
+| `core.grant.scope` | unsupported_rejected | component | ci-node-22 | **fail** (review of d5270bd) | `D-GRANT-SCOPE-LOSS`, `D-GRANT-IDEMPOTENCY`. |
+| `linux.session.direct-egress` | implemented_unproven | native_ci | ci-ubuntu-26.04-x86_64 | pass, linux-endpoint 40493342431 @ d5270bd | Script-run as root, not the installed unit; `D-LAUNCH-AUTHORITY`, `D-SYSTEMD-WORKSPACE`. |
+| `linux.session.launch-authority` | unsupported_rejected | component | ci-ubuntu-26.04-x86_64 | **fail** (review of d5270bd) | `D-LAUNCH-AUTHORITY`. |
+| `linux.session.hostname-proxy` | implemented_unproven | native_ci | ci-ubuntu-26.04-x86_64 | pass, linux-endpoint 40493342431 @ d5270bd | Admission-only; `D-PROXY-DNS-BEFORE-AUTH`, `D-PROXY-STREAM-LIFETIME`; domain fronting possible; UDP IP-only. |
+| `linux.activation.trial-rollback` | implemented_unproven | native_ci | ci-ubuntu-26.04-x86_64 | pass, linux-endpoint 40493342431 @ d5270bd | Not journaled or fault-injected: `D-ACTIVATION-JOURNAL`. |
+| `linux.spool.gaps` | implemented_unproven | component | unit | pass, rust 40493342610 @ d5270bd | No W01 event envelope yet. |
+| `linux.ordinary-apps.inventory` | unsupported_rejected | none | unit | not_run | Not implemented; W09/W10. |
+| `linux.ordinary-apps.app-rules` | unsupported_rejected | semantic | unit | pass (rejection), rust 40493342610 | nftables cannot match executables; rejected at compile. |
+| `linux.packaging.systemd` | unknown_degraded | none | omarchy-installed | not_run | `D-SYSTEMD-WORKSPACE`. |
+| `macos.filter.app-rules` | implemented_unproven | component | ci-macos-26 | pass, macos 40493342625 @ d5270bd | Never run signed; `D-MAC-CACHE-TRUST` (Lane B). |
+| `fleet.web.live-actions` | unknown_degraded | component | ci-node-22 | **fail** (review of d5270bd) | `D-WEB-DEMO-SUCCESS`, `D-INCIDENT-ROUTING` (Lane B, W08). |
+| `vpn.coexistence` | unknown_degraded | none | omarchy-installed | not_run | No VPN claim. |
 
-* **macOS protected sessions** — excluded as decided; no tested macOS boundary exists, so session rules are omitted
-  on macOS with a report.
-* **Hostname rules for ordinary (non-session) traffic on Linux** — nftables cannot attribute ordinary apps and the
-  proxy is scoped to sessions on purpose; such rules are rejected or (allows that opt in) left out with a report.
+## Open defects
 
-## Excluded from MVP by the roadmap (⏭)
+From the pinned review in MASTER_ROADMAP §2. A defect closes only when its regression test is merged and the claim
+above is updated with the run that proves it.
 
-Windows, a custom DNS server, native iOS firewall, universal TLS inspection, automatic trust promotion, remote
-autonomous remediation, public community feed, enterprise SSO, hosted service. v1/v2 workstreams (Windows WFP agent,
-mobile gateway, team governance, credential/API brokers, remote execution sensors, community intelligence, advanced
-mobile) are not started.
+| Defect | Summary | Package | Status |
+| --- | --- | --- | --- |
+| `D-PROFILE-ORDER` | Profile selection is implicit first match; overlapping profiles accepted. | W02 | open |
+| `D-DIFF-REORDER` | Reordering overlapping profiles is not classified as broadening. | W02 | open |
+| `D-DIFF-SHORTENED-DENY` | Shortening a deny's expiry is classified as narrowing. | W02 | open |
+| `D-DIFF-UNKNOWN-FIELDS` | Changes to fields the diff does not inspect are not broadening. | W02 | open |
+| `D-PROFILE-CAPABILITY` | Unsupported restrictive profiles compile and silently fall back. | W02 | open |
+| `D-DIGEST-CANONICAL` | Digests are not canonical; effective digest excludes overlays. | W01/W03 | open |
+| `D-GRANT-SCOPE-LOSS` | Generated grants lose device and process-generation scope. | W03 | open |
+| `D-GRANT-IDEMPOTENCY` | A retried grant request mints a fresh expiry. | W03 | open |
+| `D-LAUNCH-AUTHORITY` | A contained caller can request a looser session through the control socket. | W04 | open |
+| `D-PROXY-DNS-BEFORE-AUTH` | A denied hostname can be resolved before authorization. | W05 | open |
+| `D-PROXY-STREAM-LIFETIME` | No stream registry; admission vs stream expiry undefined. | W05 | open |
+| `D-ACTIVATION-JOURNAL` | Apply/rollback state not journaled or fault-tested. | W06 | open |
+| `D-SYSTEMD-WORKSPACE` | Packaged systemd restrictions break launched coding workloads. | W11 | open |
+| `D-MAC-CACHE-TRUST` | Mac cache, trust reload, first canary, stale status. | W06–W08 (Lane B) | open |
+| `D-WEB-DEMO-SUCCESS` | Live web actions reuse demo success behavior. | W08 (Lane B) | open |
+| `D-INCIDENT-ROUTING` | A notification reference can open the wrong incident. | W08/W13 (Lane B) | open |
 
-## Actions only Robert can take
+## Work packages (MASTER_ROADMAP §12)
 
-1. **GitHub Pages:** Settings → Pages → Source: GitHub Actions (then re-run the `web` workflow).
-2. **Apple:** Developer Program membership; Developer ID Application certificate; Developer ID provisioning profiles
-   for `<prefix>.moat` and `<prefix>.moat.filter` with `content-filter-provider-systemextension`; a `notarytool`
-   keychain profile. Then `macos/scripts/release.sh`.
-3. **Decide** whether to request the Endpoint Security entitlement.
-4. **Install and approve** on the M1 Pro / a second Mac (the first-run onboarding walks through it); put the signer
-   public key in `/Library/Application Support/Moat/trusted-keys`; check the Liquid Glass UI, menu bar extra and
-   accessibility settings on macOS 26.
-5. **Omarchy:** build the package, run `sudo REQUIRE_NFT=1 linux/tests/netns-enforcement.sh target/debug` (now 50
-   checks, including trial rollback and the session egress proxy), then try a real `moat-launch --profile
-   coding-session -- claude` through the proxy and a `moatd apply --trial-secs 600`; report.
-6. **Run** the [VPN matrix](vpn-test-matrix.md), the [adversarial harness](../tests/adversarial/README.md), and the
-   30-day workflow suite; record results here.
-7. **Optional:** AdGuard Home / Pi-hole on the mini, a Digital Kingdom source key, an ntfy topic.
+| Package | Owner | State |
+| --- | --- | --- |
+| W01 contracts and ledger | Lane A | ledger landed; schemas and fixtures in progress |
+| W02 semantics and broadening | Lane A | not started |
+| W03 exact grants (core side) | Lane A | not started |
+| W04 Linux launch authority | Lane A | not started |
+| W05 proxy semantics | Lane A | not started |
+| W06 durable activation (Linux) | Lane A | not started |
+| W07 Mac engine | Lane B | see Lane B |
+| W08 truthful UI | Lane B | see Lane B |
+| W09 ordinary-app Linux experiment | Lane A | not started |
+| W10 ordinary-app Linux inventory | Lane A | not started |
+| W11 installed-platform proofs | Lane A (Linux) / Robert | not started |
+
+## Needs Robert
+
+1. **Omarchy:** install the package and run `sudo REQUIRE_NFT=1 linux/tests/netns-enforcement.sh target/debug`
+   and a real `moat-launch --profile coding-session -- claude`; results become `omarchy-installed` evidence.
+2. **Apple:** Developer Program, Developer ID certificates, NE provisioning profiles, notarytool profile
+   (Lane B owns the release path).
+3. **Decisions:** grant lifetime defaults and recovery semantics (W01 uses conservative defaults until decided);
+   whether to request the Endpoint Security entitlement.
+4. **VPN matrix and adversarial harness** on real devices; results are recorded here with dates and versions.
+5. **GitHub Pages:** Settings → Pages → Source: GitHub Actions, if the public demo is wanted.
+
+Excluded from this phase by the roadmap: Windows, a custom DNS server, a native iOS firewall, universal TLS
+inspection, automatic trust promotion, a hosted service.
