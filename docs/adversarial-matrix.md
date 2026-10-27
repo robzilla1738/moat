@@ -118,7 +118,7 @@ Unit tests are Rust test function names.
 | Proxy exhaustion | ci (unit) | `exhaustion_refuses_and_reports_rather_than_bypassing` | |
 | Slow disk | ci (unit) | `a_slow_disk_delays_activation_but_never_reorders_or_outlives_a_trial_deadline` | Every durable step takes 300 ms: activation still commits only after its durable steps, and a trial whose deadline passes during the slow writes is reverted on the next tick and stays reverted after restart. Spool writes under latency and the daemon's tick loop are not measured. |
 | Log quota | ci (unit + ci-netns) | `quota_evicts_the_oldest_unacknowledged_segment_with_an_exact_gap`, `acknowledged_segments_go_first_and_need_no_gap`, `an_event_that_cannot_fit_is_dropped_with_a_gap`, `unexplained_gap_detection`, netns `W13: an acknowledgement beyond what was written is refused` | Bounded by --spool-mib; eviction and drops leave exact gap records. |
-| Notification floods | gap | none | Lane B (UI/controller). |
+| Notification floods | ci (ci-node) | `notification-floods.test.ts` | Grouped by stable subject, destination and reason: one incident with an occurrence count and first/last time. One actionable notification per unchanged incident: a recurrence after acknowledge or keep-blocked reopens the incident (visible, counted) and notifies again only if the policy revision or urgency changed. One subject raising many distinct incidents gets 3 individual notifications, then one summary per 10-minute window; every incident stays listed and blocked. Acknowledge and mute change no policy and create no grant. **Not measured:** the pilot target of at most one unnecessary interruption per active device-day needs real use. |
 
 ## Compatibility
 

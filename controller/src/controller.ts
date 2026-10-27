@@ -17,6 +17,11 @@ import { contextDigest, contractTime, grantDigest, policyDigest, type ApprovalCo
 
 export type Role = "owner" | "viewer" | "launcher" | "agent";
 export interface Principal { id: string; name: string; role: Role }
+/** Notification flood control (MASTER_ROADMAP §9.4): individual notifications per subject per window, then one summary. */
+export const FLOOD_WINDOW_MS = 10 * 60_000;
+export const FLOOD_INDIVIDUAL = 3;
+const URGENCY_RANK: Record<Urgency, number> = { low: 0, medium: 1, high: 2 };
+
 export interface Proposal { id: string; message: string; author: string; status: string; base_revision: number | null; rollback_of: number | null; created_at: string; source: string; diff: Record<string, unknown>; simulation: Record<string, unknown> | null; broadening: boolean; authorization_subject: string; authorization_digest: string }
 
 /** The signer interface; in production a client for the separate `moat-signer` service. */
@@ -367,18 +372,50 @@ export class Controller {
     if (existing) {
       if (this.db.prepare("SELECT 1 FROM incident_log WHERE incident_id = ? AND source_ref = ?").get(existing.id, s.ref)) return existing.id;
       const reopen = existing.state !== "open";
-      this.db.prepare("UPDATE incidents SET occurrences = occurrences + 1, last_at = ?, state = 'open', resolved_at = CASE WHEN ? THEN NULL ELSE resolved_at END, process_instance = COALESCE(?, process_instance), policy_revision = COALESCE(?, policy_revision), revision = revision + 1 WHERE id = ?")
-        .run(s.at, reopen ? 1 : 0, s.process ?? null, s.revision ?? null, existing.id);
-      this.db.prepare("INSERT INTO incident_log (incident_id, type, source_ref, at) VALUES (?, ?, ?, ?)").run(existing.id, reopen ? "reopened" : "occurrence", s.ref, this.iso());
-      if (reopen && !isMuted(this, key)) this.notifier.enqueue(existing.id, `${key}#${existing.revision + 1}`, s.urgency, s.kind);
+      // One actionable notification per unchanged incident: a recurrence after acknowledgement or a keep-blocked
+      // decision reopens it (visible, counted) but notifies again only when it changed: a different policy revision
+      // or a higher urgency than the one already notified.
+      const changed = (s.revision !== undefined && existing.policy_revision !== null && s.revision !== existing.policy_revision) || URGENCY_RANK[s.urgency] > URGENCY_RANK[existing.urgency as Urgency];
+      this.db.prepare("UPDATE incidents SET occurrences = occurrences + 1, last_at = ?, state = 'open', resolved_at = CASE WHEN ? THEN NULL ELSE resolved_at END, process_instance = COALESCE(?, process_instance), policy_revision = COALESCE(?, policy_revision), urgency = CASE WHEN ? THEN ? ELSE urgency END, revision = revision + 1 WHERE id = ?")
+        .run(s.at, reopen ? 1 : 0, s.process ?? null, s.revision ?? null, URGENCY_RANK[s.urgency] > URGENCY_RANK[existing.urgency as Urgency] ? 1 : 0, s.urgency, existing.id);
+      this.db.prepare("INSERT INTO incident_log (incident_id, type, source_ref, at) VALUES (?, ?, ?, ?)").run(existing.id, reopen ? (changed ? "reopened" : "recurred") : "occurrence", s.ref, this.iso());
+      if (reopen && changed && !isMuted(this, key)) this.notifier.enqueue(existing.id, `${key}#${existing.revision + 1}`, s.urgency, s.kind);
       return existing.id;
     }
     const iid = id("inc");
     this.db.prepare("INSERT INTO incidents (id, dedup_key, kind, device_id, session_id, process_instance, app, destination, port, transport, reason, rule, policy_revision, urgency, state, occurrences, first_at, last_at, facts) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', 1, ?, ?, ?)")
       .run(iid, key, s.kind, s.device, s.session ?? null, s.process ?? null, s.app ?? null, s.destination, s.port ?? null, s.transport ?? null, s.reason, s.rule ?? null, s.revision ?? null, s.urgency, s.at, s.at, JSON.stringify(s.facts ?? {}));
     this.db.prepare("INSERT INTO incident_log (incident_id, type, source_ref, at) VALUES (?, 'raised', ?, ?)").run(iid, s.ref, this.iso());
-    if (!isMuted(this, key)) this.notifier.enqueue(iid, key, s.urgency, s.kind);
+    if (!isMuted(this, key)) this.notifyNew(iid, key, `${s.kind}|${s.device}|${subject}|`, s.urgency, s.kind);
     return iid;
+  }
+
+  /**
+   * Flood control for new incidents. Each distinct (subject, destination, reason) is its own incident and stays
+   * visible, but one subject raising many in a short window (a scanner, a misbehaving app) does not page once per
+   * destination: after FLOOD_INDIVIDUAL notifications in a FLOOD_WINDOW_MS window, further ones collapse into a single
+   * summary notification for that subject and window. Notification policy only: no verdict or policy changes.
+   */
+  private notifyNew(iid: string, key: string, group: string, urgency: Urgency, kind: string) {
+    const nowMs = this.now().getTime();
+    const windowStart = Math.floor(nowMs / FLOOD_WINDOW_MS) * FLOOD_WINDOW_MS;
+    const since = new Date(windowStart).toISOString();
+    const raised = (this.db.prepare("SELECT COUNT(*) AS n FROM incident_log l JOIN incidents i ON i.id = l.incident_id WHERE l.type = 'raised' AND l.at >= ? AND substr(i.dedup_key, 1, ?) = ?").get(since, group.length, group) as { n: number }).n;
+    if (raised <= FLOOD_INDIVIDUAL) {
+      this.notifier.enqueue(iid, key, urgency, kind);
+      return;
+    }
+    // one summary per subject per window; the notifier's (destination, dedup_key) uniqueness keeps it to one
+    this.notifier.enqueue(iid, `flood|${group}${since}`, urgency, "notification_flood");
+    this.db.prepare("INSERT INTO incident_log (incident_id, type, source_ref, at) VALUES (?, 'grouped', ?, ?)").run(iid, `flood:${since}`, this.iso());
+  }
+
+  /** How notifications for a subject were grouped (for the UI and tests): incidents raised, notified individually,
+   * and collapsed into the window's summary. */
+  notificationGroups(sinceIso?: string) {
+    const since = sinceIso ?? new Date(this.now().getTime() - FLOOD_WINDOW_MS).toISOString();
+    const rows = this.db.prepare("SELECT i.kind, i.device_id, COALESCE('session:' || i.session_id, 'app:' || i.app, 'device') AS subject, COUNT(*) AS raised, SUM(CASE WHEN EXISTS (SELECT 1 FROM incident_log g WHERE g.incident_id = i.id AND g.type = 'grouped') THEN 1 ELSE 0 END) AS grouped FROM incidents i JOIN incident_log l ON l.incident_id = i.id AND l.type = 'raised' WHERE l.at >= ? GROUP BY i.kind, i.device_id, subject ORDER BY raised DESC").all(since) as { kind: string; device_id: string; subject: string; raised: number; grouped: number }[];
+    return rows.map((r) => ({ ...r, notified_individually: r.raised - r.grouped, note: r.grouped ? `${r.grouped} more incident(s) for this subject were grouped into one notification. Each is still listed and stays blocked.` : null }));
   }
 
   incidents(state?: string) {
