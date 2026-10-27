@@ -11,3 +11,4 @@ DerivedData/
 .env
 *.key
 !conformance/**/*.key
+/macos/build/

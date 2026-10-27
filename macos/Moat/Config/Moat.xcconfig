@@ -1,0 +1,10 @@
+// Shared build settings. Robert: set MOAT_BUNDLE_PREFIX and DEVELOPMENT_TEAM in Config/Signing.xcconfig
+// (git-ignored), or pass them on the xcodebuild command line. Unsigned builds leave DEVELOPMENT_TEAM empty,
+// and the extension then refuses every XPC caller.
+MOAT_BUNDLE_PREFIX = com.coursondigital
+MARKETING_VERSION = 0.1.0
+CURRENT_PROJECT_VERSION = 1
+SWIFT_VERSION = 5.0
+MACOSX_DEPLOYMENT_TARGET = 13.0
+CODE_SIGN_STYLE = Manual
+#include? "Signing.xcconfig"

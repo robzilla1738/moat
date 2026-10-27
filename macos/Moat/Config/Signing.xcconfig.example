@@ -1,0 +1,7 @@
+// Copy to Signing.xcconfig (git-ignored) and fill in. Requires an Apple Developer Program membership with
+// Developer ID certificates and Network Extension (content filter, system extension) provisioning.
+MOAT_BUNDLE_PREFIX = com.coursondigital
+DEVELOPMENT_TEAM = ABCDE12345
+CODE_SIGN_IDENTITY = Developer ID Application
+// Developer ID provisioning profiles that include the content-filter-provider-systemextension entitlement:
+// PROVISIONING_PROFILE_SPECIFIER is set per target by scripts/release.sh from MOAT_APP_PROFILE / MOAT_FILTER_PROFILE.

@@ -1,0 +1,32 @@
+# Homebrew cask for Moat. Rendered by macos/scripts/render-cask.sh from a signed, notarized release
+# (macos/scripts/release.sh). Publish in a private tap first (M1), e.g. robzilla1738/homebrew-moat.
+cask "moat" do
+  version "@VERSION@"
+  sha256 "@SHA256@"
+
+  url "https://github.com/robzilla1738/moat/releases/download/v#{version}/Moat-#{version}.dmg"
+  name "Moat"
+  desc "Local outbound firewall with signed cross-device policy"
+  homepage "https://github.com/robzilla1738/moat"
+
+  depends_on macos: ">= :ventura"
+
+  app "Moat.app"
+
+  uninstall quit: "com.coursondigital.moat"
+
+  zap trash: [
+    "~/Library/Preferences/com.coursondigital.moat.plist",
+    "~/Library/Saved Application State/com.coursondigital.moat.savedState",
+  ]
+
+  caveats <<~EOS
+    Moat's content filter is a system extension. macOS asks you to approve it
+    (System Settings > General > Login Items & Extensions) and to allow network
+    content filtering. Homebrew cannot and does not bypass those prompts.
+
+    Before `brew uninstall --cask moat`, open Moat > Set Up Filter... > Remove extension,
+    or remove the filter in System Settings > Network > Filters. Policy state lives in
+    /Library/Application Support/Moat (root-owned); remove it with sudo if you want a clean slate.
+  EOS
+end

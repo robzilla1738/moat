@@ -1,0 +1,5 @@
+module CMoatFFI {
+    header "moat_ffi.h"
+    link "moat_ffi"
+    export *
+}

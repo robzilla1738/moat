@@ -1,0 +1,57 @@
+# XcodeGen spec for the Moat app and its content-filter system extension.
+#   brew install xcodegen && xcodegen generate   (from macos/Moat)
+# Unsigned local/CI builds:  xcodebuild -scheme Moat CODE_SIGNING_ALLOWED=NO build
+# Signed releases:           ../scripts/release.sh (requires Robert's Developer ID; never faked)
+name: Moat
+configFiles:
+  Debug: Config/Moat.xcconfig
+  Release: Config/Moat.xcconfig
+options:
+  deploymentTarget:
+    macOS: "13.0"
+  createIntermediateGroups: true
+packages:
+  MoatKit:
+    path: ../MoatKit
+targets:
+  Moat:
+    type: application
+    platform: macOS
+    sources: [App]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(MOAT_BUNDLE_PREFIX).moat
+        PRODUCT_NAME: Moat
+        ENABLE_HARDENED_RUNTIME: YES
+        CODE_SIGN_ENTITLEMENTS: App/Moat.entitlements
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: App/Info.plist
+    dependencies:
+      - package: MoatKit
+        product: MoatKit
+      - package: MoatKit
+        product: MoatUI
+      - target: MoatFilter
+        embed: true
+      - sdk: SystemExtensions.framework
+      - sdk: NetworkExtension.framework
+  MoatFilter:
+    type: system-extension
+    platform: macOS
+    sources: [Extension]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(MOAT_BUNDLE_PREFIX).moat.filter
+        PRODUCT_NAME: $(MOAT_BUNDLE_PREFIX).moat.filter
+        ENABLE_HARDENED_RUNTIME: YES
+        CODE_SIGN_ENTITLEMENTS: Extension/MoatFilter.entitlements
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: Extension/Info.plist
+        LIBRARY_SEARCH_PATHS: $(SRCROOT)/../build/ffi
+        SKIP_INSTALL: YES
+    dependencies:
+      - package: MoatKit
+        product: MoatKit
+      - package: MoatKit
+        product: MoatCoreBridge
+      - sdk: NetworkExtension.framework

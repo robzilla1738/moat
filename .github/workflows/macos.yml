@@ -1,0 +1,70 @@
+name: macos
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  moatkit:
+    name: MoatKit build + unit tests (unsigned) + screenshots
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Toolchain
+        run: |
+          sw_vers
+          xcodebuild -version
+          swift --version
+      - name: Build moat-ffi static library
+        run: macos/scripts/build-ffi.sh
+      - name: swift build
+        working-directory: macos/MoatKit
+        run: swift build -Xlinker -L"$GITHUB_WORKSPACE/macos/build/ffi"
+      - name: swift test (renders screenshots)
+        working-directory: macos/MoatKit
+        env:
+          MOAT_SCREENSHOT_DIR: ${{ github.workspace }}/macos/build/screenshots
+        run: swift test -Xlinker -L"$GITHUB_WORKSPACE/macos/build/ffi"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: macos-screenshots
+          path: macos/build/screenshots
+          if-no-files-found: warn
+  app:
+    name: Moat.app + system extension (xcodebuild, unsigned)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build moat-ffi static library
+        run: macos/scripts/build-ffi.sh
+      - name: Generate Xcode project
+        working-directory: macos/Moat
+        run: |
+          brew install xcodegen
+          xcodegen generate
+      - name: xcodebuild (CODE_SIGNING_ALLOWED=NO; not a release, not runnable as a system extension)
+        working-directory: macos/Moat
+        run: |
+          set -o pipefail
+          xcodebuild -project Moat.xcodeproj -scheme Moat -configuration Debug \
+            -derivedDataPath "$RUNNER_TEMP/dd" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build | tail -200
+      - name: Inspect bundle layout
+        run: |
+          app="$RUNNER_TEMP/dd/Build/Products/Debug/Moat.app"
+          find "$app/Contents" -maxdepth 4 -name "*.systemextension" -print
+          test -n "$(find "$app/Contents/Library/SystemExtensions" -maxdepth 1 -name '*.systemextension' 2>/dev/null)" \
+            || { echo "::error::system extension is not embedded in Contents/Library/SystemExtensions"; exit 1; }
+      - name: Release script refuses without a Developer ID
+        run: |
+          set +e
+          macos/scripts/release.sh
+          code=$?
+          test "$code" = 2 || { echo "release.sh should refuse (exit 2) without signing credentials, got $code"; exit 1; }
