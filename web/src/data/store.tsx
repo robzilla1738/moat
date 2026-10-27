@@ -66,18 +66,18 @@ const Ctx = createContext<Store | null>(null);
 
 const step = (label: string, state: ActionState["steps"][number]["state"], detail?: string, at?: string) => ({ label, state, detail, at });
 
-const AUTH_LABEL: Record<string, string> = { owner_key: "your owner key", narrowing: "narrowing (no owner key needed)", temporary_grant_overlay: "the bounded temporary-grant path", delegated_issuer: "a delegated approval key" };
+const AUTH_LABEL: Record<string, string> = { owner_key: "your owner key", narrowing: "no owner key (it only narrows access)", temporary_grant_overlay: "the limited one-time permission path", delegated_issuer: "an approval key (not your owner key)" };
 
 /** Build the visible steps of an allow-once from the controller's grant status. Nothing is "done" without evidence. */
 export function grantSteps(st: WireGrantStatus, deviceName: (id: string) => string): ActionState {
-  const steps: ActionState["steps"] = [step("Requested by you", "done"), step(`Signed as revision ${st.revision}`, "done", st.authorized_by ? `authorized by ${AUTH_LABEL[st.authorized_by] ?? st.authorized_by}` : "authorizer not recorded")];
+  const steps: ActionState["steps"] = [step("Requested by you", "done"), step(`Signed as rule version ${st.revision}`, "done", st.authorized_by ? `approved with ${AUTH_LABEL[st.authorized_by] ?? st.authorized_by}` : "authorizer not recorded")];
   for (const d of st.devices) {
     const name = deviceName(d.device_id);
     const delivered = ["delivered", "received", "applied", "trial", "rejected", "rolled_back"].includes(d.state);
-    steps.push(step(`Delivered to ${name}`, delivered ? "done" : "active", delivered ? undefined : "waits for the device's next sync"));
-    if (d.state === "applied" || d.state === "trial") steps.push(step(`Applied by ${name}`, "done", `endpoint receipt for revision ${d.evidence?.revision}${d.state === "trial" ? " (trial)" : ""}${d.stale ? " · device has not reported recently" : ""}`, d.evidence?.at));
+    steps.push(step(`Delivered to ${name}`, delivered ? "done" : "active", delivered ? undefined : "waits for the device to check in"));
+    if (d.state === "applied" || d.state === "trial") steps.push(step(`Applied by ${name}`, "done", `the device confirmed rule version ${d.evidence?.revision}${d.state === "trial" ? " (trial)" : ""}${d.stale ? " · it hasn't reported recently" : ""}`, d.evidence?.at));
     else if (d.state === "rejected" || d.state === "rolled_back") steps.push(step(`Rejected by ${name}`, "failed", d.evidence?.detail ?? d.state));
-    else steps.push(step(`Applied by ${name}`, "pending", "no receipt yet"));
+    else steps.push(step(`Applied by ${name}`, "pending", "not confirmed yet"));
   }
   const phase = st.state === "active" ? "active" : st.state === "pending" ? "pending" : st.state;
   return { kind: "allow_once", phase, steps, grantId: st.id, revision: st.revision ?? undefined, authorizedBy: st.authorized_by, expiresAt: st.expires_at };
@@ -88,7 +88,7 @@ function describe(e: unknown): string {
     if (e.offline) return `Not sent: ${e.message}. Nothing changed.`;
     if (e.status === 401) return "Your sign-in is no longer valid. Nothing changed.";
     if (e.status === 403) return `Refused: ${e.message}. Nothing changed.`;
-    if (e.status === 409) return `Refused as stale: ${e.message.replace(/^stale: /, "")}. Nothing changed; the view has been refreshed.`;
+    if (e.status === 409) return `Refused as out of date: ${e.message.replace(/^stale: /, "")}. Nothing changed; the view has been refreshed.`;
     return `Refused (${e.status}): ${e.message}. Nothing changed.`;
   }
   return `Failed: ${(e as Error).message}. Nothing changed.`;
@@ -167,7 +167,7 @@ export function StoreProvider({ children, options = {} }: { children: ReactNode;
 
   const canAct = useMemo(() => {
     if (mode === "demo") return { ok: true, reason: null };
-    if (status !== "ready") return { ok: false, reason: status === "unreachable" ? "The controller is unreachable; actions are paused until the view is current." : "Sign in to act." };
+    if (status !== "ready") return { ok: false, reason: status === "unreachable" ? "Moat can't reach your controller, so actions are paused until this view is up to date." : "Sign in to act." };
     if (data?.viewer?.role !== "owner") return { ok: false, reason: `Signed in as ${data?.viewer?.role ?? "unknown role"}: read only. Owner actions need an owner sign-in.` };
     return { ok: true, reason: null };
   }, [mode, status, data]);
@@ -182,8 +182,8 @@ export function StoreProvider({ children, options = {} }: { children: ReactNode;
           if (st.state !== "pending") {
             window.clearInterval(grantPolls.current.get(incidentId));
             grantPolls.current.delete(incidentId);
-            if (st.state === "active") setToast(`Applied: the endpoint reported revision ${st.revision}. Expires on its own at its original deadline.`);
-            if (st.state === "rejected") setToast("The device rejected the revision carrying this grant. Nothing was allowed.");
+            if (st.state === "active") setToast(`Allowed: the device confirmed rule version ${st.revision}. It ends on its own at the original time.`);
+            if (st.state === "rejected") setToast("The device refused this change. Nothing was allowed.");
           }
         } catch (e) {
           setActions((m) => (m[incidentId] ? { ...m, [incidentId]: { ...m[incidentId]!, error: `Status unknown: ${(e as Error).message}` } } : m));
@@ -201,7 +201,7 @@ export function StoreProvider({ children, options = {} }: { children: ReactNode;
   const allowOnce = useCallback(
     (i: Incident) => {
       if (mode === "demo") {
-        setAction(i.id, { kind: "allow_once", phase: "simulated", steps: [step("Demo only: nothing was sent", "done", "In live mode this asks the controller for the exact plan (device, session, destination, port, deadline), you approve that plan, and the card waits for the endpoint's receipt.")] });
+        setAction(i.id, { kind: "allow_once", phase: "simulated", steps: [step("Demo only: nothing was sent", "done", "With a real controller, Moat first shows you the exact permission (device, task, address and time limit), you approve it, and the card waits for the device to confirm.")] });
         setToast("Demo: nothing was sent to a device.");
         return;
       }
@@ -238,22 +238,22 @@ export function StoreProvider({ children, options = {} }: { children: ReactNode;
       const usable = !!issuer?.delegation && !delegationProblem(issuer, issuer.delegation) && issuer.delegation.scope.devices.includes(plan.plan.scope.device_id) && plan.plan.issuer.key_id === issuer.keyId;
       // sign only what is on screen: the digest is recomputed here from the rendered plan, never taken on trust
       if (usable && contractDigest(plan.plan) !== plan.digest) {
-        setAction(i.id, { kind: "allow_once", phase: "rejected", plan, error: "Refused: the controller's digest does not match the plan shown. Nothing was signed.", steps: [step("Approve", "failed", "plan digest mismatch")] });
+        setAction(i.id, { kind: "allow_once", phase: "rejected", plan, error: "Refused: what the controller would sign doesn't match what you saw. Nothing was signed.", steps: [step("Approve", "failed", "the permission didn't match")] });
         return;
       }
       const body: Record<string, unknown> = { plan_id: plan.plan_id };
       if (usable) Object.assign(body, { issuer_key_id: issuer!.keyId, issuer_signature: signApproval(issuer!, plan.digest) });
-      setAction(i.id, { ...cur, phase: "sending", steps: [step(usable ? "Approved and signed on this device" : "Approved", "done", usable ? `delegated key ${issuer!.keyId}` : "no delegated key on this browser: the signer decides whether an owner session may approve"), step("Signing", "active", "waiting for the controller and signer")] });
+      setAction(i.id, { ...cur, phase: "sending", steps: [step(usable ? "Approved and signed on this device" : "Approved", "done", usable ? `approval key ${issuer!.keyId}` : "this browser has no approval key: the controller decides whether your sign-in may approve"), step("Signing", "active", "waiting for the controller and signer")] });
       api
         .post<{ grant_id: string; revision: number; authorized_by: string; expires_at: string }>("/v1/actions/allow-once", body)
         .then((r) => {
           clearOps(i.id);
-          setAction(i.id, { kind: "allow_once", phase: "pending", plan, grantId: r.grant_id, revision: r.revision, authorizedBy: r.authorized_by, expiresAt: r.expires_at, steps: [step("Requested by you", "done"), step(`Signed as revision ${r.revision}`, "done", `authorized by ${AUTH_LABEL[r.authorized_by] ?? r.authorized_by}`), step("Delivered and applied", "active", "waiting for endpoint evidence")] });
+          setAction(i.id, { kind: "allow_once", phase: "pending", plan, grantId: r.grant_id, revision: r.revision, authorizedBy: r.authorized_by, expiresAt: r.expires_at, steps: [step("Requested by you", "done"), step(`Signed as rule version ${r.revision}`, "done", `approved with ${AUTH_LABEL[r.authorized_by] ?? r.authorized_by}`), step("Delivered and applied", "active", "waiting for the device to confirm")] });
           watchGrant(i.id, r.grant_id);
         })
         .catch((e) => {
           const needIssuer = e instanceof ApiError && /delegated issuer/.test(e.message);
-          setAction(i.id, { kind: "allow_once", phase: e instanceof ApiError && !e.offline ? "rejected" : "failed", plan, error: needIssuer ? "Refused: this controller's signer only accepts phone approvals from a delegated key. Set up approvals on this device (Devices → Phone approvals). Nothing changed." : describe(e), steps: [step("Approve", "failed", needIssuer ? "needs a delegated approval key" : describe(e))] });
+          setAction(i.id, { kind: "allow_once", phase: e instanceof ApiError && !e.offline ? "rejected" : "failed", plan, error: needIssuer ? "Refused: this controller only accepts approvals from a phone or browser with its own approval key. Set one up under Devices → Approve from this browser. Nothing changed." : describe(e), steps: [step("Approve", "failed", needIssuer ? "needs an approval key" : describe(e))] });
           if (e instanceof ApiError && e.status === 409) {
             clearOps(i.id);
             void refresh();
@@ -281,7 +281,7 @@ export function StoreProvider({ children, options = {} }: { children: ReactNode;
       try {
         d = JSON.parse(json);
       } catch {
-        return "That is not JSON. Paste the full output of delegate-issuer.";
+        return "That isn't the text the command printed. Paste all of it.";
       }
       const bad = delegationProblem(issuer, d);
       if (bad) return bad;
@@ -305,8 +305,8 @@ export function StoreProvider({ children, options = {} }: { children: ReactNode;
     (i: Incident, kind: "keep_blocked" | "acknowledge") => {
       if (mode === "demo") {
         setData((d) => (d ? { ...d, incidents: d.incidents.map((x) => (x.id === i.id ? { ...x, state: kind === "keep_blocked" ? "resolved" : "acknowledged" } : x)) } : d));
-        setAction(i.id, { kind, phase: "simulated", steps: [step(kind === "keep_blocked" ? "Kept blocked (demo)" : "Acknowledged (demo)", "done", "no policy change")] });
-        setToast(kind === "keep_blocked" ? "Demo: kept blocked. Nothing was sent." : "Demo: acknowledged. Nothing was sent.");
+        setAction(i.id, { kind, phase: "simulated", steps: [step(kind === "keep_blocked" ? "Kept blocked (demo)" : "Acknowledged (demo)", "done", "no rule changed")] });
+        setToast(kind === "keep_blocked" ? "Demo: kept blocking. Nothing was sent." : "Demo: acknowledged. Nothing was sent.");
         return;
       }
       if (!api || !canAct.ok) return;
@@ -317,8 +317,8 @@ export function StoreProvider({ children, options = {} }: { children: ReactNode;
           const m = mapIncident(w);
           setData((d) => (d ? { ...d, incidents: d.incidents.map((x) => (x.id === i.id ? m : x)) } : d));
           setExtra((x) => (x[i.id] ? { ...x, [i.id]: m } : x));
-          setAction(i.id, { kind, phase: "done", steps: [step(kind === "keep_blocked" ? "Kept blocked" : "Acknowledged", "done", kind === "keep_blocked" ? "Recorded by the controller. No policy change was made." : "Seen. Acknowledging never allows anything.")] });
-          setToast(kind === "keep_blocked" ? "Kept blocked. No policy change was made." : "Acknowledged. Nothing was allowed.");
+          setAction(i.id, { kind, phase: "done", steps: [step(kind === "keep_blocked" ? "Kept blocked" : "Acknowledged", "done", kind === "keep_blocked" ? "Saved. No rule changed." : "Seen. Acknowledging never allows anything.")] });
+          setToast(kind === "keep_blocked" ? "Kept blocking. No rule changed." : "Acknowledged. Nothing was allowed.");
         })
         .catch((e) => {
           setAction(i.id, { kind, phase: e instanceof ApiError && !e.offline ? "rejected" : "failed", error: describe(e), steps: [step(kind === "keep_blocked" ? "Keep blocked" : "Acknowledge", "failed", describe(e))] });
@@ -330,13 +330,13 @@ export function StoreProvider({ children, options = {} }: { children: ReactNode;
 
   const retarget = useCallback(async () => {
     if (mode === "demo") {
-      setToast("Demo: retargeting republishes the current policy for every enrolled device; nothing was sent.");
+      setToast("Demo: this would resend your current rules to every device; nothing was sent.");
       return;
     }
     if (!api || !canAct.ok) return;
     try {
       const r = await api.post<{ retargeted: boolean; revision?: number; missing: string[] }>("/v1/policy/retarget", {});
-      setToast(r.retargeted ? `Revision ${r.revision} compiled for ${r.missing.join(", ")} too; it is delivered when they sync.` : "Every enrolled device already has a snapshot for the current revision.");
+      setToast(r.retargeted ? `Rule version ${r.revision} prepared for ${r.missing.join(", ")} too; they get it when they next check in.` : "Every device already has your current rules.");
       void refresh();
     } catch (e) {
       setToast(describe(e));
@@ -346,7 +346,7 @@ export function StoreProvider({ children, options = {} }: { children: ReactNode;
   const rollback = useCallback(
     async (revision: number): Promise<WireProposal | null> => {
       if (mode === "demo") {
-        setToast(`Demo: a rollback prepares a new proposal with revision ${revision}'s rules; nothing was sent.`);
+        setToast(`Demo: going back would prepare a change that restores version ${revision}'s rules; nothing was sent.`);
         return null;
       }
       if (!api || !canAct.ok) return null;
@@ -365,7 +365,7 @@ export function StoreProvider({ children, options = {} }: { children: ReactNode;
       if (mode !== "live" || !api || !canAct.ok) return;
       try {
         const r = await api.post<{ revision: number; authorized_by: string }>(`/v1/policy/proposals/${encodeURIComponent(proposalId)}/approve`, { owner_authorization: authorization });
-        setToast(`Signed as revision ${r.revision} (authorized by ${AUTH_LABEL[r.authorized_by] ?? r.authorized_by}). Devices apply it on their next sync; see each device's receipt.`);
+        setToast(`Signed as rule version ${r.revision} (approved with ${AUTH_LABEL[r.authorized_by] ?? r.authorized_by}). Devices apply it when they next check in, and each one confirms.`);
         void refresh();
       } catch (e) {
         setToast(describe(e));
@@ -385,7 +385,7 @@ export function StoreProvider({ children, options = {} }: { children: ReactNode;
       api
         .post<{ state: string }>(`/v1/harness/devices/${encodeURIComponent(s.deviceId)}/sessions/${encodeURIComponent(s.id)}/close`, {})
         .then(() => {
-          setToast("Close requested. Queued for the device's next sync; the session ends when the endpoint reports it.");
+          setToast("Asked the device to end this task. It ends when the device confirms.");
           void refresh();
         })
         .catch((e) => setToast(describe(e)));
@@ -398,7 +398,7 @@ export function StoreProvider({ children, options = {} }: { children: ReactNode;
       if (mode === "demo") {
         const { demoRefs } = await import("./demo");
         const id = demoRefs[ref];
-        return id ? { incidentId: id } : { error: "This notification reference is unknown or has expired. Nothing else was opened." };
+        return id ? { incidentId: id } : { error: "This notification link is unknown or has expired. Nothing else was opened." };
       }
       if (!api) return { error: "Sign in to open this notification." };
       try {
@@ -407,7 +407,7 @@ export function StoreProvider({ children, options = {} }: { children: ReactNode;
         setExtra((x) => ({ ...x, [m.id]: m }));
         return { incidentId: m.id };
       } catch (e) {
-        if (e instanceof ApiError && e.status === 404) return { error: "This notification reference is unknown, or its incident no longer exists. Nothing else was opened." };
+        if (e instanceof ApiError && e.status === 404) return { error: "This notification link is unknown, or what it pointed to no longer exists. Nothing else was opened." };
         return { error: describe(e).replace(/ Nothing changed\.$/, "") };
       }
     },

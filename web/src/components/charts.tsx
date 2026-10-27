@@ -1,32 +1,26 @@
 /**
- * Small, honest charts for the bento cards. Every chart draws only the series it is handed (fields that already exist
- * in the snapshot: hourly flow rollups, device evidence timestamps, revision receipts, app counts). None of them
- * interpolates, smooths into invented points or fills a gap with a guess; an empty series renders nothing and the
- * caller shows an empty state instead.
+ * The two charts Moat keeps, because each answers its view's question (docs/design.md, "Each view's job"):
+ *
+ *  - Ring: "how many of my devices are protected?" (Overview) and "is my latest rule change in force?" (Overview).
+ *  - BarStrip: "is anything getting through unchecked?" (Overview): connections per hour, blocked / allowed / watched
+ *    only, exactly as the devices rolled them up.
+ *
+ * Every chart draws only the series it is handed. None interpolates or fills a gap with a guess; an empty series
+ * renders nothing and the caller shows an empty state instead.
  */
 import type { ReactNode } from "react";
 import { useStore } from "../data/store";
 import type { TimelinePoint } from "../data/types";
-import { Icon, type IconName } from "./ui";
+import { StatusChip } from "./ui";
 
 /** Shown on chart cards in demo mode, next to the global "Sample data" banner. */
 export function SampleTag() {
   const { mode } = useStore();
-  return mode === "demo" ? <span className="sample-tag">Sample data</span> : null;
-}
-
-export function Spark({ values, width = 84, height = 32, label }: { values: number[]; width?: number; height?: number; label: string }) {
-  if (values.length < 2) return null;
-  const max = Math.max(...values, 1);
-  const step = width / (values.length - 1);
-  const pts = values.map((v, i) => [i * step, height - 2 - (v / max) * (height - 4)] as const);
-  const line = pts.map(([x, y], i) => `${i ? "L" : "M"}${x.toFixed(1)} ${y.toFixed(1)}`).join(" ");
-  return (
-    <svg className="spark" width={width} height={height} viewBox={`0 0 ${width} ${height}`} role="img" aria-label={label}>
-      <path className="spark-area" d={`${line} L${width} ${height} L0 ${height} Z`} />
-      <path className="spark-line" d={line} />
-    </svg>
-  );
+  return mode === "demo" ? (
+    <StatusChip tone="blue" icon="info">
+      Sample data
+    </StatusChip>
+  ) : null;
 }
 
 /** A progress ring for a real fraction (n of total). `total` 0 draws an empty track. */
@@ -43,38 +37,21 @@ export function Ring({ value, total, size = 64, stroke = 7, label, children }: {
   );
 }
 
-export function Kpi({ label, icon, tone, value, unit, sub, chart }: { label: string; icon: IconName; tone?: string; value: ReactNode; unit?: string; sub?: ReactNode; chart?: ReactNode }) {
-  return (
-    <div className={`kpi ${tone ? `tone-${tone}` : ""}`}>
-      <span className="kpi-label">
-        <Icon name={icon} size={13} />
-        {label}
-      </span>
-      <div className="kpi-value">
-        {value}
-        {unit && <small>{unit}</small>}
-      </div>
-      {sub && <div className="kpi-sub">{sub}</div>}
-      {chart && <div className="kpi-chart">{chart}</div>}
-    </div>
-  );
-}
-
 function hourLabel(iso: string) {
   const d = new Date(iso);
   return Number.isFinite(d.getTime()) ? `${String(d.getHours()).padStart(2, "0")}:00` : "";
 }
 
-/** Stacked hourly bars: allowed, observed (permitted, not enforced) and blocked, exactly as rolled up. */
+/** Stacked hourly bars: allowed, watched only and blocked, exactly as rolled up. */
 export function BarStrip({ points }: { points: TimelinePoint[] }) {
   if (!points.length) return null;
-  const H = 112;
+  const H = 96;
   const max = Math.max(...points.map((p) => p.allowed + p.observed + p.blocked), 1);
   const w = 100 / points.length;
   const bw = w * 0.56;
   return (
     <>
-      <svg className="strip" viewBox={`0 0 100 ${H}`} preserveAspectRatio="none" role="img" aria-label={`Flows per hour by verdict, ${points.length} hours`}>
+      <svg className="strip" viewBox={`0 0 100 ${H}`} preserveAspectRatio="none" role="img" aria-label={`Connections per hour over the last ${points.length} hours: allowed, watched only and blocked`}>
         {points.map((p, i) => {
           const x = i * w + (w - bw) / 2;
           const hA = (p.allowed / max) * (H - 2);
@@ -88,7 +65,7 @@ export function BarStrip({ points }: { points: TimelinePoint[] }) {
           };
           return (
             <g key={p.hour}>
-              <title>{`${hourLabel(p.hour)}: ${p.allowed} allowed, ${p.observed} observed, ${p.blocked} blocked`}</title>
+              <title>{`${hourLabel(p.hour)}: ${p.allowed} allowed, ${p.observed} watched only, ${p.blocked} blocked`}</title>
               {seg(hA, "strip-allowed")}
               {seg(hO, "strip-observed")}
               {seg(Math.max(hB, p.blocked > 0 ? 1.4 : 0), "strip-blocked")}
@@ -102,89 +79,5 @@ export function BarStrip({ points }: { points: TimelinePoint[] }) {
         <span>{hourLabel(points[points.length - 1]!.hour)}</span>
       </div>
     </>
-  );
-}
-
-/** Rows × buckets of hourly rollups. Each row is scaled to its own peak, so the grid shows when, not how much. */
-export function HeatGrid({ points, bucketHours = 4 }: { points: TimelinePoint[]; bucketHours?: number }) {
-  if (!points.length) return null;
-  const buckets: TimelinePoint[][] = [];
-  for (let i = 0; i < points.length; i += bucketHours) buckets.push(points.slice(i, i + bucketHours));
-  const rows: { key: "allowed" | "observed" | "blocked"; label: string; tone: string }[] = [
-    { key: "allowed", label: "Allowed", tone: "allowed" },
-    { key: "observed", label: "Observed", tone: "observed" },
-    { key: "blocked", label: "Blocked", tone: "blocked" },
-  ];
-  return (
-    <>
-      <div className="heat" style={{ ["--cols" as string]: buckets.length }} role="table" aria-label={`Flows by verdict in ${bucketHours}-hour buckets`}>
-        <span role="columnheader" />
-        {buckets.map((b) => (
-          <span key={b[0]!.hour} className="heat-col-label" role="columnheader">
-            {hourLabel(b[0]!.hour)}
-          </span>
-        ))}
-        {rows.map((r) => {
-          const sums = buckets.map((b) => b.reduce((s, p) => s + p[r.key], 0));
-          const peak = Math.max(...sums, 1);
-          return [
-            <span key={r.key} className={`heat-row-label tone-${r.tone}`} role="rowheader">
-              <span className="sw" aria-hidden />
-              {r.label}
-            </span>,
-            ...sums.map((v, i) => (
-              <span key={`${r.key}${i}`} className={`heat-cell tone-${r.tone}`} role="cell" title={`${r.label} ${v}`} aria-label={`${r.label}, from ${hourLabel(buckets[i]![0]!.hour)}: ${v}`} style={{ ["--lvl" as string]: `${v ? Math.round(14 + (v / peak) * 70) : 0}%` }} />
-            )),
-          ];
-        })}
-      </div>
-      <div className="heat-scale" aria-hidden>
-        <span>fewer</span>
-        {[0, 20, 40, 62, 84].map((l) => (
-          <i key={l} style={{ ["--lvl" as string]: `${l}%` }} />
-        ))}
-        <span>more (per row)</span>
-      </div>
-    </>
-  );
-}
-
-/** Periwinkle (few) to amber (most); a zero hour stays an empty cell. */
-export function hexFill(f: number) {
-  if (f <= 0) return "var(--surface-3)";
-  const warm = Math.round(f * 100);
-  const strength = Math.round(40 + f * 60);
-  return `color-mix(in oklab, color-mix(in oklch, var(--chart-3) ${warm}%, var(--chart-1)) ${strength}%, var(--surface-3))`;
-}
-
-/** One hexagon per hour of blocked attempts, oldest top left, the current hour outlined. */
-export function HexMap({ points }: { points: TimelinePoint[] }) {
-  if (!points.length) return null;
-  const cols = 6;
-  const R = 20;
-  const hw = Math.sqrt(3) * R;
-  const rows = Math.ceil(points.length / cols);
-  const W = cols * hw + hw / 2 + 4;
-  const H = rows * R * 1.5 + R / 2 + 4;
-  const max = Math.max(...points.map((p) => p.blocked), 1);
-  const hex = (cx: number, cy: number) =>
-    Array.from({ length: 6 }, (_, k) => {
-      const a = (Math.PI / 3) * k - Math.PI / 6;
-      return `${(cx + (R - 1) * Math.cos(a)).toFixed(1)},${(cy + (R - 1) * Math.sin(a)).toFixed(1)}`;
-    }).join(" ");
-  return (
-    <svg className="hexmap" viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`Blocked attempts per hour, ${points.length} hours`}>
-      {points.map((p, i) => {
-        const row = Math.floor(i / cols);
-        const col = i % cols;
-        const cx = 2 + hw / 2 + col * hw + (row % 2 ? hw / 2 : 0);
-        const cy = 2 + R + row * R * 1.5;
-        return (
-          <polygon key={p.hour} points={hex(cx, cy)} className={`hex ${i === points.length - 1 ? "hex-now" : ""}`} style={{ fill: hexFill(p.blocked / max) }}>
-            <title>{`${hourLabel(p.hour)}: ${p.blocked} blocked`}</title>
-          </polygon>
-        );
-      })}
-    </svg>
   );
 }

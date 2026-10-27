@@ -1,10 +1,10 @@
 import { useEffect, useId, useState, type ReactNode } from "react";
-import { Icon, type IconName } from "./components/ui";
+import { Button, Details, EmptyState, Icon, type IconName } from "./components/ui";
 import { useStore } from "./data/store";
 import { snapshotAgeMs, SNAPSHOT_STALE_AFTER_MS } from "./data/freshness";
 import { ago } from "./format";
 import { SignIn } from "./screens/SignIn";
-import { Home } from "./screens/Home";
+import { Overview } from "./screens/Overview";
 import { Activity, IncidentDetail } from "./screens/Activity";
 import { SessionDetail, Sessions } from "./screens/Sessions";
 import { Rules } from "./screens/Rules";
@@ -27,16 +27,19 @@ export function useRoute(): [string[], (to: string) => void] {
   return [parts, (to: string) => (window.location.hash = `#/${to}`)];
 }
 
-const NAV: { key: string; label: string; icon: IconName; mobile: boolean }[] = [
-  { key: "", label: "Apps", icon: "apps", mobile: true },
-  { key: "overview", label: "Overview", icon: "grid", mobile: false },
-  { key: "activity", label: "Activity", icon: "activity", mobile: true },
-  { key: "sessions", label: "Tasks", icon: "sessions", mobile: true },
-  { key: "rules", label: "Rules", icon: "rules", mobile: true },
-  { key: "devices", label: "Devices", icon: "devices", mobile: true },
-  { key: "learning", label: "Learning & packs", icon: "spark", mobile: false },
-  { key: "coverage", label: "Coverage & recovery", icon: "coverage", mobile: false },
+/**
+ * Primary navigation. Six views on a desktop, five on a phone (Overview is one tap from the Apps status line).
+ * Learn and rule packs live under Rules; coverage, recovery and "What changed?" live under Devices.
+ */
+const NAV: { key: string; label: string; icon: IconName; mobile: boolean; also: string[] }[] = [
+  { key: "", label: "Apps", icon: "apps", mobile: true, also: ["apps"] },
+  { key: "overview", label: "Overview", icon: "grid", mobile: false, also: [] },
+  { key: "activity", label: "Activity", icon: "activity", mobile: true, also: ["r"] },
+  { key: "sessions", label: "Tasks", icon: "sessions", mobile: true, also: [] },
+  { key: "rules", label: "Rules", icon: "rules", mobile: true, also: ["learning"] },
+  { key: "devices", label: "Devices", icon: "devices", mobile: true, also: ["coverage", "diagnostics", "changed"] },
 ];
+const isActive = (section: string, n: (typeof NAV)[number], mobile: boolean) => section === n.key || n.also.includes(section) || (mobile && n.key === "devices" && section === "overview");
 /** A one-computer user does not land in fleet administration: "Devices" reads "This computer". */
 const navLabel = (key: string, label: string, deviceCount: number) => (key === "devices" && deviceCount === 1 ? "This computer" : label);
 /** The phone tab bar has room for one word per tab: "Computer" there, "This computer" everywhere else. */
@@ -90,13 +93,9 @@ function RefRoute({ refId, go }: { refId: string; go: (to: string) => void }) {
   return (
     <div className="page">
       {err ? (
-        <div className="empty">
-          <div className="empty-title">Notification not found</div>
-          <div className="muted small">{err}</div>
-          <button type="button" className="btn btn-quiet" onClick={() => go("activity")}>
-            Open Activity
-          </button>
-        </div>
+        <EmptyState title="Notification not found" icon="alert" action={<Button onClick={() => go("activity")}>Open Activity</Button>}>
+          {err}
+        </EmptyState>
       ) : (
         <div className="muted small" role="status">
           Opening the notification…
@@ -106,7 +105,7 @@ function RefRoute({ refId, go }: { refId: string; go: (to: string) => void }) {
   );
 }
 
-/** Mode and freshness are visible on every screen. */
+/** Mode and freshness are visible on every screen, as a banner that is never collapsed. */
 function StatusBanner() {
   const { mode, demoOnly, status, error, data, signOut, refresh } = useStore();
   const [, tick] = useState(0);
@@ -116,14 +115,16 @@ function StatusBanner() {
   }, []);
   if (mode === "demo")
     return (
-      <div className="mode-banner mode-demo" role="status">
-        <span className="mode-icon" aria-hidden>
+      <div className="banner tone-blue banner-global" role="status">
+        <span className="banner-icon" aria-hidden>
           <Icon name="info" size={16} />
         </span>
-        <strong>Sample data.</strong> Nothing here describes your devices, and actions send nothing.
+        <div className="banner-body">
+          <strong className="banner-title">Sample data.</strong> <span className="banner-text">Nothing here is about your devices, and buttons don&apos;t send anything.</span>
+        </div>
         {!demoOnly && (
           <button type="button" className="link-btn" onClick={signOut}>
-            Leave demo
+            Leave sample data
           </button>
         )}
       </div>
@@ -132,11 +133,21 @@ function StatusBanner() {
   const age = snapshotAgeMs(data);
   if (status === "unreachable" || status === "unauthorized" || age > SNAPSHOT_STALE_AFTER_MS)
     return (
-      <div className="mode-banner mode-stale" role="alert">
-        <span className="mode-icon" aria-hidden>
+      <div className="banner tone-amber banner-global" role="alert">
+        <span className="banner-icon" aria-hidden>
           <Icon name="alert" size={16} />
         </span>
-        <strong>{status === "unauthorized" ? "Signed out by the controller." : "Not current."}</strong> {error ?? "Updates stopped."} Showing what the controller reported {ago(data.fetchedAt)}; actions are paused.
+        <div className="banner-body">
+          <strong className="banner-title">{status === "unauthorized" ? "Signed out by the controller." : "Not current."}</strong>{" "}
+          <span className="banner-text">
+            {status === "unauthorized" ? "Your controller no longer accepts this sign-in." : status === "unreachable" ? "Moat can't reach your controller." : "Updates stopped."} Showing what it reported {ago(data.fetchedAt)}; actions are paused.
+          </span>
+          {error && (
+            <Details summary="Technical details">
+              <span className="mono">{error}</span>
+            </Details>
+          )}
+        </div>
         <button type="button" className="link-btn" onClick={() => void refresh()}>
           Retry
         </button>
@@ -155,21 +166,25 @@ export function App() {
         <div className="signin-card card">
           {store.status === "unreachable" ? (
             <>
-              <h1 className="signin-title">Can't reach the controller</h1>
-              <p className="muted small">{store.error}</p>
-              <p className="muted small">Nothing is shown rather than old or sample data. Enforcement on your devices does not depend on this page.</p>
-              <div className="decision-actions">
-                <button type="button" className="btn btn-primary" onClick={() => void store.refresh()}>
-                  Retry
-                </button>
-                <button type="button" className="btn btn-quiet" onClick={store.signOut}>
+              <h1 className="signin-title">Can&apos;t reach the controller</h1>
+              <p className="lede">Nothing is shown rather than old or sample data. Your devices keep protecting themselves without this page.</p>
+              {store.error && (
+                <Details summary="Technical details">
+                  <span className="mono">{store.error}</span>
+                </Details>
+              )}
+              <div className="actions">
+                <Button kind="primary" onClick={() => void store.refresh()}>
+                  Try again
+                </Button>
+                <Button kind="quiet" onClick={store.signOut}>
                   Sign out
-                </button>
+                </Button>
               </div>
             </>
           ) : (
-            <div className="muted small" role="status">
-              Loading from the controller…
+            <div className="muted" role="status">
+              Loading from your controller…
             </div>
           )}
         </div>
@@ -222,7 +237,7 @@ function Shell() {
       screen = <Diagnostics />;
       break;
     case "overview":
-      screen = <Home go={go} />;
+      screen = <Overview go={go} />;
       break;
     case "coverage":
       screen = <CoverageScreen go={go} />;
@@ -240,7 +255,7 @@ function Shell() {
         </a>
         <nav className="side-nav">
           {NAV.map((n) => (
-            <a key={n.key} href={`#/${n.key}`} className={`side-link ${section === n.key || (section === "apps" && n.key === "") || (section === "r" && n.key === "activity") || (n.key === "coverage" && (section === "diagnostics" || section === "changed")) ? "active" : ""}`}>
+            <a key={n.key} href={`#/${n.key}`} className={`side-link ${isActive(section, n, false) ? "active" : ""}`} aria-current={isActive(section, n, false) ? "page" : undefined}>
               <Icon name={n.icon} />
               <span>{navLabel(n.key, n.label, data.devices.length)}</span>
               {n.key === "activity" && open > 0 && <span className="count">{open}</span>}
@@ -248,9 +263,9 @@ function Shell() {
           ))}
         </nav>
         <div className="side-foot">
-          <div className="rev-chip">
-            <span className="mono">rev {data.policyRevision}</span>
-            <span className="muted">{mode === "demo" ? "sample data" : `live · ${data.viewer?.role ?? "?"}`}</span>
+          <div className="side-who">
+            <span>{mode === "demo" ? "Sample data" : data.viewer?.name ?? "Signed in"}</span>
+            <span className="muted">{mode === "demo" ? "nothing is sent" : data.viewer?.role === "owner" ? "owner" : "read only"}</span>
           </div>
           <button type="button" className="icon-btn" onClick={toggle} aria-label={theme === "light" ? "Switch to dark appearance" : "Switch to light appearance"} aria-pressed={theme === "dark"}>
             <Icon name={theme === "light" ? "moon" : "sun"} />
@@ -264,7 +279,7 @@ function Shell() {
             <span>Moat</span>
           </a>
           <div className="topbar-right">
-            {mode === "demo" && <span className="demo-pill">Demo</span>}
+            {mode === "demo" && <span className="chip tone-blue">Sample</span>}
             {mode === "live" && (
               <button type="button" className="link-btn small" onClick={signOut}>
                 Sign out
@@ -282,7 +297,7 @@ function Shell() {
       </div>
       <nav className="tabbar" aria-label="Primary">
         {NAV.filter((n) => n.mobile).map((n) => (
-          <a key={n.key} href={`#/${n.key}`} className={`tab ${section === n.key || (n.key === "" && section === "apps") || (n.key === "devices" && (section === "coverage" || section === "diagnostics" || section === "changed" || section === "overview")) || (n.key === "activity" && section === "r") || (n.key === "rules" && section === "learning") ? "active" : ""}`}>
+          <a key={n.key} href={`#/${n.key}`} className={`tab ${isActive(section, n, true) ? "active" : ""}`} aria-current={isActive(section, n, true) ? "page" : undefined}>
             <span className="tab-icon">
               <Icon name={n.icon} size={21} />
               {n.key === "activity" && open > 0 && <span className="tab-badge">{open}</span>}

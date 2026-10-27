@@ -53,6 +53,25 @@
   --neutral: #A1A8B8;
 }
 :root {
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 20px;
+  --s-6: 24px;
+  --s-8: 32px;
+  --s-10: 40px;
+  --t-xs: 12px;
+  --t-sm: 13px;
+  --t-md: 15px;
+  --t-lg: 17px;
+  --t-xl: 20px;
+  --t-2xl: 28px;
+  --t-3xl: 34px;
+  --w-regular: 450;
+  --w-medium: 560;
+  --w-semibold: 640;
+  --w-bold: 700;
   --font-sans: "Inter Variable", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
   --radius-card: 14px;

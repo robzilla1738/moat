@@ -1,196 +1,221 @@
-import { SubNav, Badge, Card, CoverageBadge, DeviceIcon, Icon, SectionTitle, SupportBadge } from "../components/ui";
+/**
+ * Devices ("Which of my devices are protected, and which need a fix?") and one device ("Is this device protected, and
+ * what can Moat do on it?"). DNS-only devices say exactly what a web filter can and cannot see.
+ */
+import { Actions, Banner, Button, Card, CoverageChip, DeviceIcon, Details, EmptyState, Facts, Fine, Ident, List, ListRow, Page, Stat, StatusChip, SubNav, SupportChip, DEVICE_NAV, type Tone } from "../components/ui";
 import { useData, useFreshness, useStore } from "../data/store";
 import { ApprovalsCard } from "./Approvals";
-import { ago, compact, COVERAGE } from "../format";
-import type { Device } from "../data/types";
+import { ago, checked, compact, COVERAGE, NEEDS_ATTENTION, SUPPORT } from "../format";
+import type { Device, Support } from "../data/types";
+import { deviceSentence } from "./Standalone";
+
+const SYNC: Record<NonNullable<Device["sync"]>["state"], [Tone, string]> = {
+  current: ["green", "Up to date"],
+  pending: ["neutral", "Update on its way"],
+  stale: ["amber", "Behind on rules"],
+  rejected: ["red", "Refused an update"],
+  held: ["amber", "Update held"],
+  not_released: ["neutral", "Not released yet"],
+  ahead: ["amber", "Ahead of the controller"],
+};
+
+const resolverLabel = (dns: NonNullable<Device["dns"]>) => `via ${dns.resolverKind === "pihole" ? "Pi-hole" : dns.resolverKind === "adguard" ? "AdGuard Home" : "web filter"} (${dns.resolver})`;
+const filterHealth = (h: string) => (h === "ok" ? "OK" : h.replace(/_/g, " "));
 
 export function Devices({ go }: { go: (to: string) => void }) {
   const data = useData();
   const fresh = useFreshness();
+  const one = data.devices.length === 1;
   return (
-    <div className="page">
-      <SubNav active="devices" />
-      <div className="page-head">
-        <h1>Devices</h1>
-        <p className="lede">Each device enforces locally and keeps working when the controller is away. Phones and the TV are covered through DNS only.</p>
-      </div>
-      <div className="stack">
-        {data.devices.map((d) => (
-          <Card key={d.id} as="button" onClick={() => go(`devices/${d.id}`)} className="device-row">
-            <span className="device-glyph lg">
-              <DeviceIcon d={d} size={20} />
-            </span>
-            <span className="device-row-main">
-              <span className="device-row-top">
-                <span className="device-name">{d.name}</span>
-                {d.isController && <Badge>controller</Badge>}
-              </span>
-              <span className="muted small ellipsis">{fresh(d).note ?? d.coverageNote}</span>
-            </span>
-            <span className="device-row-side">
-              <CoverageBadge c={fresh(d).coverage} />
-              {d.sync && d.sync.state !== "current" && <Badge tone={d.sync.state === "pending" || d.sync.state === "not_released" ? "neutral" : "amber"}>{d.sync.state.replace("_", " ")}</Badge>}
-              <span className="muted small">{d.dns ? `resolver ${d.dns.resolverHealth.replace(/_/g, " ")} · polled ${ago(d.lastSeen)}` : `${d.revision ? `rev ${d.revision}` : "no policy"} · ${ago(d.lastSeen)}`}</span>
-            </span>
-          </Card>
-        ))}
-      </div>
+    <Page title={one ? "This computer" : "Devices"} lede="Each device protects itself and keeps working when your controller is away." nav={<SubNav items={DEVICE_NAV} active="devices" label="Devices" />}>
+      {data.devices.length === 0 ? (
+        <EmptyState title="No devices yet" icon="devices">
+          Install Moat on a computer, or connect your home web filter, and it appears here.
+        </EmptyState>
+      ) : (
+        <div className="card list-card">
+          {data.devices.map((d) => {
+            const f = fresh(d);
+            return (
+              <ListRow
+                key={d.id}
+                icon={<DeviceIcon d={d} size={18} />}
+                title={
+                  <>
+                    <Ident value={d.name} />
+                    {d.isController && <span className="muted"> · runs your controller</span>}
+                  </>
+                }
+                sub={
+                  <>
+                    <Ident value={deviceSentence(f.note, d.coverageNote, f.coverage)} kind="text" />
+                    <br />
+                    {d.dns ? `web filter ${filterHealth(d.dns.resolverHealth)} · ${checked(d.lastSeen)}` : checked(d.lastSeen)}
+                  </>
+                }
+                trailing={
+                  <span className="chips">
+                    <CoverageChip c={f.coverage} />
+                    {d.sync && d.sync.state !== "current" && <StatusChip tone={SYNC[d.sync.state][0]}>{SYNC[d.sync.state][1]}</StatusChip>}
+                  </span>
+                }
+                onClick={() => go(`devices/${encodeURIComponent(d.id)}`)}
+              />
+            );
+          })}
+        </div>
+      )}
       <ApprovalsCard />
-    </div>
+    </Page>
   );
+}
+
+function supportSummary(caps: { support: Support }[]) {
+  const order: Support[] = ["supported", "partial", "untested", "unsupported"];
+  return order
+    .map((s) => [s, caps.filter((c) => c.support === s).length] as const)
+    .filter(([, n]) => n > 0)
+    .map(([s, n]) => `${SUPPORT[s].label}: ${n}`)
+    .join(" · ");
 }
 
 export function DeviceDetail({ id, go }: { id: string; go: (to: string) => void }) {
   const data = useData();
   const fresh = useFreshness();
   const d = data.devices.find((x) => x.id === id);
-  if (!d) return <div className="page">Not found</div>;
+  void go;
+  if (!d)
+    return (
+      <Page title="Device not found" back={{ label: "Devices", to: "devices" }}>
+        <EmptyState title="Device not found" icon="devices" />
+      </Page>
+    );
   const f = fresh(d);
+  const warn = NEEDS_ATTENTION.includes(f.coverage);
   return (
-    <div className="page">
-      <button type="button" className="back" onClick={() => go("devices")}>
-        <Icon name="chevron" size={16} className="flip" /> Devices
-      </button>
-      <div className="page-head">
-        <div className="eyebrow">{d.model}</div>
-        <h1 className="detail-title">{d.name}</h1>
-        <div className="head-badges">
-          <CoverageBadge c={f.coverage} />
-          {f.stale && <Badge tone="amber">stale</Badge>}
-          {d.revision && <Badge tone="blue">rev {d.revision} {d.revisionState}</Badge>}
-          {d.awaitingRetarget && <Badge tone="amber">no snapshot for this device</Badge>}
-          {d.sync && d.sync.state !== "current" && (
-            <Badge tone={d.sync.state === "pending" || d.sync.state === "not_released" ? "neutral" : "amber"}>
-              {d.sync.state.replace("_", " ")}
-              {d.sync.desired ? ` · wants rev ${d.sync.desired}` : ""}
-            </Badge>
-          )}
-          <span className="muted small">{d.dns ? `resolver polled ${ago(d.lastSeen)}` : `seen ${ago(d.lastSeen)}`}</span>
-        </div>
+    <Page
+      back={{ label: "Devices", to: "devices" }}
+      eyebrow={<Ident value={d.model} />}
+      title={<Ident value={d.name} />}
+    >
+      <div className="chips">
+        <CoverageChip c={f.coverage} />
+        {f.stale && <StatusChip tone="amber">Not current</StatusChip>}
+        {d.awaitingRetarget && <StatusChip tone="amber">Doesn&apos;t have your current rules</StatusChip>}
+        {d.sync && d.sync.state !== "current" && <StatusChip tone={SYNC[d.sync.state][0]}>{SYNC[d.sync.state][1]}</StatusChip>}
+        <span className="muted">{checked(d.lastSeen)}</span>
       </div>
+      {warn ? (
+        <Banner tone={COVERAGE[f.coverage].tone === "red" ? "red" : "amber"} title={f.coverage === "unknown" ? "We can't confirm this device is protected." : `${COVERAGE[f.coverage].label}.`}>
+          <Ident value={deviceSentence(f.note, d.coverageNote, f.coverage)} kind="text" />
+        </Banner>
+      ) : (
+        <Card>
+          <p className="claim">{COVERAGE[f.coverage].meaning}</p>
+          <p className="muted">
+            <Ident value={d.coverageNote} kind="text" />
+          </p>
+        </Card>
+      )}
       {d.awaitingRetarget && <RetargetCard />}
-      <Card>
-        <p className="claim">{COVERAGE[f.coverage].claim}</p>
-        <div className="muted small">{f.note ?? d.coverageNote}</div>
-      </Card>
       {d.dns ? (
         <DnsEvidence d={d} ageMs={f.ageMs} />
       ) : (
-        <div className="grid-3">
-          <Card>
-            <div className="stat-label">Flows today</div>
-            <div className="stat-value">{compact(d.flowsToday)}</div>
-          </Card>
-          <Card>
-            <div className="stat-label">Blocked today</div>
-            <div className="stat-value bad">{compact(d.blockedToday)}</div>
-          </Card>
-          <Card>
-            <div className="stat-label">Telemetry gaps</div>
-            <div className="stat-value">{d.telemetryGaps.length}</div>
-            {d.telemetryGaps.map(([a, b]) => (
-              <div key={a} className="muted small mono">
-                events {a}–{b}
-              </div>
-            ))}
-          </Card>
-        </div>
-      )}
-      <Card>
-        <SectionTitle>Capabilities</SectionTitle>
-        <ul className="caps">
-          {d.capabilities.map((c) => (
-            <li key={c.key}>
-              <span className="cap-label">{c.label}</span>
-              <span className="muted small cap-note">{c.note}</span>
-              <SupportBadge s={c.support} />
-            </li>
-          ))}
-        </ul>
-        <div className="footnote">Advertised by the endpoint and downgraded by its own probes. A strict rule that needs an unavailable capability fails validation; it is never compiled into a weaker one.</div>
-      </Card>
-      {d.platform === "linux" && (
-        <Card>
-          <SectionTitle>Local recovery</SectionTitle>
-          <pre className="code">{`sudo moatd recover status
-sudo moatd recover disable --reason "..."
-sudo moatd recover isolate --keep 100.100.1.2/32`}</pre>
-          <div className="muted small">Works on the device with the controller or Tailscale down. Isolation never reopens on its own.</div>
+        <Card title="Today">
+          <div className="stats">
+            <Stat label="Connections today" value={compact(d.flowsToday)} />
+            <Stat label="Blocked today" value={compact(d.blockedToday)} tone={d.blockedToday ? "red" : undefined} />
+            <Stat label="Gaps in reports" value={d.telemetryGaps.length} tone={d.telemetryGaps.length ? "amber" : undefined} sub={d.telemetryGaps.length ? "activity in a gap is incomplete" : undefined} />
+          </div>
+          {d.telemetryGaps.length > 0 && (
+            <Details summary="Technical details">
+              {d.telemetryGaps.map(([a, b]) => (
+                <div key={a} className="mono">
+                  events {a}–{b} lost
+                </div>
+              ))}
+            </Details>
+          )}
         </Card>
       )}
-    </div>
+      {d.capabilities.length > 0 && (
+        <Card title="What Moat can do here">
+          <p>{supportSummary(d.capabilities)}</p>
+          <Details summary={`See all ${d.capabilities.length}`}>
+            <List>
+              {d.capabilities.map((c) => (
+                <ListRow key={c.key} title={c.label} sub={c.note ? <Ident value={c.note} kind="text" /> : undefined} trailing={<SupportChip s={c.support} />} />
+              ))}
+            </List>
+            <Fine>Each device reports what it can do and lowers it when its own checks fail. A rule that needs something a device can&apos;t do is refused, never turned into a weaker one.</Fine>
+          </Details>
+        </Card>
+      )}
+      {d.platform === "linux" && (
+        <Card title="If something breaks">
+          <p>Recovery works at the device even when your controller or network is down. Lockdown never turns itself off.</p>
+          <Details summary="Recovery commands">
+            <pre className="code">{`sudo moatd recover status
+sudo moatd recover disable --reason "..."
+sudo moatd recover isolate --keep 100.100.1.2/32`}</pre>
+          </Details>
+        </Card>
+      )}
+    </Page>
   );
 }
 
-const resolverLabel = (dns: NonNullable<Device["dns"]>) => `via ${dns.resolverKind === "pihole" ? "Pi-hole" : dns.resolverKind === "adguard" ? "AdGuard Home" : "resolver"} (${dns.resolver})`;
-
 /**
- * W16 DNS-only presentation: resolver health and evidence age (the adapter's last good poll), the client's last query
- * and declared history gaps. No flows, processes or bytes: DNS cannot establish them.
+ * W16 DNS-only presentation: the web filter's health and when it last answered (the evidence age), the device's last
+ * lookup and declared history gaps. No connections, programs or data counts: DNS cannot establish them.
  */
 function DnsEvidence({ d, ageMs }: { d: Device; ageMs: number | null }) {
   const dns = d.dns!;
   return (
     <>
-      <div className="grid-3">
-        <Card>
-          <div className="stat-label">Resolver</div>
-          <div className={`stat-value ${dns.resolverHealth === "ok" ? "" : "bad"}`}>{dns.resolverHealth.replace(/_/g, " ")}</div>
-          <div className="muted small">{resolverLabel(dns)}</div>
-        </Card>
-        <Card>
-          <div className="stat-label">Evidence age</div>
-          <div className="stat-value">{ageMs === null ? "never polled" : ageMs < 60_000 ? "<1 min" : `${Math.round(ageMs / 60_000)} min`}</div>
-          <div className="muted small">since the resolver&apos;s last good poll</div>
-        </Card>
-        <Card>
-          <div className="stat-label">Last query</div>
-          <div className="stat-value">{ago(dns.lastQueryAt)}</div>
-          <div className="muted small">as the resolver reported it</div>
-        </Card>
-      </div>
-      {d.blockedToday > 0 && (
-        <div className="grid-3">
-          <Card>
-            <div className="stat-label">Queries today</div>
-            <div className="stat-value">{compact(d.flowsToday)}</div>
-          </Card>
-          <Card>
-            <div className="stat-label">Blocked by the resolver</div>
-            <div className="stat-value bad">{compact(d.blockedToday)}</div>
-          </Card>
+      <Card title="Web filter">
+        <div className="stats">
+          <Stat label="Web filter" value={filterHealth(dns.resolverHealth)} sub={resolverLabel(dns)} tone={dns.resolverHealth === "ok" ? undefined : "red"} />
+          <Stat label="Last checked" value={ageMs === null ? "never" : ageMs < 60_000 ? "<1 min" : ageMs < 3600_000 ? `${Math.round(ageMs / 60_000)} min` : `${Math.round(ageMs / 3600_000)} h`} sub="since the web filter last answered" />
+          <Stat label="Last lookup" value={ago(dns.lastQueryAt)} sub="as the web filter reported it" />
         </div>
-      )}
-      <Card>
-        <SectionTitle>History gaps</SectionTitle>
-        {dns.gaps.length === 0 ? (
-          <div className="muted small">No dropped resolver history has been detected.</div>
-        ) : (
-          <ul className="caps">
-            {dns.gaps.map((g, i) => (
-              <li key={i}>
-                <span className="cap-label">{g.from ? ago(g.from) : "?"} – {g.to ? ago(g.to) : "now"}</span>
-                <span className="muted small cap-note">{g.reason}</span>
-              </li>
-            ))}
-          </ul>
+        {d.blockedToday > 0 && (
+          <div className="stats">
+            <Stat label="Lookups today" value={compact(d.flowsToday)} />
+            <Stat label="Blocked by the web filter" value={compact(d.blockedToday)} tone="red" />
+          </div>
         )}
-        <div className="footnote">DNS evidence says which client asked the resolver for which name, and whether it was blocked. It cannot name an app or process, see a connection or count bytes, and direct-IP or other encrypted-DNS traffic is invisible to it.</div>
+        <Fine>The web filter only sees which device asked for which website, and whether it was blocked. It can&apos;t name an app, see a connection or count data, and it misses direct connections and other encrypted lookups.</Fine>
+      </Card>
+      <Card title="Gaps in history">
+        {dns.gaps.length === 0 ? (
+          <p className="muted">No missing web filter history found.</p>
+        ) : (
+          <List>
+            {dns.gaps.map((g, i) => (
+              <ListRow key={i} title={`${g.from ? ago(g.from) : "?"} – ${g.to ? ago(g.to) : "now"}`} sub={<Ident value={g.reason} kind="text" />} trailing={<StatusChip tone="amber">Gap</StatusChip>} />
+            ))}
+          </List>
+        )}
       </Card>
     </>
   );
 }
 
-/** A device enrolled after the current revision was compiled: its platform's snapshot does not name it. */
+/** A device enrolled after the current rules were prepared: its platform's copy does not name it. */
 function RetargetCard() {
   const { retarget, canAct } = useStore();
   return (
-    <Card>
-      <p className="claim">The current policy was compiled before this device enrolled, so it has not received it.</p>
-      <div className="muted small">
-        Each platform&apos;s snapshot is compiled for the devices enrolled at the time and installs only on them. Retarget republishes the same policy (no permission changes) for every enrolled device.
-      </div>
-      <button type="button" className="btn btn-primary" disabled={!canAct.ok} onClick={() => void retarget()}>Retarget current policy</button>
+    <Card title="This device doesn't have your current rules">
+      <p>It joined after your current rules were prepared, so it hasn&apos;t received them. Resending changes no permissions.</p>
+      <Actions>
+        <Button kind="primary" disabled={!canAct.ok} onClick={() => void retarget()}>
+          Resend current rules
+        </Button>
+      </Actions>
+      <Details summary="Technical details">
+        Each platform&apos;s signed snapshot is compiled for the devices enrolled at the time and installs only on them. Retargeting republishes the same policy for every enrolled device.
+      </Details>
     </Card>
   );
 }

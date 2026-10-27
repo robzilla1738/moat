@@ -7,40 +7,20 @@
     "numerals": "tabular-nums for every figure"
   },
   "type": {
-    "display": {
-      "size": 32,
-      "desktop": 38,
-      "weight": 680,
-      "tracking": -0.028
-    },
-    "title": {
-      "size": 20,
-      "weight": 650,
-      "tracking": -0.018
-    },
-    "card-title": {
-      "size": 15,
-      "weight": 640,
-      "tracking": -0.01
-    },
-    "body": {
-      "size": 15,
-      "weight": 450,
-      "line": 1.5
-    },
-    "label": {
-      "size": 12.5,
-      "weight": 560
-    },
-    "micro": {
-      "size": 11.5,
-      "weight": 600
-    },
-    "figure": {
-      "size": 30,
-      "weight": 680,
-      "tracking": -0.03
-    }
+    "note": "One type scale for web (--t-*) and macOS (TypeScale.*). Roles: xs chips and fine print, sm secondary text and labels, md body and card titles, lg section headers, xl detail titles, 2xl page titles on phones, 3xl page titles on desktop and big figures.",
+    "xs": 12,
+    "sm": 13,
+    "md": 15,
+    "lg": 17,
+    "xl": 20,
+    "2xl": 28,
+    "3xl": 34
+  },
+  "weight": {
+    "regular": 450,
+    "medium": 560,
+    "semibold": 640,
+    "bold": 700
   },
   "radius": {
     "card": 14,
@@ -49,10 +29,15 @@
     "chip": 999
   },
   "space": {
-    "gap": 16,
-    "card-pad": 18,
-    "page-x-phone": 16,
-    "page-x-desktop": 36
+    "note": "One spacing scale for padding, margins and gaps on web (--s-*) and macOS (Space.*). Nothing outside it.",
+    "1": 4,
+    "2": 8,
+    "3": 12,
+    "4": 16,
+    "5": 20,
+    "6": 24,
+    "8": 32,
+    "10": 40
   },
   "hit-target": 44,
   "color": {

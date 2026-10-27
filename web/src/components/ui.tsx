@@ -1,9 +1,14 @@
+/**
+ * Moat's one component set (docs/design.md, "Components"). Every screen is built from these: Page, Card, SectionHeader,
+ * Stat, StatusChip, ListRow, Banner, EmptyState, Button and Details, plus the untrusted-text renderer (Ident). Styles
+ * live in styles.css and use only the tokens in tokens.css; styles.test.ts fails on anything else.
+ */
 import type { ReactNode } from "react";
 import { inspectIdent } from "../data/ident";
-import type { ActionState, ChainNode, Coverage, Device, Support, TimelinePoint } from "../data/types";
+import type { ActionState, ChainNode, Coverage, Device, Support } from "../data/types";
 import { COVERAGE, SUPPORT } from "../format";
 
-type IconName = "home" | "activity" | "sessions" | "rules" | "devices" | "apps" | "coverage" | "shield" | "check" | "x" | "chevron" | "laptop" | "server" | "phone" | "tv" | "linux" | "clock" | "bolt" | "globe" | "lock" | "sun" | "moon" | "undo" | "spark" | "alert" | "dot" | "branch" | "eye" | "help" | "minus" | "wrench" | "info" | "grid" | "trophy";
+type IconName = "home" | "activity" | "sessions" | "rules" | "devices" | "apps" | "coverage" | "shield" | "check" | "x" | "chevron" | "laptop" | "server" | "phone" | "tv" | "linux" | "clock" | "bolt" | "globe" | "lock" | "sun" | "moon" | "undo" | "spark" | "alert" | "dot" | "branch" | "eye" | "help" | "minus" | "wrench" | "info" | "grid";
 
 const paths: Record<IconName, ReactNode> = {
   home: <path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z" />,
@@ -38,7 +43,6 @@ const paths: Record<IconName, ReactNode> = {
   wrench: <path d="M14.7 6.3a4 4 0 0 0-5.4 5.1L3.6 17.1a1.5 1.5 0 0 0 2.1 2.1l5.7-5.7a4 4 0 0 0 5.1-5.4l-2.5 2.5-2.1-.4-.4-2.1z" />,
   info: <><circle cx="12" cy="12" r="9" /><path d="M12 11v5M12 8h.01" /></>,
   grid: <><rect x="3" y="3" width="8" height="8" rx="2" /><rect x="13" y="3" width="8" height="5" rx="2" /><rect x="13" y="10" width="8" height="11" rx="2" /><rect x="3" y="13" width="8" height="8" rx="2" /></>,
-  trophy: <><path d="M8 4h8v5a4 4 0 0 1-8 0z" /><path d="M8 6H5a3 3 0 0 0 3 4M16 6h3a3 3 0 0 1-3 4M12 13v4M8.5 20h7" /></>,
   branch: <><circle cx="6" cy="5" r="2" /><circle cx="6" cy="19" r="2" /><circle cx="18" cy="12" r="2" /><path d="M6 7v10M6 12h6a4 4 0 0 0 4-4V7" /></>,
 };
 
@@ -51,103 +55,305 @@ export function Icon({ name, size = 18, className }: { name: IconName; size?: nu
 }
 export type { IconName };
 
-/** The icon a status tone carries when no more specific one is given: status is never colour alone. */
-export const TONE_ICON: Record<string, IconName> = { green: "check", red: "x", amber: "alert", blue: "info", violet: "globe", neutral: "dot" };
+export type Tone = "green" | "red" | "amber" | "blue" | "violet" | "neutral";
 
-/**
- * A pill chip. Every toned chip leads with an icon so its state reads without colour; neutral chips (counts, ids)
- * carry text only unless they ask for an icon.
- */
-export function Badge({ tone = "neutral", children, dot, icon }: { tone?: string; children: ReactNode; dot?: boolean; icon?: IconName }) {
-  const name = icon ?? (tone !== "neutral" || dot ? TONE_ICON[tone] ?? "dot" : undefined);
+/** The icon a status tone carries when no more specific one is given: status is never colour alone. */
+export const TONE_ICON: Record<Tone, IconName> = { green: "check", red: "x", amber: "alert", blue: "info", violet: "globe", neutral: "dot" };
+
+// ------------------------------------------------------------------------------------------------------ layout
+
+/** The page frame: optional back link, eyebrow, one title, at most one short lede, then content. */
+export function Page({ title, lede, eyebrow, back, nav, wide, titleMono, children }: { title: ReactNode; lede?: ReactNode; eyebrow?: ReactNode; back?: { label: string; to: string }; nav?: ReactNode; wide?: boolean; titleMono?: boolean; children: ReactNode }) {
   return (
-    <span className={`badge tone-${tone}`}>
+    <div className={`page ${wide ? "page-wide" : ""}`}>
+      {nav}
+      {back && (
+        <a className="back" href={`#/${back.to}`}>
+          <Icon name="chevron" size={16} className="flip" /> {back.label}
+        </a>
+      )}
+      <header className="page-head">
+        {eyebrow && <div className="eyebrow">{eyebrow}</div>}
+        <h1 className={titleMono ? "title-mono" : undefined}>{title}</h1>
+        {lede && <p className="lede">{lede}</p>}
+      </header>
+      {children}
+    </div>
+  );
+}
+
+/** A card: optional header (title + one quiet action or chip), body. One primary action per card. */
+export function Card({ title, action, children, className = "", tone, onClick, id }: { title?: ReactNode; action?: ReactNode; children: ReactNode; className?: string; tone?: Tone; onClick?: () => void; id?: string }) {
+  const cls = `card ${tone ? `card-${tone}` : ""} ${className}`;
+  const body = (
+    <>
+      {title !== undefined && <SectionHeader title={title} action={action} level={3} />}
+      {children}
+    </>
+  );
+  if (onClick)
+    return (
+      <button type="button" className={`${cls} card-button`} onClick={onClick} id={id}>
+        {body}
+      </button>
+    );
+  return (
+    <section className={cls} id={id}>
+      {body}
+    </section>
+  );
+}
+
+/** Section header: one title, at most one trailing action (a link) or chip. */
+export function SectionHeader({ title, action, level = 2 }: { title: ReactNode; action?: ReactNode; level?: 2 | 3 }) {
+  const H = level === 2 ? "h2" : "h3";
+  return (
+    <div className={`section-header section-header-${level}`}>
+      <H>{title}</H>
+      {action}
+    </div>
+  );
+}
+
+/** A figure with a label. Used where a number answers the view's question; never decorative. */
+export function Stat({ label, value, sub, tone }: { label: string; value: ReactNode; sub?: ReactNode; tone?: Tone }) {
+  return (
+    <div className={`stat ${tone ? `stat-${tone}` : ""}`}>
+      <div className="stat-label">{label}</div>
+      <div className="stat-value">{value}</div>
+      {sub && <div className="stat-sub">{sub}</div>}
+    </div>
+  );
+}
+
+/** Status chip: icon + label, always. Neutral chips (counts) may omit the icon. */
+export function StatusChip({ tone = "neutral", children, icon }: { tone?: Tone; children: ReactNode; icon?: IconName | null }) {
+  const name = icon === null ? undefined : icon ?? (tone !== "neutral" ? TONE_ICON[tone] : undefined);
+  return (
+    <span className={`chip tone-${tone}`}>
       {name && <Icon name={name} size={12} />}
       {children}
     </span>
   );
 }
 
-export function CoverageBadge({ c }: { c: Coverage }) {
+export function CoverageChip({ c }: { c: Coverage }) {
   return (
-    <Badge tone={COVERAGE[c].tone} icon={COVERAGE[c].icon}>
+    <StatusChip tone={COVERAGE[c].tone} icon={COVERAGE[c].icon}>
       {COVERAGE[c].label}
-    </Badge>
+    </StatusChip>
   );
 }
 
-export function SupportBadge({ s }: { s: Support }) {
+export function SupportChip({ s }: { s: Support }) {
   return (
-    <Badge tone={SUPPORT[s].tone} icon={SUPPORT[s].icon}>
+    <StatusChip tone={SUPPORT[s].tone} icon={SUPPORT[s].icon}>
       {SUPPORT[s].label}
-    </Badge>
+    </StatusChip>
   );
 }
 
-export function Card({ children, className = "", onClick, as }: { children: ReactNode; className?: string; onClick?: () => void; as?: "button" }) {
-  if (as === "button")
+/** A list row: leading icon, title, one sub line, trailing chip or figure; a row that opens something shows a chevron. */
+export function ListRow({ icon, iconTone, title, sub, trailing, onClick, href }: { icon?: ReactNode; iconTone?: Tone; title: ReactNode; sub?: ReactNode; trailing?: ReactNode; onClick?: () => void; href?: string }) {
+  const inner = (
+    <>
+      {icon && <span className={`row-icon ${iconTone ? `tone-${iconTone}` : ""}`}>{icon}</span>}
+      <span className="row-main">
+        <span className="row-title">{title}</span>
+        {sub && <span className="row-sub">{sub}</span>}
+      </span>
+      {trailing && <span className="row-trailing">{trailing}</span>}
+      {(onClick || href) && <Icon name="chevron" size={16} className="row-chevron" />}
+    </>
+  );
+  if (href)
     return (
-      <button type="button" className={`card card-button ${className}`} onClick={onClick}>
-        {children}
+      <a className="row row-link" href={href}>
+        {inner}
+      </a>
+    );
+  if (onClick)
+    return (
+      <button type="button" className="row row-link" onClick={onClick}>
+        {inner}
       </button>
     );
-  return <section className={`card ${className}`}>{children}</section>;
+  return <div className="row">{inner}</div>;
 }
 
-export function SectionTitle({ children, action }: { children: ReactNode; action?: ReactNode }) {
+/** A list of rows inside a card. */
+export function List({ children, label }: { children: ReactNode; label?: string }) {
   return (
-    <div className="section-title">
-      <h2>{children}</h2>
+    <div className="list" role={label ? "list" : undefined} aria-label={label}>
+      {children}
+    </div>
+  );
+}
+
+/**
+ * Banner: an announcement or warning across the top of a view or a card. Coverage and safety warnings are banners and
+ * are never put behind a disclosure; their exact technical reason can be.
+ */
+export function Banner({ tone = "blue", title, children, action, role }: { tone?: Tone; title: ReactNode; children?: ReactNode; action?: ReactNode; role?: "status" | "alert" | "note" }) {
+  return (
+    <div className={`banner tone-${tone}`} role={role ?? (tone === "red" || tone === "amber" ? "alert" : "status")}>
+      <span className="banner-icon" aria-hidden>
+        <Icon name={tone === "blue" ? "info" : TONE_ICON[tone]} size={16} />
+      </span>
+      <div className="banner-body">
+        <strong className="banner-title">{title}</strong>
+        {children && <span className="banner-text"> {children}</span>}
+      </div>
+      {action && <div className="banner-action">{action}</div>}
+    </div>
+  );
+}
+
+/** Empty state: what this view will show and, when there is one, the next step. */
+export function EmptyState({ title, icon = "check", children, action }: { title: string; icon?: IconName; children?: ReactNode; action?: ReactNode }) {
+  return (
+    <div className="empty" role="status">
+      <span className="empty-icon" aria-hidden>
+        <Icon name={icon} size={20} />
+      </span>
+      <div className="empty-title">{title}</div>
+      {children && <div className="empty-text">{children}</div>}
       {action}
     </div>
   );
 }
+
+type ButtonKind = "primary" | "secondary" | "quiet" | "danger";
+/** Buttons: one primary per card; secondary for the alternative; quiet for everything else. Labels say what happens. */
+export function Button({ kind = "secondary", children, icon, onClick, disabled, describedBy, type = "button", href }: { kind?: ButtonKind; children: ReactNode; icon?: IconName; onClick?: () => void; disabled?: boolean; describedBy?: string; type?: "button" | "submit"; href?: string }) {
+  const content = (
+    <>
+      {icon && <Icon name={icon} size={16} />}
+      {children}
+    </>
+  );
+  if (href)
+    return (
+      <a className={`btn btn-${kind}`} href={href}>
+        {content}
+      </a>
+    );
+  return (
+    <button type={type} className={`btn btn-${kind}`} onClick={onClick} disabled={disabled} aria-describedby={describedBy}>
+      {content}
+    </button>
+  );
+}
+
+export function Actions({ children }: { children: ReactNode }) {
+  return <div className="actions">{children}</div>;
+}
+
+/** Fine print under an action: what exactly will happen. One or two short sentences. */
+export function Fine({ children, id }: { children: ReactNode; id?: string }) {
+  return (
+    <p className="fine" id={id}>
+      {children}
+    </p>
+  );
+}
+
+/**
+ * Disclosure for secondary and technical detail (hostnames, ports, hashes, rule versions, signer and task ids). Never
+ * for a warning about coverage or safety: those stay visible as a Banner or a chip.
+ */
+export function Details({ summary = "Details", children, open }: { summary?: ReactNode; children: ReactNode; open?: boolean }) {
+  return (
+    <details className="details" open={open}>
+      <summary>
+        <Icon name="chevron" size={14} className="details-chevron" />
+        {summary}
+      </summary>
+      <div className="details-body">{children}</div>
+    </details>
+  );
+}
+
+/** Label / value pairs (inside Details or a technical page). */
+export function Facts({ rows }: { rows: [ReactNode, ReactNode][] }) {
+  return (
+    <dl className="facts">
+      {rows.map(([k, v], i) => (
+        <div key={i}>
+          <dt>{k}</dt>
+          <dd>{v}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+/** Secondary navigation between related views (tabs). */
+export function SubNav({ items, active, label }: { items: [string, string][]; active: string; label: string }) {
+  return (
+    <nav className="subnav" aria-label={label}>
+      {items.map(([k, text]) => (
+        <a key={k} href={`#/${k}`} className={active === k ? "active" : ""} aria-current={active === k ? "page" : undefined}>
+          {text}
+        </a>
+      ))}
+    </nav>
+  );
+}
+
+export const DEVICE_NAV: [string, string][] = [
+  ["devices", "Devices"],
+  ["coverage", "Coverage & recovery"],
+  ["changed", "What changed?"],
+];
+export const RULES_NAV: [string, string][] = [
+  ["rules", "Rules"],
+  ["learning", "Learn"],
+  ["learning/packs", "Rule packs"],
+];
 
 export function DeviceIcon({ d, size = 18 }: { d: Pick<Device, "platform" | "isController" | "model">; size?: number }) {
   const name: IconName = d.platform === "ios" || d.platform === "dns-client" ? "phone" : d.platform === "android-tv" ? "tv" : d.platform === "linux" ? "linux" : d.isController ? "server" : "laptop";
   return <Icon name={name} size={size} />;
 }
 
+/** A process chain: compact ("Claude Code → zsh → curl") or the full list with file paths (for Details). */
 export function Chain({ nodes, complete = true, compact = false }: { nodes: ChainNode[]; complete?: boolean; compact?: boolean }) {
   if (compact)
     return (
       <span className="chain-inline">
         {nodes.map((n, i) => (
-          <span key={i} className="chain-inline-node">
-            {i > 0 && <span className="chain-arrow">→</span>}
+          <span key={i}>
+            {i > 0 && <span className="chain-arrow"> → </span>}
             <Ident value={n.name} />
           </span>
         ))}
-        {!complete && <span className="muted"> (ancestry incomplete)</span>}
+        {!complete && <span className="muted"> (earlier steps not seen)</span>}
       </span>
     );
   return (
     <ol className="chain">
       {nodes.map((n, i) => (
-        <li key={i} className={`chain-node ${i === nodes.length - 1 ? "chain-last" : ""}`}>
-          <span className="chain-rail" aria-hidden>
-            <span className="chain-dot" />
+        <li key={i}>
+          <span className="chain-name">
+            <Ident value={n.name} />
+            {n.note && <span className="muted"> · {n.note}</span>}
           </span>
-          <div className="chain-body">
-            <div className="chain-name">
-              <Ident value={n.name} />
-              {n.note && <span className="chain-note">{n.note}</span>}
-            </div>
-            <div className="chain-exe mono">
-              <Ident value={n.exe} />
-              {n.pid ? <span className="muted"> · pid {n.pid}</span> : null}
-            </div>
-          </div>
+          <span className="chain-exe">
+            <Ident value={n.exe} mono />
+            {n.pid ? <span className="muted"> · pid {n.pid}</span> : null}
+          </span>
         </li>
       ))}
-      {!complete && <li className="chain-gap">Earlier ancestry not observed</li>}
+      {!complete && <li className="muted">Earlier steps were not seen</li>}
     </ol>
   );
 }
 
+/** Progress of an owner action, step by step, from evidence only. */
 export function Steps({ action }: { action: ActionState }) {
   return (
-    <ol className="steps" aria-label="Action progress">
+    <ol className="steps" aria-label="Progress">
       {action.steps.map((s, i) => (
         <li key={i} className={`step step-${s.state}`}>
           <span className="step-mark">{s.state === "done" ? <Icon name="check" size={12} /> : s.state === "failed" ? <Icon name="x" size={12} /> : null}</span>
@@ -161,79 +367,10 @@ export function Steps({ action }: { action: ActionState }) {
   );
 }
 
-export function Bars({ points, height = 64 }: { points: TimelinePoint[]; height?: number }) {
-  if (!points.length) return <div className="empty-chart">No flow history yet</div>;
-  const max = Math.max(...points.map((p) => p.blocked)) || 1;
-  const w = 100 / points.length;
-  return (
-    <svg className="bars" viewBox={`0 0 100 ${height}`} preserveAspectRatio="none" role="img" aria-label="Blocked attempts per hour, last 24 hours">
-      {points.map((p, i) => {
-        const h = Math.max(1.5, (p.blocked / max) * (height - 4));
-        return <rect key={i} x={i * w + w * 0.18} y={height - h} width={w * 0.64} height={h} rx={0.8} className={i === points.length - 1 ? "bar bar-now" : "bar"} />;
-      })}
-    </svg>
-  );
-}
-
-export function Stat({ label, value, sub, tone }: { label: string; value: ReactNode; sub?: ReactNode; tone?: string }) {
-  return (
-    <div className={`stat ${tone ? `stat-${tone}` : ""}`}>
-      <div className="stat-label">{label}</div>
-      <div className="stat-value">{value}</div>
-      {sub && <div className="stat-sub">{sub}</div>}
-    </div>
-  );
-}
-
-export function Row({ children, onClick, chevron }: { children: ReactNode; onClick?: () => void; chevron?: boolean }) {
-  const inner = (
-    <>
-      <div className="row-main">{children}</div>
-      {chevron && <Icon name="chevron" size={16} className="row-chevron" />}
-    </>
-  );
-  return onClick ? (
-    <button type="button" className="row row-button" onClick={onClick}>
-      {inner}
-    </button>
-  ) : (
-    <div className="row">{inner}</div>
-  );
-}
-
-export function Empty({ title, icon = "check", children }: { title: string; icon?: IconName; children?: ReactNode }) {
-  return (
-    <div className="empty" role="status">
-      <span className="empty-icon" aria-hidden>
-        <Icon name={icon} size={20} />
-      </span>
-      <div className="empty-title">{title}</div>
-      {children && <div className="empty-sub">{children}</div>}
-    </div>
-  );
-}
-
-export function SubNav({ active }: { active: "devices" | "coverage" | "diagnostics" | "changed" }) {
-  const items = [
-    ["devices", "Devices"],
-    ["coverage", "Coverage & recovery"],
-    ["diagnostics", "Diagnostics"],
-    ["changed", "What changed?"],
-  ] as const;
-  return (
-    <nav className="subnav" aria-label="Coverage and recovery">
-      {items.map(([k, label]) => (
-        <a key={k} href={`#/${k}`} className={active === k ? "active" : ""}>
-          {label}
-        </a>
-      ))}
-    </nav>
-  );
-}
-
 /**
- * Untrusted identifiers (hostnames, app names, session ids, agent text). Hidden characters are shown as escapes,
- * and look-alike or altered values carry a visible warning. The raw value is available on hover for copying.
+ * Untrusted identifiers (hostnames, app names, task ids, agent text). Hidden characters are shown as escapes, and
+ * look-alike or altered values carry a visible warning (never hidden behind a disclosure). The raw value is available
+ * on hover for copying.
  */
 export function Ident({ value, kind = "id", mono = false, className = "" }: { value: unknown; kind?: "host" | "text" | "id"; mono?: boolean; className?: string }) {
   const r = inspectIdent(value, { kind });
