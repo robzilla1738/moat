@@ -175,7 +175,8 @@ test("W12 standalone: Apps-first landing, app detail with four evidence sections
   // one enrolled device: the fleet section reads "This computer", not empty fleet administration
   await page.locator(".tabbar").getByText("This computer").waitFor();
   await page.getByRole("heading", { name: "Apps", exact: true }).waitFor();
-  await page.getByRole("button", { name: /curl/ }).first().click();
+  // the app card (decision cards above it also mention curl, as the blocked process)
+  await page.locator("button.app-card").filter({ hasText: "/usr/bin/curl" }).first().click();
   for (const s of ["Current permissions", "Recent changes", "Activity", "Why the current rules apply"]) await page.getByRole("heading", { name: s }).waitFor();
   await page.getByText("/usr/bin/curl").first().waitFor();
   await page.getByText(/Recorded:/).first().waitFor();
