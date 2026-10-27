@@ -57,13 +57,22 @@ pub struct Decoder {
     last_heartbeat: Option<Instant>,
     stall_reported: bool,
     unparsed: u64,
+    /// The first few unparsed lines since the last report, verbatim (tracer errors and warnings land here).
+    unparsed_sample: Vec<String>,
     /// Nanoseconds per /proc clock tick (start_generation unit), for the PID-reuse guard.
     ns_per_tick: u64,
 }
 
 impl Decoder {
     pub fn new(clk_tck: u64) -> Self {
-        Decoder { attached: false, last_heartbeat: None, stall_reported: false, unparsed: 0, ns_per_tick: 1_000_000_000 / clk_tck.max(1) }
+        Decoder {
+            attached: false,
+            last_heartbeat: None,
+            stall_reported: false,
+            unparsed: 0,
+            unparsed_sample: Vec::new(),
+            ns_per_tick: 1_000_000_000 / clk_tck.max(1),
+        }
     }
 
     fn loss(scope: &str, count: u64, detail: String) -> InventoryEvent {
@@ -95,6 +104,9 @@ impl Decoder {
             Some((k, remote)) => Some(self.attribute(k, remote, identity)),
             None => {
                 self.unparsed += 1;
+                if self.unparsed_sample.len() < 5 {
+                    self.unparsed_sample.push(line.chars().take(300).collect());
+                }
                 None
             }
         }
@@ -140,7 +152,12 @@ impl Decoder {
             }
         }
         if self.unparsed > 0 {
-            out.push(Self::loss("ebpf_unparsed", self.unparsed, format!("{} tracer lines could not be parsed", self.unparsed)));
+            let sample = std::mem::take(&mut self.unparsed_sample);
+            out.push(Self::loss(
+                "ebpf_unparsed",
+                self.unparsed,
+                format!("{} tracer lines could not be parsed; first: {}", self.unparsed, sample.join(" | ")),
+            ));
             self.unparsed = 0;
         }
         out
@@ -194,7 +211,8 @@ impl Tracer {
     /// force and measure loss).
     pub fn start(bpftrace: &str, perf_rb_pages: Option<u32>) -> std::io::Result<Tracer> {
         let mut cmd = Command::new(bpftrace);
-        cmd.arg("-e").arg(SCRIPT).stdout(Stdio::piped()).stderr(Stdio::piped()).stdin(Stdio::null());
+        // -B line: bpftrace's stdout is a pipe here; line buffering keeps heartbeats and connects timely.
+        cmd.arg("-B").arg("line").arg("-e").arg(SCRIPT).stdout(Stdio::piped()).stderr(Stdio::piped()).stdin(Stdio::null());
         if let Some(p) = perf_rb_pages {
             cmd.env("BPFTRACE_PERF_RB_PAGES", p.to_string());
         }
@@ -316,7 +334,9 @@ mod tests {
         assert!(d.feed("C 1 2 3 4 4 not-an-ip 80 x", t0, &none).is_none());
         assert!(d.feed("C 1 2 3 4 6 10.0.0.1 80 family-mismatch", t0, &none).is_none());
         let checks = d.check(t0 + Duration::from_secs(1));
-        assert!(checks.iter().any(|e| matches!(e, InventoryEvent::InventoryLoss { scope, count: 3, .. } if scope == "ebpf_unparsed")));
+        assert!(checks.iter().any(
+            |e| matches!(e, InventoryEvent::InventoryLoss { scope, count: 3, detail, .. } if scope == "ebpf_unparsed" && detail.contains("not-an-ip"))
+        ));
         assert!(d.check(t0 + Duration::from_secs(1)).is_empty(), "unparsed counts are reported once");
         let stall = d.check(t0 + Duration::from_secs(5));
         assert!(stall.iter().any(|e| matches!(e, InventoryEvent::InventoryLoss { scope, .. } if scope == "ebpf_stalled")));

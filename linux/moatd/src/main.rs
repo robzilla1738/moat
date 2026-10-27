@@ -60,7 +60,8 @@ enum Cmd {
         /// Sampling interval in milliseconds.
         #[arg(long, default_value_t = 200)]
         interval_ms: u64,
-        /// Stop after this many seconds (default: run until killed).
+        /// Stop after this many seconds (default: run until killed). With --ebpf, counted from the moment the tracer
+        /// attached.
         #[arg(long)]
         seconds: Option<u64>,
         /// Connect-time attribution with this bpftrace binary instead of socket-table sampling (W10 increment 2).
@@ -214,7 +215,9 @@ fn run(cli: Cli) -> Result<(), String> {
                 "{}",
                 serde_json::json!({"type": "coverage", "coverage": moatd::inventory::COVERAGE, "note": moatd::ebpf::coverage_note()})
             );
-            let start = std::time::Instant::now();
+            // --seconds counts attached tracing time: bpftrace may take many seconds to compile and attach.
+            let launched = std::time::Instant::now();
+            let mut start = launched;
             let mut announced = false;
             let ident = |pid: u32| src.identity(pid);
             loop {
@@ -223,11 +226,22 @@ fn run(cli: Cli) -> Result<(), String> {
                 }
                 if t.decoder.attached && !announced {
                     announced = true;
-                    println!("{}", serde_json::json!({"type": "sensor_attached", "measurement_source": moatd::ebpf::MEASUREMENT}));
+                    start = std::time::Instant::now();
+                    println!(
+                        "{}",
+                        serde_json::json!({"type": "sensor_attached", "measurement_source": moatd::ebpf::MEASUREMENT, "attach_ms": launched.elapsed().as_millis() as u64})
+                    );
                 }
                 use std::io::Write;
                 let _ = std::io::stdout().flush();
-                if seconds.is_some_and(|s| start.elapsed() >= Duration::from_secs(s)) {
+                if !announced && launched.elapsed() >= Duration::from_secs(180) {
+                    for ev in t.drain(&ident) {
+                        println!("{}", serde_json::to_string(&ev).unwrap());
+                    }
+                    t.stop();
+                    return Err("bpftrace did not attach within 180 s (see ebpf_unparsed records for its output)".into());
+                }
+                if announced && seconds.is_some_and(|s| start.elapsed() >= Duration::from_secs(s)) {
                     // let the tracer flush what it already has (and its loss counters) before stopping
                     std::thread::sleep(Duration::from_millis(1500));
                     for ev in t.drain(&ident) {

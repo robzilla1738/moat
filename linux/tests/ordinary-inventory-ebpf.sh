@@ -30,6 +30,9 @@ cleanup() {
 }
 trap cleanup EXIT
 "$BPFTRACE" --version
+uname -r
+# Standalone probe, outside moatd: shows bpftrace's own error if the kernel or the script is the problem.
+timeout 120 "$BPFTRACE" -B line -e 'BEGIN { printf("probe-ok\n"); exit(); }' 2>&1 | tail -5 || true
 
 ip netns add $C; ip netns add $R
 ip link add moatebpf0 type veth peer name moatebpf1
@@ -56,12 +59,13 @@ PY
 inr python3 "$W/recv.py" "$W/accepted.jsonl" > "$W/recv.out" 2>&1 &
 for _ in $(seq 40); do grep -q ready "$W/recv.out" && break; sleep 0.1; done
 
-wait_attached() { for _ in $(seq 100); do grep -q sensor_attached "$1" 2>/dev/null && return 0; sleep 0.1; done; return 1; }
+# bpftrace compiles the program with LLVM and parses kernel BTF before it attaches: allow 90 s on a shared runner.
+wait_attached() { for _ in $(seq 900); do grep -q sensor_attached "$1" 2>/dev/null && return 0; sleep 0.1; done; return 1; }
 
 # --- run 1: attribution of short-lived processes -------------------------------------------------------------------
 "$BIN/moatd" inventory --ebpf "$BPFTRACE" --seconds 14 > "$W/run1.jsonl" 2> "$W/run1.err" &
 INV=$!
-wait_attached "$W/run1.jsonl" || { echo "FAIL  tracer never attached"; cat "$W/run1.err"; exit 1; }
+wait_attached "$W/run1.jsonl" || { echo "FAIL  tracer never attached"; cat "$W/run1.err"; cat "$W/run1.jsonl"; exit 1; }
 cat > "$W/once.py" <<'PY'
 import os, socket, sys
 print(os.getpid(), flush=True)
@@ -81,7 +85,7 @@ wait $INV || true
 opens() { inc awk '/^Tcp:/ {n++; if (n==1) for (i=1;i<=NF;i++) if ($i=="ActiveOpens") c=i; if (n==2) print $c}' /proc/net/snmp; }
 "$BIN/moatd" inventory --ebpf "$BPFTRACE" --perf-rb-pages 1 --seconds 12 > "$W/run2.jsonl" 2> "$W/run2.err" &
 INV=$!
-wait_attached "$W/run2.jsonl" || { echo "FAIL  tracer (run 2) never attached"; cat "$W/run2.err"; exit 1; }
+wait_attached "$W/run2.jsonl" || { echo "FAIL  tracer (run 2) never attached"; cat "$W/run2.err"; cat "$W/run2.jsonl"; exit 1; }
 O0=$(opens)
 inc python3 - <<'PY'
 import socket
