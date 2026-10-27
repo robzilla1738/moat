@@ -95,6 +95,12 @@ export interface SignRequest {
   revision: number;
   rollbackOf?: number | null;
   platforms: ("linux" | "macos" | "dns")[];
+  /**
+   * Per-platform device lists (issue #26). A platform with enrolled devices is compiled for exactly those devices, so
+   * an app-scoped or hostname rule scoped to a Mac does not refuse the Linux snapshot in a mixed fleet; the device
+   * list is inside the signed payload. A platform with no list (or an empty one) is compiled fleet-wide.
+   */
+  targets?: Partial<Record<"linux" | "macos" | "dns", string[]>>;
   ownerAuthorization?: OwnerAuthorization | null;
   /** Controller attestation that an authenticated owner session requested the new owner-issued grants (only honored when enabled). */
   ownerSessionAttested?: boolean;
@@ -239,7 +245,8 @@ export class Signer {
 
   async sign(req: SignRequest): Promise<SignResult> {
     const grants = req.grants ?? [];
-    const digest = sha256hex(canonicalJson({ source: req.source, grants, revision: req.revision, platforms: req.platforms, rollbackOf: req.rollbackOf ?? null }));
+    const targets = normalizeTargets(req.targets);
+    const digest = sha256hex(canonicalJson({ source: req.source, grants, revision: req.revision, platforms: req.platforms, rollbackOf: req.rollbackOf ?? null, ...(Object.keys(targets).length ? { targets } : {}) }));
     if (req.publicationId) {
       const seen = this.state.journal!.find((j) => j.id === req.publicationId);
       if (seen) {
@@ -313,8 +320,9 @@ export class Signer {
     const snapshots: SignResult["snapshots"] = [];
     let effectiveDigest: string | null = null;
     for (const p of req.platforms) {
-      const c = await this.moatctl.compile(req.source, p, req.revision, req.issuedAt, req.rollbackOf ?? null, grants);
-      if (!c.ok) throw new SignerError(422, `does not compile for ${p}: ${c.error}`);
+      const devs = targets[p] ?? [];
+      const c = await this.moatctl.compile(req.source, p, req.revision, req.issuedAt, req.rollbackOf ?? null, grants, devs);
+      if (!c.ok) throw new SignerError(422, `does not compile for ${p}${devs.length ? ` (devices ${devs.join(", ")})` : ""}: ${c.error}`);
       const report = (JSON.parse(c.snapshot) as { report: { effective_digest?: string | null } }).report;
       effectiveDigest ??= report.effective_digest ?? null;
       snapshots.push({ platform: p, signed: signSnapshotBytes(this.kp, c.snapshot), report });
@@ -337,4 +345,17 @@ export class Signer {
     if (!hex) return false;
     return verifyB64(publicFromHex(hex), ownerAuthorizationString(subject, sha256hex(source)), a.signature);
   }
+}
+
+/** Sorted, de-duplicated device lists per platform; platforms with no devices are dropped (fleet-wide compile). */
+export function normalizeTargets(t: SignRequest["targets"]): Partial<Record<"linux" | "macos" | "dns", string[]>> {
+  const out: Partial<Record<"linux" | "macos" | "dns", string[]>> = {};
+  for (const p of ["dns", "linux", "macos"] as const) {
+    const v = t?.[p];
+    if (!Array.isArray(v)) continue;
+    const list = [...new Set(v.map(String))].sort();
+    for (const d of list) if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(d)) throw new SignerError(422, `target device id ${JSON.stringify(d)} is not a device id`);
+    if (list.length) out[p] = list;
+  }
+  return out;
 }

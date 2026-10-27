@@ -19,11 +19,11 @@ function enrollDevice(f: Fixture, id = "omarchy", platform = "linux") {
   return kp;
 }
 
-async function verifyWithMoatctl(f: Fixture, signed: unknown, adapter: string) {
+async function verifyWithMoatctl(f: Fixture, signed: unknown, adapter: string, device?: string) {
   const dir = mkdtempSync(join(tmpdir(), "moat-v-"));
   writeFileSync(join(dir, "s.json"), JSON.stringify(signed));
   writeFileSync(join(dir, "k.pub"), f.signer.publicHex);
-  return f.moatctl.run(["verify", join(dir, "s.json"), "--pub", join(dir, "k.pub"), "--adapter", adapter]);
+  return f.moatctl.run(["verify", join(dir, "s.json"), "--pub", join(dir, "k.pub"), "--adapter", adapter, ...(device ? ["--device", device] : [])]);
 }
 
 test("enrollment codes are single-use and expire; device requests are signed, fresh and not replayable", () => {
@@ -98,10 +98,11 @@ test("signed snapshots verify with the Rust core; distribution and receipts are 
   const d = f.c.authenticateDevice("POST", "/v1/device/sync", deviceHeaders(kp, "omarchy", "{}", new Date(f.clock.t).toISOString()), "{}");
   const out = f.c.sync(d as never, { last_applied: null });
   assert.ok(out.snapshot, "newer snapshot delivered");
-  const v = await verifyWithMoatctl(f, out.snapshot, "linux");
+  const v = await verifyWithMoatctl(f, out.snapshot, "linux", "omarchy");
   assert.equal(v.code, 0, v.stderr);
+  assert.notEqual((await verifyWithMoatctl(f, out.snapshot, "linux", "another-linux")).code, 0, "a snapshot compiled for omarchy does not install on another device");
   assert.match(v.stdout, /revision 1/);
-  assert.notEqual((await verifyWithMoatctl(f, out.snapshot, "macos")).code, 0, "wrong platform is rejected by the core");
+  assert.notEqual((await verifyWithMoatctl(f, out.snapshot, "macos", "omarchy")).code, 0, "wrong platform is rejected by the core");
   f.c.sync(d as never, { last_applied: 0, events: [{ seq: 1, at: new Date(f.clock.t).toISOString(), event: { type: "policy_applied", revision: 1, policy_digest: "x" } }] });
   const states = f.c.revisions()[0]!.devices as { state: string }[];
   assert.deepEqual(states.map((s) => s.state).sort(), ["applied", "approved", "distributed"]);

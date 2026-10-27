@@ -28,12 +28,17 @@ export class Moatctl {
     });
   }
 
-  async validate(policy: string): Promise<{ ok: boolean; errors: string[]; adapters: unknown[] }> {
+  /**
+   * `ok`: valid and compiles fleet-wide for every adapter. `schemaOk`: the policy itself is valid (it parsed and only
+   * fleet-wide adapter compilation failed), which a device-targeted compile may still satisfy (issue #26).
+   */
+  async validate(policy: string): Promise<{ ok: boolean; schemaOk: boolean; errors: string[]; adapters: unknown[] }> {
     const r = await this.run(["--json", "validate", "@p.toml"], { "p.toml": policy });
     const j = parse(r);
     const adapters = (j.adapters as { adapter?: string; compiles?: boolean; errors?: string[] }[] | undefined) ?? [];
     const adapterErrors = adapters.filter((a) => a.compiles === false).flatMap((a) => (a.errors ?? ["does not compile"]).map((e) => `${a.adapter}: ${e}`));
-    return { ok: r.code === 0 && j.ok !== false, errors: (j.errors as string[] | undefined) ?? (j.error ? [String(j.error)] : adapterErrors), adapters };
+    const schemaErrors = (j.errors as string[] | undefined) ?? (j.error ? [String(j.error)] : null);
+    return { ok: r.code === 0 && j.ok !== false, schemaOk: !schemaErrors && adapters.length > 0, errors: schemaErrors ?? adapterErrors, adapters };
   }
 
   async diff(oldPolicy: string, newPolicy: string): Promise<{ broadening: boolean; diff: Record<string, unknown> }> {
@@ -43,10 +48,16 @@ export class Moatctl {
     return { broadening: j.broadening === true, diff: (j.diff as Record<string, unknown>) ?? {} };
   }
 
-  /** Compile base + `moat.grant.v1` overlays (`--grants`, W03): the core renders each grant's exact rule. */
-  async compile(policy: string, adapter: "linux" | "macos" | "dns", revision: number, issuedAt: Date, rollbackOf?: number | null, grants: unknown[] = []): Promise<{ ok: true; snapshot: string } | { ok: false; error: string }> {
+  /**
+   * Compile base + `moat.grant.v1` overlays (`--grants`, W03): the core renders each grant's exact rule.
+   * `devices` (issue #26): compile for these devices only (`--device`, repeatable). Rules scoped to other devices are
+   * left out with a report and the signed snapshot installs only on a listed device. Empty: fleet-wide compile, which
+   * refuses a rule this adapter cannot enforce even when it is scoped to another platform's device.
+   */
+  async compile(policy: string, adapter: "linux" | "macos" | "dns", revision: number, issuedAt: Date, rollbackOf?: number | null, grants: unknown[] = [], devices: string[] = []): Promise<{ ok: true; snapshot: string } | { ok: false; error: string }> {
     const args = ["compile", "@p.toml", "--adapter", adapter, "--revision", String(revision), "--issued-at", issuedAt.toISOString()];
     if (rollbackOf) args.push("--rollback-of", String(rollbackOf));
+    for (const d of devices) args.push("--device", d);
     const files: Record<string, string> = { "p.toml": policy };
     if (grants.length) {
       args.push("--grants", "@grants.json");

@@ -163,7 +163,21 @@ Mac-only rule used to stop the whole fleet's Linux snapshot.
   FFI takes `device_id`; `moatctl verify --device`.
 * Without `target_devices` the compile is fleet-wide and keeps the conservative behaviour.
 
-The controller (Lane B) should compile one snapshot per platform with that platform's device list, or one per device.
+The controller compiles one snapshot per platform with that platform's enrolled-device list (`controller/src/signer.ts`
+`targets`, passed to `moatctl compile --device`; covered by `controller/test/device-compile.test.ts`):
+
+* A platform with enrolled devices is compiled for exactly those devices and must compile, or the proposal is refused
+  before review (`policy does not compile for this fleet: linux (devices omarchy): ...`).
+* A platform with no enrolled devices is compiled fleet-wide when that succeeds. When the fleet-wide compile refuses
+  (a Mac-only fleet with a Mac app rule), that platform gets **no** snapshot and the publication reports it in
+  `skipped_platforms`. Nothing weaker is ever compiled to fill the gap.
+* Sync hands a device only the **current** revision's snapshot for its platform, and only if it names the device (or
+  is fleet-wide). A device enrolled after the revision was compiled gets `snapshot: null` with `snapshot_pending`, a
+  `not_targeted` revision state and `awaiting_retarget: true` on `GET /v1/devices`, never an older or other-device
+  snapshot. The owner runs `POST /v1/policy/retarget`, which republishes the unchanged base and carried grants for the
+  current device lists; the signer authorizes it as non-broadening and grant deadlines are not renewed.
+* The Mac endpoint passes its device id to `moat_verify_snapshot` (`CoreVerifier(trust:deviceID:)`), and standalone
+  local rules carry `devices = ["<this mac>"]` when the id is known.
 
 ### Backend identifiers
 

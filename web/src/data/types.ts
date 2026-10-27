@@ -1,7 +1,7 @@
 export type Coverage = "protected-session" | "enforced" | "monitoring" | "dns-only" | "degraded" | "isolated" | "unknown";
 export type Support = "supported" | "partial" | "untested" | "unsupported";
 export type Platform = "macos" | "linux" | "ios" | "android-tv";
-export type RevisionState = "approved" | "distributed" | "received" | "applied" | "verified" | "rejected" | "trial" | "confirmed" | "rolled_back";
+export type RevisionState = "approved" | "distributed" | "received" | "applied" | "verified" | "rejected" | "trial" | "confirmed" | "rolled_back" | "not_targeted";
 
 export interface Capability { key: string; label: string; support: Support; note?: string }
 
@@ -18,6 +18,8 @@ export interface Device {
   revisionState: RevisionState | null;
   capabilities: Capability[];
   telemetryGaps: [number, number][];
+  /** The current revision's snapshot for this platform was compiled for devices enrolled before this one (issue #26). */
+  awaitingRetarget?: boolean;
   isController?: boolean;
   blockedToday: number;
   flowsToday: number;

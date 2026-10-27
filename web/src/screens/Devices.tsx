@@ -1,5 +1,5 @@
 import { SubNav, Badge, Card, CoverageBadge, DeviceIcon, Icon, SectionTitle, SupportBadge } from "../components/ui";
-import { useData, useFreshness } from "../data/store";
+import { useData, useFreshness, useStore } from "../data/store";
 import { ApprovalsCard } from "./Approvals";
 import { ago, compact, COVERAGE } from "../format";
 
@@ -56,9 +56,11 @@ export function DeviceDetail({ id, go }: { id: string; go: (to: string) => void 
           <CoverageBadge c={f.coverage} />
           {f.stale && <Badge tone="amber">stale</Badge>}
           {d.revision && <Badge tone="blue">rev {d.revision} {d.revisionState}</Badge>}
+          {d.awaitingRetarget && <Badge tone="amber">no snapshot for this device</Badge>}
           <span className="muted small">seen {ago(d.lastSeen)}</span>
         </div>
       </div>
+      {d.awaitingRetarget && <RetargetCard />}
       <Card>
         <p className="claim">{COVERAGE[f.coverage].claim}</p>
         <div className="muted small">{f.note ?? d.coverageNote}</div>
@@ -105,5 +107,19 @@ sudo moatd recover isolate --keep 100.100.1.2/32`}</pre>
         </Card>
       )}
     </div>
+  );
+}
+
+/** A device enrolled after the current revision was compiled: its platform's snapshot does not name it. */
+function RetargetCard() {
+  const { retarget, canAct } = useStore();
+  return (
+    <Card>
+      <p className="claim">The current policy was compiled before this device enrolled, so it has not received it.</p>
+      <div className="muted small">
+        Each platform&apos;s snapshot is compiled for the devices enrolled at the time and installs only on them. Retarget republishes the same policy (no permission changes) for every enrolled device.
+      </div>
+      <button type="button" className="btn btn-primary" disabled={!canAct.ok} onClick={() => void retarget()}>Retarget current policy</button>
+    </Card>
   );
 }

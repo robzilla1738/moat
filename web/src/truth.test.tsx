@@ -198,3 +198,14 @@ describe("demo and live are separate", () => {
     expect(mapIncident(w).measurement).toMatch(/No transfer measurement/);
   });
 });
+
+describe("device-targeted snapshots (issue #26)", () => {
+  it("a device the current snapshot does not name says so instead of showing the revision as its own", async () => {
+    const { mapDevice } = await import("./data/api");
+    const base = { id: "linux-2", name: "Linux 2", platform: "linux", coverage: null, last_seen_at: null, last_revision: null, telemetry_gaps: [] as [number, number][], capabilities: null, status: null, revision_states: [{ revision: 4, state: "not_targeted", at: "x", detail: "compiled for omarchy" }] };
+    const d = mapDevice({ ...base, awaiting_retarget: true });
+    expect(d.awaitingRetarget).toBe(true);
+    expect(d.revisionState).toBe("not_targeted");
+    expect(mapDevice(base).awaitingRetarget).toBe(false);
+  });
+});
