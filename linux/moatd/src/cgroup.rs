@@ -92,6 +92,29 @@ impl Cgroups {
         fs::read_to_string(s.path.join("cgroup.procs")).unwrap_or_default().lines().filter_map(|l| l.trim().parse().ok()).collect()
     }
 
+    /// Every session directory under `moat.slice/p-*/s-*`: (profile dir name without `p-`, session id, cgroup).
+    pub fn list_sessions(&self) -> Vec<(String, String, SessionCgroup)> {
+        let mut out = Vec::new();
+        for p in fs::read_dir(self.root()).into_iter().flatten().flatten() {
+            let pname = p.file_name().to_string_lossy().to_string();
+            let Some(profile) = pname.strip_prefix("p-") else { continue };
+            if !p.path().is_dir() {
+                continue;
+            }
+            for s in fs::read_dir(p.path()).into_iter().flatten().flatten() {
+                let sname = s.file_name().to_string_lossy().to_string();
+                let Some(id) = sname.strip_prefix("s-") else { continue };
+                if !s.path().is_dir() {
+                    continue;
+                }
+                let rel = format!("{}/{pname}/{sname}", self.root_name);
+                out.push((profile.to_string(), id.to_string(), SessionCgroup { path: s.path(), rel }));
+            }
+        }
+        out.sort_by(|a, b| a.1.cmp(&b.1));
+        out
+    }
+
     /// Kill every process in the session (cgroup.kill, kernel >= 5.14), then remove the directory.
     pub fn close_session(&self, s: &SessionCgroup) -> io::Result<()> {
         let kill = s.path.join("cgroup.kill");

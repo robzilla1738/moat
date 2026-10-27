@@ -18,6 +18,7 @@ use moat_core::signing::{verify_snapshot, verifying_key_from_hex, SignedSnapshot
 use serde::{Deserialize, Serialize};
 
 use crate::cgroup::{Cgroups, SessionCgroup};
+use crate::journal::{self, FsStore, Journal, Loaded, Phase, Store};
 use crate::nft::{self, CgroupLayout, NftBackend, ProxiedSession, ProxyLayout, RenderReport};
 use crate::proxy::{ProxyManager, ProxyPolicy};
 use crate::recovery::RecoveryState;
@@ -60,6 +61,21 @@ pub struct Status {
     /// Session profiles that are proxied under the installed revision.
     #[serde(default)]
     pub proxied_profiles: Vec<String>,
+    /// Durable activation state (W06): phase, rollback target, replay high-water and whether it is durable.
+    #[serde(default)]
+    pub activation: Option<ActivationStatus>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ActivationStatus {
+    pub phase: Phase,
+    pub active: Option<u64>,
+    pub rollback_target: Option<u64>,
+    pub replay_high_water: u64,
+    /// `durable`: the journal on disk matches this. `uncertain`: the last journal write failed; startup reconciles
+    /// from the snapshot files, which are durable.
+    pub durability: String,
+    pub detail: Option<String>,
 }
 
 pub struct Endpoint<B: NftBackend> {
@@ -87,6 +103,12 @@ pub struct Endpoint<B: NftBackend> {
     uid_of: fn(&str) -> Option<u32>,
     trial: Option<TrialState>,
     pub proxy: Option<ProxyManager>,
+    store: Box<dyn Store>,
+    journal: Journal,
+    /// Set when the last journal write failed (the in-memory journal is then ahead of the disk).
+    journal_uncertain: Option<String>,
+    /// Last rollback failure reported, so a retried rollback does not flood the spool.
+    rollback_error: Option<String>,
 }
 
 pub fn lookup_uid(name: &str) -> Option<u32> {
@@ -130,7 +152,17 @@ impl<B: NftBackend> Endpoint<B> {
             uid_of: lookup_uid,
             trial: None,
             proxy: None,
+            store: Box::new(FsStore),
+            journal: Journal::default(),
+            journal_uncertain: None,
+            rollback_error: None,
         }
+    }
+
+    /// Replace the durable store (tests inject faults through it).
+    pub fn with_store(mut self, s: Box<dyn Store>) -> Self {
+        self.store = s;
+        self
     }
 
     pub fn with_uid_resolver(mut self, f: fn(&str) -> Option<u32>) -> Self {
@@ -237,12 +269,177 @@ impl<B: NftBackend> Endpoint<B> {
                 Err(e) => self.last_rejection = Some(format!("stored snapshot unreadable: {e}")),
             }
         }
-        // The replay high-water mark survives rollbacks and restarts.
-        if let Some(mark) = trial::load_replay_mark(&self.state_dir) {
-            self.last_applied = Some(self.last_applied.unwrap_or(0).max(mark));
-        }
         self.trial = TrialState::load(&self.state_dir);
+        self.recover_journal();
+        self.stop_orphan_sessions();
         self.reconcile();
+    }
+
+    fn current_rev(&self) -> Option<u64> {
+        self.current.as_ref().map(|c| c.1.revision)
+    }
+
+    /// Write the journal; on failure remember that the disk is behind (reported in status, reconciled on startup
+    /// from the snapshot files, which are written before the phase that refers to them).
+    fn persist_journal(&mut self) -> Result<(), String> {
+        match self.journal.save(self.store.as_mut(), &self.state_dir) {
+            Ok(()) => {
+                self.journal_uncertain = None;
+                Ok(())
+            }
+            Err(e) => {
+                let why = format!("activation journal write failed: {e}");
+                self.journal_uncertain = Some(why.clone());
+                Err(why)
+            }
+        }
+    }
+
+    fn activation_event(&mut self, detail: String) {
+        self.spool.append(Event::ActivationRecovery {
+            phase: serde_json::to_value(self.journal.phase).ok().and_then(|v| v.as_str().map(String::from)).unwrap_or_default(),
+            active_revision: self.journal.active,
+            detail,
+        });
+    }
+
+    /// Startup half of W06: the replay high-water is the maximum of every readable copy, and the journal decides
+    /// what an interrupted activation or rollback means. Never a silent fresh permissive bootstrap.
+    fn recover_journal(&mut self) {
+        let mut notes = Vec::new();
+        let mark = match fs::read_to_string(self.state_dir.join(trial::REPLAY_MARK)) {
+            Ok(t) => match t.trim().parse::<u64>() {
+                Ok(v) => Some(v),
+                Err(_) => {
+                    notes.push("replay high-water file corrupt; using the journal's copy".to_string());
+                    None
+                }
+            },
+            Err(_) => None,
+        };
+        let loaded = Journal::load(&self.state_dir);
+        let mut j = match &loaded {
+            Loaded::Ok(j) => j.clone(),
+            _ => Journal::default(),
+        };
+        let cur = self.current_rev();
+        let hw = [mark, Some(j.replay_high_water), cur, self.last_applied, self.trial.as_ref().map(|t| t.revision)]
+            .into_iter()
+            .flatten()
+            .max()
+            .unwrap_or(0);
+        j.replay_high_water = hw;
+        self.last_applied = (hw > 0).then_some(hw).or(self.last_applied);
+        match loaded {
+            Loaded::Missing => {
+                // First start with a journal (or a fresh device): describe what the snapshot files say.
+                j.active = cur;
+                j.phase = match (cur, &self.trial) {
+                    (None, _) => Phase::None,
+                    (Some(r), Some(t)) if t.revision == r => Phase::Trial,
+                    _ => Phase::Confirmed,
+                };
+                if j.phase == Phase::Trial {
+                    j.rollback_target = self.trial.as_ref().map(|t| t.fallback_revision);
+                    j.trial_deadline = self.trial.as_ref().map(|t| t.deadline);
+                }
+            }
+            Loaded::Corrupt(why) => {
+                let _ = fs::copy(self.state_dir.join(journal::FILE), self.state_dir.join(format!("{}.corrupt", journal::FILE)));
+                j.phase = Phase::RecoveryRequired;
+                j.active = cur;
+                j.detail = Some(format!(
+                    "{why}; enforcing the last verified snapshot ({}); a new signed revision clears this",
+                    cur.map_or("none".into(), |r| format!("revision {r}"))
+                ));
+                notes.push(why);
+            }
+            Loaded::Ok(_) => match j.phase {
+                Phase::Applying if cur.is_some() && cur == j.target => {
+                    // The commit (current = target) happened; only the final phase write was lost.
+                    let on_trial = self.trial.as_ref().is_some_and(|t| Some(t.revision) == j.target);
+                    j.phase = if on_trial { Phase::Trial } else { Phase::Confirmed };
+                    j.active = cur;
+                    if on_trial {
+                        j.rollback_target = self.trial.as_ref().map(|t| t.fallback_revision);
+                        j.trial_deadline = self.trial.as_ref().map(|t| t.deadline);
+                    } else {
+                        j.rollback_target = None;
+                        j.trial_deadline = None;
+                        if self.trial.take().is_some() {
+                            let _ = self.store.remove(&self.state_dir, trial::FILE);
+                        }
+                    }
+                    notes.push(format!("activation of revision {} was committed before the restart; completed", cur.unwrap()));
+                }
+                Phase::Applying => {
+                    // Interrupted before the commit: the kernel is uncertain, the disk still names the prior revision.
+                    let target = j.target.unwrap_or(0);
+                    if self.trial.as_ref().is_some_and(|t| t.revision == target) {
+                        let _ = self.store.remove(&self.state_dir, trial::FILE);
+                        self.trial = None;
+                    }
+                    if let Some(pt) = j.prior_trial.take() {
+                        if self.store.write_atomic(&self.state_dir, trial::FILE, &serde_json::to_vec_pretty(&pt).unwrap()).is_ok() {
+                            self.trial = Some(pt);
+                        }
+                    }
+                    let _ = self.store.remove(&self.state_dir, journal::CANDIDATE);
+                    j.active = cur;
+                    j.phase = match (cur, &self.trial) {
+                        (None, _) => Phase::None,
+                        (Some(r), Some(t)) if t.revision == r => Phase::Trial,
+                        _ => Phase::Confirmed,
+                    };
+                    if cur.is_none() && self.last_rejection.is_some() {
+                        j.phase = Phase::RecoveryRequired;
+                    }
+                    notes.push(format!(
+                        "activation of revision {target} was interrupted before it was committed; {} is reinstalled",
+                        cur.map_or("no policy".into(), |r| format!("revision {r}"))
+                    ));
+                }
+                _ => {}
+            },
+        }
+        j.target = None;
+        j.prior = None;
+        if self.current.is_none() && self.last_rejection.is_some() && j.phase != Phase::RollbackRequired {
+            // A stored snapshot exists but cannot be loaded: say so; leave the kernel as it is (not deleted, not
+            // replaced with something weaker) until a new signed revision or a rollback restores a known state.
+            j.phase = Phase::RecoveryRequired;
+            j.detail = self.last_rejection.clone();
+        }
+        self.journal = j;
+        if mark != Some(hw) {
+            let _ = self.store.write_atomic(&self.state_dir, trial::REPLAY_MARK, hw.to_string().as_bytes());
+        }
+        let _ = self.persist_journal();
+        for n in notes {
+            self.activation_event(n);
+        }
+    }
+
+    /// Restart contract for protected sessions (W06): sessions that were running when the previous daemon stopped
+    /// are **not adopted**. Their control connection, egress proxy and session-bound grants are gone, so they are
+    /// stopped (cgroup.kill) and reported. Until this runs they stay under their profile's chain, which is
+    /// fail-closed (no session-bound grants, no proxy redirect).
+    fn stop_orphan_sessions(&mut self) {
+        for (profile, id, cg) in self.cgroups.list_sessions() {
+            if self.sessions.contains_key(&id) {
+                continue;
+            }
+            let killed = self.cgroups.close_session(&cg).is_ok();
+            self.spool.append(Event::SessionNotAdopted {
+                session_id: id,
+                profile,
+                reason: if killed {
+                    "moatd restarted: sessions are not adopted across a daemon restart; stopped".into()
+                } else {
+                    "moatd restarted: sessions are not adopted; stopping failed".into()
+                },
+            });
+        }
     }
 
     fn decode_issued_at(s: &SignedSnapshot) -> Option<DateTime<Utc>> {
@@ -382,99 +579,230 @@ impl<B: NftBackend> Endpoint<B> {
         v["revision"].as_u64()
     }
 
+    fn reject(&mut self, e: String) -> Result<u64, String> {
+        self.last_rejection = Some(e.clone());
+        self.spool.append(Event::PolicyRejected { reason: e.clone(), kept_revision: self.current_rev() });
+        Err(e)
+    }
+
+    /// Undo an activation that failed before its commit: the prior revision stays (or is restored), the journal
+    /// returns to its previous phase, the replay high-water is **not** lowered.
+    fn abort_activation(
+        &mut self,
+        before: Journal,
+        prior_trial: Option<TrialState>,
+        wrote_trial: bool,
+        why: String,
+    ) -> Result<u64, String> {
+        if wrote_trial {
+            let restored = match &prior_trial {
+                Some(t) => self.store.write_atomic(&self.state_dir, trial::FILE, &serde_json::to_vec_pretty(t).unwrap()),
+                None => self.store.remove(&self.state_dir, trial::FILE),
+            };
+            if restored.is_err() {
+                // The trial file now names a revision that is not active; tick_trial ignores and removes such files.
+                self.activation_event("could not restore the trial file after an aborted activation; it is ignored".into());
+            }
+        }
+        let _ = self.store.remove(&self.state_dir, journal::CANDIDATE);
+        let hw = self.journal.replay_high_water;
+        self.journal = Journal { replay_high_water: hw.max(before.replay_high_water), ..before };
+        let _ = self.persist_journal();
+        self.reject(why)
+    }
+
     /// Offer a snapshot, optionally on trial for `trial_secs` seconds (reverts unless confirmed).
+    ///
+    /// Durable sequence (journal.rs has the crash table): intent → replay high-water → staged candidate (+ rollback
+    /// target and trial deadline) → kernel → commit → phase. Any failure before the commit leaves the prior revision
+    /// in force; a failure at the commit restores the prior revision in the kernel or enters `recovery_required`.
     pub fn offer_with(&mut self, signed: SignedSnapshot, trial_secs: Option<u64>) -> Result<u64, String> {
         let fallback = self.confirmed_revision();
         if trial_secs.is_some() && fallback.is_none() {
-            let e = "a trial needs a confirmed revision to fall back to; apply the first revision without --trial-secs".to_string();
-            self.last_rejection = Some(e.clone());
-            self.spool.append(Event::PolicyRejected { reason: e.clone(), kept_revision: self.last_applied });
-            return Err(e);
+            return self
+                .reject("a trial needs a confirmed revision to fall back to; apply the first revision without --trial-secs".to_string());
         }
         if trial_secs == Some(0) {
-            let e = "a trial needs a deadline of at least one second".to_string();
-            self.spool.append(Event::PolicyRejected { reason: e.clone(), kept_revision: self.last_applied });
-            return Err(e);
+            return self.reject("a trial needs a deadline of at least one second".to_string());
         }
-        let res = (|| {
+        if trial_secs.is_some() && self.journal.phase == Phase::RollbackRequired {
+            return self.reject("a rollback is still pending; a new trial cannot start until it completes".to_string());
+        }
+        let checked = (|| {
             let snap = verify_snapshot(&signed, &self.trust, Platform::Linux, self.last_applied, Utc::now()).map_err(|e| e.to_string())?;
             let (_, rep) = nft::render(&snap, &self.device_id, &self.layout(), &self.uid_of).map_err(|e| e.0)?;
-            if !self.recovery.enforcement_disabled {
-                self.install(&snap)?;
-            }
             Ok::<_, String>((snap, rep))
         })();
-        match res {
-            Ok((snap, rep)) => {
-                let rev = snap.revision;
-                // Keep the confirmed revision we are replacing as the rollback target (not while a trial is
-                // pending: then the target stays the revision confirmed before the trial).
-                if self.trial.is_none() && self.current.is_some() {
-                    let _ = fs::copy(self.state_dir.join(CURRENT), self.state_dir.join(trial::LAST_GOOD));
-                }
-                let tmp = self.state_dir.join(format!("{CURRENT}.tmp"));
-                fs::write(&tmp, serde_json::to_vec_pretty(&signed).unwrap()).map_err(|e| e.to_string())?;
-                fs::rename(&tmp, self.state_dir.join(CURRENT)).map_err(|e| e.to_string())?;
-                self.spool.append(Event::PolicyApplied {
-                    revision: rev,
-                    rollback_of: snap.rollback_of,
-                    policy_digest: snap.policy_digest.clone(),
-                    skipped_allows: rep.skipped_allows.iter().map(|(id, _)| id.clone()).collect(),
-                });
-                self.last_applied = Some(rev);
-                let _ = trial::save_replay_mark(&self.state_dir, rev);
-                self.current = Some((signed, snap, rep));
-                if !self.recovery.enforcement_disabled {
-                    self.set_enforcement(true, "policy enforced");
-                }
-                match trial_secs {
-                    Some(secs) => {
-                        let now = Utc::now();
-                        let t = TrialState {
-                            revision: rev,
-                            fallback_revision: fallback.unwrap_or(0),
-                            started_at: now,
-                            deadline: now + chrono::Duration::seconds(secs.min(7 * 24 * 3600) as i64),
-                            confirmed: false,
-                            revert_now: false,
-                            changed_by_uid: None,
-                        };
-                        let _ = t.save(&self.state_dir);
-                        self.spool.append(Event::PolicyTrialStarted {
-                            revision: rev,
-                            fallback_revision: t.fallback_revision,
-                            deadline: t.deadline,
-                        });
-                        self.trial = Some(t);
-                    }
-                    None => {
-                        // A revision applied without a trial ends any pending trial: the new revision is confirmed,
-                        // the earlier trial revision was never confirmed and is no longer installed.
-                        if self.trial.take().is_some() {
-                            TrialState::clear(&self.state_dir);
-                        }
-                    }
-                }
-                Ok(rev)
+        let (snap, rep) = match checked {
+            Ok(x) => x,
+            Err(e) => return self.reject(e),
+        };
+        let rev = snap.revision;
+        let prior = self.current_rev();
+        let prior_snap = self.current.as_ref().map(|c| c.1.clone());
+        let prior_trial = self.trial.clone();
+        let before = self.journal.clone();
+
+        // 1. durable intent
+        self.journal.phase = Phase::Applying;
+        self.journal.target = Some(rev);
+        self.journal.prior = prior;
+        self.journal.prior_trial = prior_trial.clone();
+        self.journal.replay_high_water = self.journal.replay_high_water.max(rev);
+        self.journal.detail = None;
+        if let Err(e) = self.persist_journal() {
+            self.journal = before;
+            self.journal_uncertain = None;
+            return self.reject(format!("not durable: {e}; revision {} stays in force", prior.map_or("none".into(), |r| r.to_string())));
+        }
+        // 2. independent replay high-water (never lowered, even if this activation fails later)
+        if let Err(e) = self.store.write_atomic(&self.state_dir, trial::REPLAY_MARK, self.journal.replay_high_water.to_string().as_bytes())
+        {
+            return self.abort_activation(before, prior_trial, false, format!("not durable: replay high-water write failed: {e}"));
+        }
+        self.last_applied = Some(self.last_applied.unwrap_or(0).max(rev));
+        // 3. staged candidate; for a trial, the rollback target and the deadline are durable before the kernel changes
+        if let Err(e) = self.store.write_atomic(&self.state_dir, journal::CANDIDATE, &serde_json::to_vec_pretty(&signed).unwrap()) {
+            return self.abort_activation(before, prior_trial, false, format!("not durable: staging the candidate failed: {e}"));
+        }
+        let new_trial = trial_secs.map(|secs| {
+            let now = Utc::now();
+            TrialState {
+                revision: rev,
+                fallback_revision: fallback.unwrap_or(0),
+                started_at: now,
+                deadline: now + chrono::Duration::seconds(secs.min(7 * 24 * 3600) as i64),
+                confirmed: false,
+                revert_now: false,
+                changed_by_uid: None,
             }
-            Err(e) => {
-                self.last_rejection = Some(e.clone());
-                self.spool.append(Event::PolicyRejected { reason: e.clone(), kept_revision: self.last_applied });
-                Err(e)
+        });
+        if let Some(t) = &new_trial {
+            if self.trial.is_none() {
+                if let Err(e) = self.store.copy_atomic(&self.state_dir, CURRENT, trial::LAST_GOOD) {
+                    return self.abort_activation(
+                        before,
+                        prior_trial,
+                        false,
+                        format!("not durable: saving the rollback target failed: {e}"),
+                    );
+                }
+            }
+            if let Err(e) = self.store.write_atomic(&self.state_dir, trial::FILE, &serde_json::to_vec_pretty(t).unwrap()) {
+                return self.abort_activation(before, prior_trial, true, format!("not durable: saving the trial deadline failed: {e}"));
             }
         }
+        // 4. kernel
+        if !self.recovery.enforcement_disabled {
+            if let Err(e) = self.install(&snap) {
+                // nft applies a ruleset as one transaction: a failed install leaves the prior table in place.
+                return self.abort_activation(before, prior_trial, new_trial.is_some(), e);
+            }
+        }
+        // 5. commit
+        if let Err(e) = self.store.copy_atomic(&self.state_dir, journal::CANDIDATE, CURRENT) {
+            let why = format!("revision {rev} was installed but could not be made durable ({e})");
+            let restored = match (&prior_snap, self.recovery.enforcement_disabled) {
+                (_, true) => Ok(()),
+                (Some(p), false) => self.install(p).map(|_| ()),
+                (None, false) => Err("there is no prior revision to restore".to_string()),
+            };
+            return match restored {
+                Ok(()) => self.abort_activation(
+                    before,
+                    prior_trial,
+                    new_trial.is_some(),
+                    format!("not durable: {why}; revision {} restored", prior.map_or("none".into(), |r| r.to_string())),
+                ),
+                Err(re) => {
+                    // The kernel holds a verified signed revision the disk does not: say so, keep it (never weaker).
+                    self.current = Some((signed, snap, rep));
+                    self.journal.phase = Phase::RecoveryRequired;
+                    self.journal.active = Some(rev);
+                    self.journal.target = None;
+                    self.journal.detail = Some(format!("{why}; restoring the prior state failed: {re}"));
+                    let _ = self.persist_journal();
+                    let d = self.journal.detail.clone().unwrap();
+                    self.activation_event(d.clone());
+                    self.reject(format!("not durable: {d}"))
+                }
+            };
+        }
+        // 6. phase
+        let _ = self.store.remove(&self.state_dir, journal::CANDIDATE);
+        self.journal.active = Some(rev);
+        self.journal.target = None;
+        self.journal.prior = None;
+        self.journal.prior_trial = None;
+        match &new_trial {
+            Some(t) => {
+                self.journal.phase = Phase::Trial;
+                self.journal.rollback_target = Some(t.fallback_revision);
+                self.journal.trial_deadline = Some(t.deadline);
+            }
+            None => {
+                // A revision applied without a trial ends any pending trial: it is confirmed by being applied.
+                self.journal.phase = Phase::Confirmed;
+                self.journal.rollback_target = None;
+                self.journal.trial_deadline = None;
+                if self.trial.is_some() && self.store.remove(&self.state_dir, trial::FILE).is_err() {
+                    self.activation_event("stale trial file could not be removed; it is ignored (revision differs)".into());
+                }
+                self.trial = None;
+            }
+        }
+        if let Err(e) = self.persist_journal() {
+            self.activation_event(format!("{e}; revision {rev} is committed and is completed from the snapshot files on restart"));
+        }
+        self.spool.append(Event::PolicyApplied {
+            revision: rev,
+            rollback_of: snap.rollback_of,
+            policy_digest: snap.policy_digest.clone(),
+            skipped_allows: rep.skipped_allows.iter().map(|(id, _)| id.clone()).collect(),
+        });
+        self.current = Some((signed, snap, rep));
+        if !self.recovery.enforcement_disabled {
+            self.set_enforcement(true, "policy enforced");
+        }
+        if let Some(t) = new_trial {
+            self.spool.append(Event::PolicyTrialStarted { revision: rev, fallback_revision: t.fallback_revision, deadline: t.deadline });
+            self.trial = Some(t);
+        }
+        Ok(rev)
     }
 
     /// End or revert a pending trial. Reads the trial file each time so `moatd recover confirm|rollback` (root,
-    /// local) takes effect on the next tick, and also when it was written while the daemon was stopped.
+    /// local) takes effect on the next tick, and also when it was written while the daemon was stopped. A rollback
+    /// that cannot complete stays `rollback_required` and is retried on every tick.
     pub fn tick_trial(&mut self, now: DateTime<Utc>) {
+        if self.journal.phase == Phase::RollbackRequired {
+            self.attempt_rollback();
+            return;
+        }
         let Some(t) = TrialState::load(&self.state_dir) else {
             self.trial = None;
             return;
         };
-        if t.confirmed {
-            TrialState::clear(&self.state_dir);
+        if Some(t.revision) != self.current_rev() {
+            // A trial file left behind for a revision that is not active (an interrupted write): never act on it.
+            if self.store.remove(&self.state_dir, trial::FILE).is_ok() {
+                self.activation_event(format!("ignored a trial file for revision {} that is not active", t.revision));
+            }
             self.trial = None;
+            return;
+        }
+        if t.confirmed {
+            if let Err(e) = self.store.remove(&self.state_dir, trial::FILE) {
+                // Retried next tick; the trial stays visible until the confirmation is durable.
+                self.trial = Some(t);
+                self.last_rejection = Some(format!("confirming revision {}: {e}", self.current_rev().unwrap_or(0)));
+                return;
+            }
+            self.trial = None;
+            self.journal.phase = Phase::Confirmed;
+            self.journal.rollback_target = None;
+            self.journal.trial_deadline = None;
+            let _ = self.persist_journal();
             self.spool.append(Event::PolicyTrialConfirmed {
                 revision: t.revision,
                 by_uid: t.changed_by_uid,
@@ -491,39 +819,78 @@ impl<B: NftBackend> Endpoint<B> {
         } else {
             format!("trial not confirmed before {}", t.deadline.to_rfc3339())
         };
-        TrialState::clear(&self.state_dir);
-        self.trial = None;
+        // Rollback intent is durable before anything changes, and kept until restoration is durable.
+        self.journal.phase = Phase::RollbackRequired;
+        self.journal.active = Some(t.revision);
+        self.journal.rollback_target = Some(t.fallback_revision);
+        self.journal.detail = Some(reason);
+        if let Err(e) = self.persist_journal() {
+            // The trial file still holds the intent (it is only removed once the rollback is durable).
+            self.activation_event(format!("{e}; the rollback intent is still held by the trial file"));
+        }
+        self.trial = Some(t);
+        self.attempt_rollback();
+    }
+
+    fn attempt_rollback(&mut self) {
+        let from = self.journal.active.unwrap_or(0);
+        let to = self.journal.rollback_target.unwrap_or(0);
+        let reason = self.journal.detail.clone().unwrap_or_else(|| "rollback".into());
         let res = (|| {
-            let signed = Self::read_signed(&self.state_dir.join(trial::LAST_GOOD)).ok_or("the last confirmed snapshot is missing")?;
-            let at = Self::decode_issued_at(&signed).unwrap_or(now);
+            let signed =
+                Self::read_signed(&self.state_dir.join(trial::LAST_GOOD)).ok_or("the last confirmed snapshot is missing or unreadable")?;
+            let at = Self::decode_issued_at(&signed).unwrap_or_else(Utc::now);
             let snap = verify_snapshot(&signed, &self.trust, Platform::Linux, None, at).map_err(|e| e.to_string())?;
+            if snap.revision != to {
+                return Err(format!("the stored rollback target is revision {}, expected {to}", snap.revision));
+            }
             let (_, rep) = nft::render(&snap, &self.device_id, &self.layout(), &self.uid_of).map_err(|e| e.0)?;
-            if !self.recovery.enforcement_disabled {
+            if !self.recovery.enforcement_disabled && self.installed != Some(to) {
                 self.install(&snap)?;
             }
             Ok::<_, String>((signed, snap, rep))
         })();
-        match res {
-            Ok((signed, snap, rep)) => {
-                let to = snap.revision;
-                let _ = fs::copy(self.state_dir.join(trial::LAST_GOOD), self.state_dir.join(CURRENT));
-                self.spool.append(Event::PolicyRolledBack { from_revision: t.revision, to_revision: to, reason: reason.clone() });
-                self.spool.append(Event::PolicyApplied {
-                    revision: to,
-                    rollback_of: Some(t.revision),
-                    policy_digest: snap.policy_digest.clone(),
-                    skipped_allows: rep.skipped_allows.iter().map(|(id, _)| id.clone()).collect(),
-                });
-                self.last_rejection = Some(format!("Rolled back from revision {} to {to} ({reason}).", t.revision));
-                self.current = Some((signed, snap, rep));
-                // last_applied (the replay high-water mark) intentionally stays at the trial revision.
-            }
+        let (signed, snap, rep) = match res {
+            Ok(x) => x,
             Err(e) => {
-                let why = format!("rollback from revision {} failed: {e}; revision {} stays in force", t.revision, t.revision);
+                let why = format!("rollback from revision {from} to {to} failed: {e}; revision {from} stays in force; retrying");
                 self.last_rejection = Some(why.clone());
-                self.spool.append(Event::PolicyRollbackFailed { revision: t.revision, reason: why });
+                if self.rollback_error.as_deref() != Some(why.as_str()) {
+                    self.spool.append(Event::PolicyRollbackFailed { revision: from, reason: why.clone() });
+                    self.rollback_error = Some(why);
+                }
+                return;
             }
+        };
+        // The kernel now enforces `to`; status says so even if the disk write below fails.
+        self.current = Some((signed, snap.clone(), rep.clone()));
+        if let Err(e) = self.store.copy_atomic(&self.state_dir, trial::LAST_GOOD, CURRENT) {
+            let why = format!("rollback to revision {to} is enforced but not yet durable ({e}); retrying");
+            self.last_rejection = Some(why.clone());
+            if self.rollback_error.as_deref() != Some(why.as_str()) {
+                self.spool.append(Event::PolicyRollbackFailed { revision: from, reason: why.clone() });
+                self.rollback_error = Some(why);
+            }
+            return;
         }
+        let _ = self.store.remove(&self.state_dir, trial::FILE);
+        self.trial = None;
+        self.rollback_error = None;
+        self.journal.phase = Phase::Confirmed;
+        self.journal.active = Some(to);
+        self.journal.rollback_target = None;
+        self.journal.trial_deadline = None;
+        self.journal.detail = Some(format!("restored revision {to} ({reason})"));
+        let _ = self.persist_journal();
+        self.spool.append(Event::PolicyRolledBack { from_revision: from, to_revision: to, reason: reason.clone() });
+        self.spool.append(Event::PolicyApplied {
+            revision: to,
+            rollback_of: Some(from),
+            policy_digest: snap.policy_digest.clone(),
+            skipped_allows: rep.skipped_allows.iter().map(|(id, _)| id.clone()).collect(),
+        });
+        self.last_rejection = Some(format!("Rolled back from revision {from} to {to} ({reason})."));
+        // last_applied (the replay high-water mark) intentionally stays at the trial revision.
     }
 
     /// Process every file in `<state>/inbox`, oldest name first.
@@ -650,6 +1017,12 @@ impl<B: NftBackend> Endpoint<B> {
         if self.recovery.isolation.active {
             return "emergency-isolation".into();
         }
+        if self.journal.phase == Phase::RecoveryRequired {
+            return "recovery-required".into();
+        }
+        if self.journal.phase == Phase::RollbackRequired {
+            return "rollback-pending".into();
+        }
         if !self.enforcement_active {
             return "degraded".into();
         }
@@ -677,6 +1050,14 @@ impl<B: NftBackend> Endpoint<B> {
             trial: self.trial.clone(),
             egress_proxy: self.proxy.as_ref().map(|m| m.sessions.iter().map(|(id, p)| (id.clone(), p.port)).collect()).unwrap_or_default(),
             proxied_profiles: self.current.as_ref().map(|c| c.2.proxied_profiles.clone()).unwrap_or_default(),
+            activation: Some(ActivationStatus {
+                phase: self.journal.phase,
+                active: self.journal.active,
+                rollback_target: self.journal.rollback_target,
+                replay_high_water: self.journal.replay_high_water,
+                durability: if self.journal_uncertain.is_some() { "uncertain".into() } else { "durable".into() },
+                detail: self.journal_uncertain.clone().or_else(|| self.journal.detail.clone()),
+            }),
         }
     }
 }
@@ -696,9 +1077,19 @@ pub(crate) mod tests {
         pub deleted: Vec<String>,
         pub fail_check: bool,
         pub tables: BTreeMap<String, String>,
+        /// W06 fault injection: every apply fails (backend error).
+        pub fail_apply: bool,
+        /// W06 crash simulation: once set, the "process" is gone and the kernel is no longer changed.
+        pub crashed: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
     }
     impl NftBackend for FakeNft {
         fn apply(&mut self, r: &str) -> Result<(), String> {
+            if self.crashed.as_ref().is_some_and(|c| c.load(std::sync::atomic::Ordering::SeqCst)) {
+                return Err("process crashed".into());
+            }
+            if self.fail_apply {
+                return Err("netlink: Error: Could not process rule: No buffer space available".into());
+            }
             let name = if r.contains("moat_local_emergency") { "moat_local_emergency" } else { "moat" };
             self.tables.insert(name.into(), r.into());
             self.applied.push(r.into());
@@ -745,7 +1136,11 @@ pub(crate) mod tests {
         (Fixture { dir, key }, ep)
     }
 
-    fn make(dir: &Path) -> Endpoint<FakeNft> {
+    pub fn make(dir: &Path) -> Endpoint<FakeNft> {
+        make_with(dir, FakeNft::default())
+    }
+
+    pub fn make_with(dir: &Path, backend: FakeNft) -> Endpoint<FakeNft> {
         let spool = Spool::open(SpoolConfig {
             dir: dir.join("spool"),
             device_id: "omarchy".into(),
@@ -757,7 +1152,7 @@ pub(crate) mod tests {
         Endpoint::new(
             dir.into(),
             "omarchy".into(),
-            FakeNft::default(),
+            backend,
             Cgroups { mount: dir.join("cg"), root_name: "moat.slice".into() },
             spool,
             CapabilityAdvertisement::linux_nftables_cgroup(),
@@ -776,7 +1171,7 @@ pub(crate) mod tests {
         sign_snapshot(&s, key)
     }
 
-    fn events(ep: &Endpoint<FakeNft>) -> Vec<Event> {
+    pub fn events(ep: &Endpoint<FakeNft>) -> Vec<Event> {
         ep.spool.read_after(0, 1000).into_iter().map(|r| r.event).collect()
     }
 
@@ -908,7 +1303,7 @@ pub(crate) mod tests {
         assert_eq!(ep.status().coverage, "monitoring");
     }
 
-    fn applied_revision(ep: &Endpoint<FakeNft>) -> String {
+    pub fn applied_revision(ep: &Endpoint<FakeNft>) -> String {
         ep.backend.tables["moat"].lines().next().unwrap_or("").to_string()
     }
 
@@ -1046,3 +1441,6 @@ pub(crate) mod tests {
         assert_eq!(ep.prepare_session_proxy("x2", "coding-session").unwrap(), None);
     }
 }
+
+#[cfg(test)]
+mod journal_faults;

@@ -124,6 +124,11 @@ moatd recover status                            # shows the pending trial and it
 CI checks this on a real kernel: a deliberately broken trial revision is enforced, reverts on its own, cannot be
 replayed, and a confirmed trial stays (`netns-enforcement.sh`).
 
+**Durability and restart (W06).** Activation and rollback are journaled step by step (`activation.json`); a failure
+or crash at any step leaves either the prior revision or the committed one, never a silent permissive state, and a
+rollback is retained until it is durable. Protected sessions running across a daemon restart are **stopped, not
+adopted**. Details, the crash table and the evidence: [linux-activation-journal.md](../linux-activation-journal.md).
+
 ## Session egress proxy (hostname rules in protected sessions)
 
 Profiles with session-scoped hostname rules (for example `coding-session` allowing `api.github.com`) send their TCP
