@@ -160,7 +160,6 @@
       },
       "limits": "Run by the test script as root, not by the installed systemd service. Omarchy kernel untested. New packets of established flows hit the rule; no conntrack flush.",
       "open_defects": [
-        "D-LAUNCH-AUTHORITY",
         "D-SYSTEMD-WORKSPACE"
       ]
     },
@@ -168,20 +167,21 @@
       "id": "linux.session.launch-authority",
       "capability": "a contained caller cannot obtain a less restricted session through the moatd control socket",
       "backend": "moatd 0.1.0 control socket",
-      "evidence_level": "component",
-      "disposition": "unsupported_rejected",
-      "tests": [],
+      "evidence_level": "native_ci",
+      "disposition": "implemented_unproven",
+      "tests": [
+        "linux/moatd/src/caller.rs::tests",
+        "linux/tests/netns-enforcement.sh (W04 checks)"
+      ],
       "environment": "ci-ubuntu-26.04-x86_64",
       "last_result": {
-        "result": "fail",
-        "run": "review of d5270bd",
-        "commit": "d5270bd",
+        "result": "pass",
+        "run": "linux-endpoint 40534200207",
+        "commit": "adca7c2",
         "date": "2026-10-27"
       },
-      "limits": "The socket is 0666 and the launch handler never checks the caller's cgroup, so a workload inside a session can request any other profile.",
-      "open_defects": [
-        "D-LAUNCH-AUTHORITY"
-      ]
+      "limits": "Kernel-attested callers only (SO_PEERCRED + SCM_CREDENTIALS mapped to cgroup v2, PID-reuse guarded). A contained caller may launch only its own profile with full broker isolation and close only its own sessions. Run as root in a CI netns lab, not through the installed systemd unit (W11). External pre-existing brokers (docker socket, ssh-agent, writable files) are outside this claim.",
+      "open_defects": []
     },
     {
       "id": "linux.session.hostname-proxy",
@@ -449,7 +449,14 @@
       "id": "D-LAUNCH-AUTHORITY",
       "summary": "A contained caller can request a looser session through the control socket.",
       "package": "W04",
-      "status": "open"
+      "status": "closed",
+      "closed_by": "W04 (linux/moatd/src/caller.rs, control.rs, server.rs)",
+      "regression_tests": [
+        "netns: W04 lab-deny workload cannot launch a lab-allow session via moat-launch",
+        "netns: W04 raw control-socket request from inside lab-deny refused",
+        "netns: W04 pre-opened outside connection used from inside lab-deny refused",
+        "linux-endpoint 40534200207"
+      ]
     },
     {
       "id": "D-PROXY-DNS-BEFORE-AUTH",

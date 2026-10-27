@@ -1,7 +1,7 @@
 # Status: claim ledger
 
 Moat is an **experimental build**. Release gate G0 ("truthful experimental build", MASTER_ROADMAP §13) is **not yet
-met**: the open defects below include grant scope loss, a launcher path a contained caller can use to broaden itself,
+met**: the open defects below include grant scope loss in the controller path, proxy DNS/stream lifetime gaps,
 and activation state that is not durably journaled. Until they are closed, treat every protection below as
 unproven outside the environment named next to it.
 
@@ -42,8 +42,8 @@ real-workflow evidence, if a claim cites a defect that does not exist, or if thi
 | `core.compile.capability-gate` | implemented_unproven | semantic | unit | pass (local, W02) | Profiles capability-checked; Linux backend id collisions rejected. |
 | `core.signing.snapshot` | implemented_unproven | semantic | unit | pass, rust 40493342610 @ d5270bd | Canonical policy digest; effective digest binds overlays. |
 | `core.grant.scope` | implemented_unproven | semantic | unit | pass (local, W03 core) | Core keeps scope end to end; controller adapter pending (Lane B): `D-GRANT-SCOPE-LOSS`, `D-GRANT-IDEMPOTENCY`. |
-| `linux.session.direct-egress` | implemented_unproven | native_ci | ci-ubuntu-26.04-x86_64 | pass, linux-endpoint 40493342431 @ d5270bd | Script-run as root, not the installed unit; `D-LAUNCH-AUTHORITY`, `D-SYSTEMD-WORKSPACE`. |
-| `linux.session.launch-authority` | unsupported_rejected | component | ci-ubuntu-26.04-x86_64 | **fail** (review of d5270bd) | `D-LAUNCH-AUTHORITY`. |
+| `linux.session.direct-egress` | implemented_unproven | native_ci | ci-ubuntu-26.04-x86_64 | pass, linux-endpoint 40493342431 @ d5270bd | Script-run as root, not the installed unit; `D-SYSTEMD-WORKSPACE`. |
+| `linux.session.launch-authority` | implemented_unproven | native_ci | ci-ubuntu-26.04-x86_64 | pass, linux-endpoint 40534200207 @ adca7c2 | Kernel-attested callers; contained caller limited to its own profile. Not via the installed unit; external brokers (docker, ssh-agent) outside the claim. |
 | `linux.session.hostname-proxy` | implemented_unproven | native_ci | ci-ubuntu-26.04-x86_64 | pass, linux-endpoint 40493342431 @ d5270bd | Admission-only; `D-PROXY-DNS-BEFORE-AUTH`, `D-PROXY-STREAM-LIFETIME`; domain fronting possible; UDP IP-only. |
 | `linux.activation.trial-rollback` | implemented_unproven | native_ci | ci-ubuntu-26.04-x86_64 | pass, linux-endpoint 40493342431 @ d5270bd | Not journaled or fault-injected: `D-ACTIVATION-JOURNAL`. |
 | `linux.spool.gaps` | implemented_unproven | component | unit | pass, rust 40493342610 @ d5270bd | No W01 event envelope yet. |
@@ -69,7 +69,7 @@ above is updated with the run that proves it.
 | `D-DIGEST-CANONICAL` | Digests are not canonical; effective digest excludes overlays. | W01/W03 | **closed** (W03 core) |
 | `D-GRANT-SCOPE-LOSS` | Generated grants lose device and process-generation scope. Core fixed; controller must use `moatctl compile --grants`. | W03 (core done, controller Lane B) | open |
 | `D-GRANT-IDEMPOTENCY` | A retried grant request mints a fresh expiry. Core `GrantLedger` keeps the original; controller must adopt. | W03 (core done, controller Lane B) | open |
-| `D-LAUNCH-AUTHORITY` | A contained caller can request a looser session through the control socket. | W04 | open |
+| `D-LAUNCH-AUTHORITY` | A contained caller can request a looser session through the control socket. | W04 | **closed** (W04, netns run 40534200207) |
 | `D-PROXY-DNS-BEFORE-AUTH` | A denied hostname can be resolved before authorization. | W05 | open |
 | `D-PROXY-STREAM-LIFETIME` | No stream registry; admission vs stream expiry undefined. | W05 | open |
 | `D-ACTIVATION-JOURNAL` | Apply/rollback state not journaled or fault-tested. | W06 | open |
@@ -85,7 +85,7 @@ above is updated with the run that proves it.
 | W01 contracts and ledger | Lane A | ledger, six versioned schemas, canonical rules, 40 shared fixtures; Rust + JS consumers in CI. Swift/TS app consumers: Lane B |
 | W02 semantics and broadening | Lane A | structured conservative diff, differential counterexample search, profile capability checks, collision-free backend ids; native-fixture agreement for the supported subset still partial |
 | W03 exact grants (core side) | Lane A | core done: device/process/task scope through serialization, idempotent ledger, effective digest; controller adoption and signer/publication journal are Lane B |
-| W04 Linux launch authority | Lane A | not started |
+| W04 Linux launch authority | Lane A | done in CI netns (kernel caller identity, own-profile-only nested launch, raw/pre-opened socket refused); installed-unit proof is W11 |
 | W05 proxy semantics | Lane A | not started |
 | W06 durable activation (Linux) | Lane A | not started |
 | W07 Mac engine | Lane B | see Lane B |
