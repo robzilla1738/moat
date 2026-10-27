@@ -49,10 +49,24 @@ public final class AppModel: ObservableObject {
     /// Errors from an owner action stay visible until dismissed.
     private var errorIsConnection = false
 
-    public func refresh() async {
+    /// When the extension last answered, and since when it has not (nil while connected).
+    @Published public private(set) var lastContact: Date?
+    @Published public private(set) var contactLostSince: Date?
+    /// The last report the extension actually sent. `status` is this report while contact is current, and an
+    /// explicitly stale copy (coverage unknown) once contact is lost: an old green badge is never shown as current.
+    public private(set) var lastGoodStatus: StatusReport?
+
+    public var isStale: Bool { contactLostSince != nil }
+
+    public func refresh(now: Date = Date()) async {
         do {
-            status = try await client.status()
-            flows = try await client.recentFlows(limit: 200)
+            let s = try await client.status()
+            let f = try await client.recentFlows(limit: 200)
+            status = s
+            lastGoodStatus = s
+            flows = f
+            lastContact = now
+            contactLostSince = nil
             if errorIsConnection {
                 lastError = nil
                 errorIsConnection = false
@@ -60,7 +74,18 @@ public final class AppModel: ObservableObject {
         } catch {
             lastError = "\(error)"
             errorIsConnection = true
+            if contactLostSince == nil { contactLostSince = now }
+            status = Self.staleCopy(of: lastGoodStatus, lastContact: lastContact, error: "\(error)")
         }
+    }
+
+    /// What to show when the extension stopped answering: the last report, with coverage unknown and why.
+    static func staleCopy(of s: StatusReport?, lastContact: Date?, error: String) -> StatusReport? {
+        guard var s else { return nil }
+        let when = lastContact.map { ISO8601DateFormatter().string(from: $0) } ?? "unknown"
+        s.coverage = .unknown
+        s.coverageNotes.insert("Lost contact with the Moat filter (\(error)). Last report: \(when). Enforcement may continue in the extension, but nothing shown here is current.", at: 0)
+        return s
     }
 
     private func run(_ label: String, _ f: () async throws -> Void) async {
@@ -91,6 +116,9 @@ public final class AppModel: ObservableObject {
     public func rollback() async { await run("Rolled back to the last known good revision.") { _ = try await client.rollbackToLastKnownGood() } }
     public func enterIsolation(reason: String) async { await run("Emergency isolation is on.") { _ = try await client.enterIsolation(reason: reason) } }
     public func exitIsolation(confirmation: String) async { await run("Isolation is off.") { _ = try await client.exitIsolation(confirmation: confirmation) } }
+    public func reloadTrust() async {
+        await run("Trusted keys re-read; the installed policy was re-verified.") { _ = try await client.reloadTrust() }
+    }
 }
 
 /// A demo client backed by the *real* ControlHandler/FilterEngine/PolicyStore with a canned evaluator, so previews
@@ -184,6 +212,7 @@ public final class DemoControlClient: ControlClient, @unchecked Sendable {
     public func rollbackToLastKnownGood() async throws -> PolicySummary { try get(.rollbackToLastKnownGood, PolicySummary.self) }
     public func enterIsolation(reason: String) async throws -> IsolationState { try get(.enterIsolation(reason: reason), IsolationState.self) }
     public func exitIsolation(confirmation: String) async throws -> IsolationState { try get(.exitIsolation(confirmation: confirmation), IsolationState.self) }
+    public func reloadTrust() async throws -> Bool { try get(.reloadTrust, [String: Bool].self)["changed"] ?? false }
 
     /// Synchronous snapshot of state for rendering without async (screenshots, previews).
     public func snapshot() -> (StatusReport, [FlowRecord]) {

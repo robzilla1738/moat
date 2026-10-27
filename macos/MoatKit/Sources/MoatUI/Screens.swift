@@ -403,7 +403,7 @@ struct RecoveryScreen: View {
                         Text(iso.active ? "Emergency isolation is on" : "Emergency isolation").font(.title3.weight(.semibold))
                         Text(iso.active
                             ? "Everything except loopback is blocked. \(iso.reason ?? "")"
-                            : "Blocks everything except loopback on this Mac, immediately. It stays on through restarts and never reopens because the controller disappeared.")
+                            : "Blocks new outbound connections except loopback on this Mac, immediately. Connections already open are not cut. It stays on through restarts and never reopens because the controller disappeared.")
                             .font(.body).foregroundStyle(p.text2).fixedSize(horizontal: false, vertical: true)
                         if iso.active, showExit {
                             Text("Type \u{201C}\(ControlHandler.exitPhrase)\u{201D} to confirm.").font(.callout).foregroundStyle(p.muted)
@@ -451,7 +451,7 @@ struct RecoveryScreen: View {
             Button("Isolate now", role: .destructive) { Task { await model.enterIsolation(reason: "Turned on from the Moat app") } }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("All network access except loopback is blocked until you turn isolation off here.")
+            Text("New outbound connections except loopback are blocked until you turn isolation off here. Connections already open are not cut.")
         }
     }
 

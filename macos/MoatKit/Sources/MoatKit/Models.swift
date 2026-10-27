@@ -18,10 +18,31 @@ public enum HostnameSource: String, Codable, Sendable {
     case inferred
 }
 
+/// The process that actually opened the socket (NEFilterFlow.sourceProcessAuditToken), kept separate from the
+/// responsible app. `pidVersion` is the audit token's per-process generation, so a reused pid is not the same process.
+public struct ProcessIdentity: Codable, Sendable, Equatable {
+    public var signingID: String?
+    public var teamID: String?
+    public var executable: String?
+    public var pid: Int32?
+    public var pidVersion: Int32?
+
+    public init(signingID: String? = nil, teamID: String? = nil, executable: String? = nil, pid: Int32? = nil, pidVersion: Int32? = nil) {
+        self.signingID = signingID
+        self.teamID = teamID
+        self.executable = executable
+        self.pid = pid
+        self.pidVersion = pidVersion
+    }
+}
+
 /// What the Network Extension can tell us about one outbound flow, before a verdict.
 ///
-/// Identity comes from the flow's source-app audit token (signing identifier, team, path). The extension does not
-/// see ancestry: without the Endpoint Security entitlement, `ancestryComplete` is always false and the UI says so.
+/// `signingID`/`teamID`/`executable`/`pid` describe the *responsible app* (NEFilterFlow.sourceAppAuditToken): the
+/// identity app rules match and Activity groups by. `process` is the process that actually opened the socket
+/// (sourceProcessAuditToken), recorded as evidence and never merged into the app identity. When macOS does not
+/// provide a separate process token, `process` is nil and the UI says the actual process is unknown. The extension
+/// does not see ancestry: without the Endpoint Security entitlement, ancestry is unavailable and the UI says so.
 public struct FlowFacts: Codable, Sendable, Equatable {
     public var id: String
     public var bundleID: String?
@@ -35,6 +56,8 @@ public struct FlowFacts: Codable, Sendable, Equatable {
     public var remotePort: UInt16
     public var transport: Transport
     public var at: Date
+    /// The actual socket process, when it differs from or is reported separately from the responsible app.
+    public var process: ProcessIdentity?
 
     public init(
         id: String = UUID().uuidString,
@@ -48,7 +71,8 @@ public struct FlowFacts: Codable, Sendable, Equatable {
         remoteIP: String,
         remotePort: UInt16,
         transport: Transport,
-        at: Date = Date()
+        at: Date = Date(),
+        process: ProcessIdentity? = nil
     ) {
         self.id = id
         self.bundleID = bundleID
@@ -62,6 +86,7 @@ public struct FlowFacts: Codable, Sendable, Equatable {
         self.remotePort = remotePort
         self.transport = transport
         self.at = at
+        self.process = process
     }
 
     /// The best human label for the app: signing identifier, then bundle id, then executable name.
@@ -74,8 +99,14 @@ public struct FlowFacts: Codable, Sendable, Equatable {
 
     /// Key used by the verdict cache. Includes everything that can change a decision.
     public var cacheKey: String {
-        [signingID ?? "", teamID ?? "", executable ?? "", remoteHost ?? "", remoteIP, String(remotePort), transport.rawValue]
+        [signingID ?? "", teamID ?? "", executable ?? "", process?.signingID ?? "", process?.executable ?? "", remoteHost ?? "", remoteIP, String(remotePort), transport.rawValue]
             .joined(separator: "|")
+    }
+
+    /// True when macOS reported a socket process whose identity differs from the responsible app.
+    public var processDiffersFromApp: Bool {
+        guard let p = process else { return false }
+        return (p.signingID != nil && p.signingID != signingID) || (p.executable != nil && p.executable != executable)
     }
 
     public var isLoopback: Bool {
@@ -91,7 +122,7 @@ public enum DecisionSource: String, Codable, Sendable, Equatable {
     case observationNoPolicy = "observation_no_policy"
     /// The policy's profile is in observe mode: permitted and recorded, not enforced.
     case observationProfile = "observation_profile"
-    /// Emergency isolation is on: everything except loopback is denied until the owner turns it off locally.
+    /// Emergency isolation is on: every new outbound flow except loopback is denied until the owner turns it off locally.
     case emergencyIsolation = "emergency_isolation"
     /// Loopback is always permitted so local recovery and IPC keep working.
     case loopback
@@ -197,7 +228,7 @@ public enum CoverageLevel: String, Codable, Sendable {
         case .observed: return "Activity is visible. Nothing is being blocked."
         case .enforced: return "App rules from your signed policy are enforced by the content filter."
         case .degraded: return "Coverage is reduced. See what is wrong below."
-        case .isolated: return "Emergency isolation: everything except loopback is blocked until you turn it off here."
+        case .isolated: return "Emergency isolation: new outbound connections except loopback are blocked until you turn it off here. Connections already open are not cut."
         case .unknown: return "The filter has not reported. Moat cannot say what is covered."
         }
     }
@@ -224,7 +255,9 @@ public struct CapabilityRow: Codable, Sendable, Equatable, Identifiable {
     /// The design-time macOS capability set, mirroring `CapabilityAdvertisement::macos_network_extension()`.
     /// Everything is "untested" until proven on a real, signed install (docs/STATUS.md).
     public static let macOSDesign: [CapabilityRow] = [
-        .init(key: "process_identity", label: "Process identity", support: .untested, note: "Source app audit token via NEFilterFlow"),
+        .init(key: "process_identity", label: "Process identity", support: .untested, note: "Responsible app and socket process audit tokens via NEFilterFlow, kept separate"),
+        .init(key: "process_scoped_grants", label: "Process-scoped permissions", support: .unsupported, note: "Unavailable until process-generation capture and enforcement are proven; app-on-device permissions are offered instead"),
+        .init(key: "isolation_new_flows", label: "Isolation (new connections)", support: .untested, note: "Blocks new outbound flows; already-open flows and inbound flows are not cut"),
         .init(key: "app_enforcement", label: "App enforcement", support: .untested, note: "NEFilterDataProvider verdicts per flow"),
         .init(key: "hostname_enforcement", label: "Hostname rules", support: .partial, note: "Only when the flow exposes a hostname; IP otherwise"),
         .init(key: "byte_counters", label: "Byte counters", support: .partial, note: "NEFilterReport counters under specific reporting conditions"),
@@ -232,7 +265,7 @@ public struct CapabilityRow: Codable, Sendable, Equatable, Identifiable {
         .init(key: "udp_enforcement", label: "UDP / QUIC", support: .untested, note: "QUIC requires device proof"),
         .init(key: "ancestor_attribution", label: "Process ancestry", support: .unsupported, note: "Needs the Endpoint Security entitlement"),
         .init(key: "session_enforcement", label: "Protected sessions", support: .unsupported, note: "No tested macOS session boundary; session rules are omitted with a report"),
-        .init(key: "existing_flow_revocation", label: "Revoke open flows", support: .unsupported, note: "Not yet tested"),
+        .init(key: "existing_flow_revocation", label: "Revoke open flows", support: .unsupported, note: "Not implemented: a new verdict does not cut an open flow"),
     ]
 }
 
@@ -282,6 +315,13 @@ public struct StatusReport: Codable, Sendable, Equatable {
     public var flowsDenied: UInt64
     public var telemetryGaps: [GapMarker]
     public var capabilities: [CapabilityRow]
+    /// The evaluator generation decisions are made with, and the trust generation it was verified under.
+    public var evaluatorGeneration: UInt64?
+    public var trustGeneration: UInt64?
+    /// False when the installed state is enforced in memory but could not be written to disk.
+    public var durable: Bool?
+    /// What happened when the extension restored its state at start (verified, fell back, or failed).
+    public var restoration: String?
 
     public init(
         extensionVersion: String,
@@ -295,7 +335,11 @@ public struct StatusReport: Codable, Sendable, Equatable {
         flowsSeen: UInt64,
         flowsDenied: UInt64,
         telemetryGaps: [GapMarker],
-        capabilities: [CapabilityRow]
+        capabilities: [CapabilityRow],
+        evaluatorGeneration: UInt64? = nil,
+        trustGeneration: UInt64? = nil,
+        durable: Bool? = nil,
+        restoration: String? = nil
     ) {
         self.extensionVersion = extensionVersion
         self.coverage = coverage
@@ -309,6 +353,10 @@ public struct StatusReport: Codable, Sendable, Equatable {
         self.flowsDenied = flowsDenied
         self.telemetryGaps = telemetryGaps
         self.capabilities = capabilities
+        self.evaluatorGeneration = evaluatorGeneration
+        self.trustGeneration = trustGeneration
+        self.durable = durable
+        self.restoration = restoration
     }
 }
 

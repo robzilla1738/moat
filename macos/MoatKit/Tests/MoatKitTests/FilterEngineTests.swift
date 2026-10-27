@@ -76,13 +76,13 @@ final class FilterEngineTests: XCTestCase {
         var c = VerdictCache(capacity: 2, ttl: 10)
         let t = Date()
         let d = FlowDecision(verdict: .allow, source: .policy, summary: "x")
-        c.put("a", d, now: t)
-        c.put("b", d, now: t)
-        c.put("c", d, now: t)
+        c.put("a", d, generation: 1, now: t, boundary: nil)
+        c.put("b", d, generation: 1, now: t, boundary: nil)
+        c.put("c", d, generation: 1, now: t, boundary: nil)
         XCTAssertEqual(c.count, 2)
-        XCTAssertNil(c.get("a", now: t), "oldest evicted")
-        XCTAssertNotNil(c.get("c", now: t))
-        XCTAssertNil(c.get("c", now: t.addingTimeInterval(11)), "expired")
+        XCTAssertNil(c.get("a", generation: 1, now: t), "oldest evicted")
+        XCTAssertNotNil(c.get("c", generation: 1, now: t))
+        XCTAssertNil(c.get("c", generation: 1, now: t.addingTimeInterval(11)), "expired")
     }
 
     func testByteFormat() {
