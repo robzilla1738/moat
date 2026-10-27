@@ -47,7 +47,7 @@ public struct MenuBarContent: View {
         .padding(16)
         .frame(width: 348)
         .environment(\.palette, p)
-        .tint(p.accent)
+        .tint(p.accentStrong)
     }
 
     private func header(_ p: Palette) -> some View {

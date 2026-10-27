@@ -55,9 +55,22 @@ const shots = [
   { name: "mobile-learning-light", hash: "learning", theme: "light", vp: phone },
   { name: "desktop-packs-dark", hash: "learning/packs", theme: "dark", vp: desktop },
   { name: "desktop-learning-drift-light", hash: "learning/c/cand-demo-2", theme: "light", vp: desktop },
+  { name: "desktop-overview-light", hash: "overview", theme: "light", vp: desktop, full: true },
+  { name: "desktop-overview-dark", hash: "overview", theme: "dark", vp: desktop, full: true },
+  { name: "mobile-overview-light", hash: "overview", theme: "light", vp: phone },
+  { name: "mobile-overview-dark", hash: "overview", theme: "dark", vp: phone },
+  { name: "desktop-activity-light", hash: "activity", theme: "light", vp: desktop },
+  { name: "desktop-rules-light", hash: "rules", theme: "light", vp: desktop },
+  { name: "desktop-devices-light", hash: "devices", theme: "light", vp: desktop },
+  { name: "desktop-devices-dark", hash: "devices", theme: "dark", vp: desktop },
+  { name: "mobile-activity-dark", hash: "activity", theme: "dark", vp: phone },
+  { name: "mobile-allow-once-light", hash: "activity/inc-8f2a", theme: "light", vp: phone },
+  { name: "mobile-coverage-light", hash: "coverage", theme: "light", vp: phone },
+  { name: "mobile-device-dns-light", hash: "devices/tcl-tv", theme: "light", vp: phone },
+  { name: "desktop-packs-light", hash: "learning/packs", theme: "light", vp: desktop },
 ];
 // Every route is also checked (no screenshot) in both themes at phone size.
-const routes = ["", "activity", "activity/inc-8f2a", "activity/inc-7c31", "sessions", "rules", "devices", "devices/omarchy", "devices/tcl-tv", "apps", "coverage", "learning", "learning/c/cand-demo-1", "learning/c/cand-demo-2", "learning/b/base-demo-1", "learning/packs"];
+const routes = ["", "overview", "activity", "activity/inc-8f2a", "activity/inc-7c31", "sessions", "rules", "devices", "devices/omarchy", "devices/tcl-tv", "apps", "coverage", "learning", "learning/c/cand-demo-1", "learning/c/cand-demo-2", "learning/b/base-demo-1", "learning/packs"];
 
 const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined, args: ["--font-render-hinting=none"] });
 const problems = [];
@@ -109,7 +122,7 @@ for (const s of shots) {
   await check(page, s.name);
   const first = join(outs[0], `${s.name}.png`);
   await mkdir(outs[0], { recursive: true });
-  await page.screenshot({ path: first });
+  await page.screenshot({ path: first, fullPage: !!s.full });
   for (const o of outs.slice(1)) {
     await mkdir(o, { recursive: true });
     await copyFile(first, join(o, `${s.name}.png`));

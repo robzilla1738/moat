@@ -12,9 +12,10 @@ extension EnvironmentValues {
     }
 }
 
-/// Content surface. Content leads, so cards are quiet opaque surfaces, never glass.
+/// Bento card: an opaque surface with a hairline border and a very soft shadow (light appearance only).
 struct Card<Content: View>: View {
     @Environment(\.palette) private var p
+    @Environment(\.colorScheme) private var scheme
     @Environment(\.colorSchemeContrast) private var contrast
     var padding: CGFloat = 18
     @ViewBuilder var content: Content
@@ -23,10 +24,11 @@ struct Card<Content: View>: View {
         VStack(alignment: .leading, spacing: 12) { content }
             .padding(padding)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(p.surface))
+            .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(p.surface))
             .overlay(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .strokeBorder(contrast == .increased ? p.text.opacity(0.4) : p.border, lineWidth: 1))
+            .shadow(color: Color.black.opacity(scheme == .dark ? 0 : 0.05), radius: 2, x: 0, y: 1)
     }
 }
 
@@ -52,6 +54,19 @@ struct SectionTitle: View {
 enum Tone {
     case green, red, amber, violet, blue, neutral, accent
 
+    /// The symbol a tone carries when no more specific one is given.
+    var symbol: String {
+        switch self {
+        case .green: return "checkmark"
+        case .red: return "xmark"
+        case .amber: return "exclamationmark.triangle.fill"
+        case .violet: return "globe"
+        case .blue: return "info.circle.fill"
+        case .neutral: return "circle.fill"
+        case .accent: return "sparkle"
+        }
+    }
+
     func color(_ p: Palette) -> Color {
         switch self {
         case .green: return p.green
@@ -65,54 +80,46 @@ enum Tone {
     }
 }
 
+/// Status chip. Every toned chip leads with an SF Symbol so the state reads without colour; neutral chips carry text
+/// only unless they ask for a symbol.
 struct Pill: View {
     @Environment(\.palette) private var p
     let text: String
     var tone: Tone = .neutral
     var dot = false
+    var symbol: String?
 
     var body: some View {
         let c = tone.color(p)
-        HStack(spacing: 5) {
-            if dot { Circle().fill(c).frame(width: 6, height: 6).accessibilityHidden(true) }
+        HStack(spacing: 4) {
+            if let s = symbol ?? (tone != .neutral || dot ? tone.symbol : nil) {
+                Image(systemName: s).font(.system(size: 9.5, weight: .bold)).accessibilityHidden(true)
+            }
             Text(text).font(.caption.weight(.semibold))
         }
-        .foregroundStyle(c)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 3)
-        .background(Capsule().fill(c.opacity(0.13)))
-        .overlay(Capsule().strokeBorder(c.opacity(0.28), lineWidth: 1))
+        .foregroundStyle(tone == .neutral ? p.text2 : c)
+        .padding(.horizontal, 9)
+        .padding(.vertical, 4)
+        .background(Capsule().fill(tone == .neutral ? p.surface3 : c.opacity(0.13)))
         .accessibilityElement(children: .combine)
     }
 }
 
+/// A KPI tile (bento): chip label, big tabular figure, sub line.
 struct Stat: View {
-    @Environment(\.palette) private var p
     let label: String
     let value: String
     var sub: String?
     var tone: Tone?
+    var symbol: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(label).font(.subheadline.weight(.medium)).foregroundStyle(p.muted)
-            Text(value)
-                .font(.system(.largeTitle, design: .rounded).weight(.semibold))
-                .monospacedDigit()
-                .foregroundStyle(tone.map { $0.color(p) } ?? p.text)
-                .lineLimit(1)
-                .minimumScaleFactor(0.6)
-            if let sub { Text(sub).font(.caption).foregroundStyle(p.muted).lineLimit(2) }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(16)
-        .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(p.surface))
-        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(p.border, lineWidth: 1))
-        .accessibilityElement(children: .combine)
+        KpiTile(label: label, symbol: symbol ?? tone?.symbol ?? "chart.bar.fill", tone: tone ?? .accent, value: value, sub: sub)
     }
 }
 
-/// A control button: `.glassProminent` (primary/danger) or `.glass` (secondary) on macOS 26, bordered styles before.
+/// A control button: bordered prominent (primary/danger) or bordered (secondary), large control size (≥ 28 pt tall,
+/// with the system's own hit area).
 struct MoatButton: View {
     enum Kind { case primary, secondary, danger }
     let title: String
@@ -135,8 +142,8 @@ struct MoatButton: View {
     }
 }
 
-/// Segmented filter on a glass capsule. The selection highlight is an opaque tinted capsule that slides between
-/// options (matched geometry), so glass is never stacked on glass. Reduce Motion: no slide.
+/// Segmented filter: a solid track with an opaque selected segment that slides between options (matched geometry).
+/// Reduce Motion: no slide.
 struct Segmented<T: Hashable>: View {
     @Environment(\.palette) private var p
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -159,19 +166,20 @@ struct Segmented<T: Hashable>: View {
                         .padding(.vertical, 6)
                         .background {
                             if on {
-                                Capsule().fill(p.accent.opacity(0.18))
-                                    .overlay(Capsule().strokeBorder(p.accent.opacity(0.35), lineWidth: 1))
+                                RoundedRectangle(cornerRadius: 8, style: .continuous).fill(p.surface)
+                                    .shadow(color: Color.black.opacity(0.08), radius: 1.5, x: 0, y: 1)
                                     .matchedGeometryEffect(id: "selection", in: ns)
                             }
                         }
-                        .contentShape(Capsule())
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityAddTraits(on ? .isSelected : [])
             }
         }
-        .padding(4)
-        .moatGlass(in: Capsule())
+        .padding(3)
+        .background(RoundedRectangle(cornerRadius: 11, style: .continuous).fill(p.surface3))
+        .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous).strokeBorder(p.border, lineWidth: 1))
     }
 }
 

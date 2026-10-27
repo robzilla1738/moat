@@ -1,0 +1,137 @@
+{
+  "$schema-note": "Moat design tokens. Source of truth for web/src/tokens.css (generated), the macOS colour sets in macos/Moat/App/Assets.xcassets (generated) and macos/MoatKit/Sources/MoatUI/Theme.swift (kept in sync; web/src/tokens.test.ts checks it). Regenerate with: CHROMIUM_PATH=... node web/scripts/brand.mjs",
+  "font": {
+    "sans": "\"Inter Variable\", \"Inter\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", system-ui, sans-serif",
+    "mono": "ui-monospace, \"SF Mono\", \"JetBrains Mono\", Menlo, Consolas, monospace",
+    "features": "\"cv11\", \"ss01\", \"ss03\"",
+    "numerals": "tabular-nums for every figure"
+  },
+  "type": {
+    "display": {
+      "size": 32,
+      "desktop": 38,
+      "weight": 680,
+      "tracking": -0.028
+    },
+    "title": {
+      "size": 20,
+      "weight": 650,
+      "tracking": -0.018
+    },
+    "card-title": {
+      "size": 15,
+      "weight": 640,
+      "tracking": -0.01
+    },
+    "body": {
+      "size": 15,
+      "weight": 450,
+      "line": 1.5
+    },
+    "label": {
+      "size": 12.5,
+      "weight": 560
+    },
+    "micro": {
+      "size": 11.5,
+      "weight": 600
+    },
+    "figure": {
+      "size": 30,
+      "weight": 680,
+      "tracking": -0.03
+    }
+  },
+  "radius": {
+    "card": 14,
+    "inner": 10,
+    "control": 10,
+    "chip": 999
+  },
+  "space": {
+    "gap": 16,
+    "card-pad": 18,
+    "page-x-phone": 16,
+    "page-x-desktop": 36
+  },
+  "hit-target": 44,
+  "color": {
+    "light": {
+      "bg": "#F3F4F8",
+      "surface": "#FFFFFF",
+      "surface-2": "#F7F8FB",
+      "surface-3": "#EDEFF5",
+      "border": "#E3E6EE",
+      "border-strong": "#CDD2DE",
+      "text": "#0F1222",
+      "text-2": "#3A4055",
+      "muted": "#5D6478",
+      "accent": "#4F46E5",
+      "accent-strong": "#4F46E5",
+      "accent-ink": "#FFFFFF",
+      "accent-soft": "#EEF0FF",
+      "chart-1": "#8B8FF7",
+      "chart-2": "#5CC8B4",
+      "chart-3": "#F5B83D",
+      "teal": "#115E59",
+      "green": "#166534",
+      "red": "#B91C1C",
+      "amber": "#92400E",
+      "violet": "#5B21B6",
+      "blue": "#1D4ED8",
+      "neutral": "#5D6478"
+    },
+    "dark": {
+      "bg": "#0C0E14",
+      "surface": "#151821",
+      "surface-2": "#1A1E29",
+      "surface-3": "#222734",
+      "border": "#252A37",
+      "border-strong": "#353B4B",
+      "text": "#ECEEF5",
+      "text-2": "#C3C8D6",
+      "muted": "#969DB0",
+      "accent": "#A5A8FF",
+      "accent-strong": "#5B5BEA",
+      "accent-ink": "#0C0E14",
+      "accent-soft": "#23264A",
+      "chart-1": "#7C80F0",
+      "chart-2": "#3FBFA9",
+      "chart-3": "#E9A93A",
+      "teal": "#5EEAD4",
+      "green": "#4ADE80",
+      "red": "#FF8A80",
+      "amber": "#F5B84B",
+      "violet": "#C4B5FD",
+      "blue": "#93B4FF",
+      "neutral": "#A1A8B8"
+    }
+  },
+  "status": {
+    "note": "Status is never colour alone: every tone pairs an icon with a label.",
+    "green": {
+      "icon": "check",
+      "sf": "checkmark.circle.fill"
+    },
+    "blue": {
+      "icon": "shield",
+      "sf": "shield.fill"
+    },
+    "violet": {
+      "icon": "globe",
+      "sf": "globe"
+    },
+    "amber": {
+      "icon": "alert",
+      "sf": "exclamationmark.triangle.fill"
+    },
+    "red": {
+      "icon": "x",
+      "sf": "xmark.octagon.fill"
+    },
+    "neutral": {
+      "icon": "help",
+      "sf": "questionmark.circle"
+    }
+  }
+}

@@ -11,7 +11,7 @@ struct StatusLine: View {
     var body: some View {
         if let s = model.status {
             HStack(spacing: 8) {
-                Circle().fill(s.coverage.tone.color(p)).frame(width: 8, height: 8).accessibilityHidden(true)
+                Image(systemName: s.coverage.symbol).foregroundStyle(s.coverage.tone.color(p)).accessibilityHidden(true)
                 Text(s.coverage.label).font(.callout.weight(.semibold))
                 Text("·").foregroundStyle(p.muted)
                 Text(s.installed.map { "Policy r\($0.revision) \($0.policyName)" } ?? "No signed policy (observing)").font(.callout).foregroundStyle(p.text2)
@@ -20,8 +20,8 @@ struct StatusLine: View {
                 Spacer()
             }
             .padding(.horizontal, 14)
-            .padding(.vertical, 9)
-            .moatGlass(in: Capsule())
+            .padding(.vertical, 10)
+            .moatGlass(in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             .accessibilityElement(children: .combine)
         }
     }
@@ -34,10 +34,9 @@ struct AppsScreen: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            if !heroShown {
-                ScreenHeader(eyebrow: "This computer", title: model.status.map { OverviewHero.headline($0) } ?? "Waiting for the filter", dim: "Apps by the identity macOS reports. A name alone is never identity.")
-            }
+            ScreenHeader(eyebrow: "This computer", title: model.status.map { OverviewHero.headline($0) } ?? "Waiting for the filter", dim: "Apps by the identity macOS reports. A name alone is never identity.")
             StatusLine(model: model)
+            OverviewBento(model: model)
             FirstTenMinutesCard(model: model)
             let apps = model.apps
             if apps.isEmpty {
@@ -51,6 +50,63 @@ struct AppsScreen: View {
                     ForEach(apps) { a in
                         Button { model.open(app: a.id) } label: { AppTile(app: a) }.buttonStyle(.plain)
                     }
+                }
+            }
+        }
+    }
+}
+
+/// The overview bento above the apps: coverage, counters, capabilities proven, the recent-flow strip and the apps
+/// with the most blocked flows. Every value is a model field (status counters, capability rows, flow records).
+struct OverviewBento: View {
+    @ObservedObject var model: AppModel
+    @Environment(\.palette) private var p
+
+    var body: some View {
+        if let s = model.status {
+            let recent = Array(model.flows.sorted { $0.facts.at < $1.facts.at }.suffix(48))
+            let supported = s.capabilities.filter { $0.support == .supported }.count
+            let ranked = Array(model.apps.filter { $0.blocked > 0 }.sorted { $0.blocked > $1.blocked }.prefix(3))
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(alignment: .top, spacing: 14) {
+                    OverviewHero(status: s)
+                    KpiTile(label: "Flows seen", symbol: "arrow.left.arrow.right", tone: .blue, value: "\(s.flowsSeen)", sub: "since the filter started")
+                    KpiTile(label: "Blocked", symbol: "xmark", tone: .red, value: "\(s.flowsDenied)", sub: "before data was sent")
+                    KpiTile(label: "Supported here", symbol: "checkmark.seal", tone: .accent, value: "\(supported)", unit: "/ \(s.capabilities.count)", sub: "capabilities supported") {
+                        ProgressRing(value: supported, total: s.capabilities.count, tone: .green, size: 44, lineWidth: 6, showsText: false)
+                    }
+                }
+                .fixedSize(horizontal: false, vertical: true)
+                HStack(alignment: .top, spacing: 14) {
+                    Card {
+                        SectionTitle(text: "Recent flows", trailing: recent.isEmpty ? nil : "\(recent.count) most recent · oldest first")
+                        if recent.isEmpty {
+                            Text("Flows appear the moment the filter reports one.").font(.callout).foregroundStyle(p.text2)
+                        } else {
+                            FlowStrip(records: recent)
+                            HStack(spacing: 16) {
+                                LegendItem(color: p.chart2, text: "allowed")
+                                LegendItem(color: p.chart1, text: "observed (permitted)")
+                                LegendItem(color: p.red, text: "blocked")
+                            }
+                        }
+                    }
+                    Card {
+                        HStack(spacing: 6) {
+                            Image(systemName: "trophy.fill").foregroundStyle(p.amber).accessibilityHidden(true)
+                            SectionTitle(text: "Most blocked")
+                        }
+                        if ranked.isEmpty {
+                            Text("Nothing blocked in the recorded flows.").font(.callout).foregroundStyle(p.text2)
+                        } else {
+                            VStack(spacing: 2) {
+                                ForEach(Array(ranked.enumerated()), id: \.offset) { item in
+                                    RankedRow(rank: item.offset + 1, title: item.element.name, detail: item.element.destinations.first(where: { $0.blocked > 0 }).map { "\($0.host):\($0.port)" } ?? (item.element.teamID.map { "Team \($0)" } ?? "identity not reported"), value: "\(item.element.blocked)", valueSub: "of \(item.element.flows)")
+                                }
+                            }
+                        }
+                    }
+                    .frame(width: 320)
                 }
             }
         }
@@ -399,6 +455,6 @@ public struct LocalRuleSheet: View {
         .frame(width: 620, alignment: .topLeading)
         .background(p.bg)
         .environment(\.palette, p)
-        .tint(p.accent)
+        .tint(p.accentStrong)
     }
 }

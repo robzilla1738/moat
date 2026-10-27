@@ -29,6 +29,7 @@ export function useRoute(): [string[], (to: string) => void] {
 
 const NAV: { key: string; label: string; icon: IconName; mobile: boolean }[] = [
   { key: "", label: "Apps", icon: "apps", mobile: true },
+  { key: "overview", label: "Overview", icon: "grid", mobile: false },
   { key: "activity", label: "Activity", icon: "activity", mobile: true },
   { key: "sessions", label: "Tasks", icon: "sessions", mobile: true },
   { key: "rules", label: "Rules", icon: "rules", mobile: true },
@@ -41,14 +42,34 @@ const navLabel = (key: string, label: string, deviceCount: number) => (key === "
 /** The phone tab bar has room for one word per tab: "Computer" there, "This computer" everywhere else. */
 const tabLabel = (key: string, label: string, deviceCount: number) => (key === "devices" && deviceCount === 1 ? "Computer" : label);
 
+/**
+ * Appearance follows the system (prefers-color-scheme, live) until the owner picks one with the toggle; that choice
+ * persists in localStorage ("moat.theme") and wins from then on.
+ */
 function useTheme(): [string, () => void] {
-  const [theme, setTheme] = useState(() => (typeof window === "undefined" ? "dark" : localStorage.getItem("moat.theme") ?? (window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark")));
+  const system = () => (typeof window !== "undefined" && window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+  const [chosen, setChosen] = useState<string | null>(() => (typeof window === "undefined" ? null : localStorage.getItem("moat.theme")));
+  const [sys, setSys] = useState(system);
+  useEffect(() => {
+    const m = window.matchMedia?.("(prefers-color-scheme: dark)");
+    if (!m) return;
+    const on = () => setSys(system());
+    m.addEventListener("change", on);
+    return () => m.removeEventListener("change", on);
+  }, []);
+  const theme = chosen === "light" || chosen === "dark" ? chosen : sys;
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
-    localStorage.setItem("moat.theme", theme);
-    document.querySelector('meta[name="theme-color"]')?.setAttribute("content", theme === "light" ? "#f6f7f9" : "#0a0b0d");
+    document.querySelectorAll('meta[name="theme-color"]').forEach((m) => m.setAttribute("content", theme === "light" ? "#FFFFFF" : "#151821"));
   }, [theme]);
-  return [theme, () => setTheme((t) => (t === "light" ? "dark" : "light"))];
+  return [
+    theme,
+    () => {
+      const next = theme === "light" ? "dark" : "light";
+      localStorage.setItem("moat.theme", next);
+      setChosen(next);
+    },
+  ];
 }
 
 /** `#/r/<ref>`: an opaque notification reference resolves to exactly one incident, or to nothing. */
@@ -96,6 +117,9 @@ function StatusBanner() {
   if (mode === "demo")
     return (
       <div className="mode-banner mode-demo" role="status">
+        <span className="mode-icon" aria-hidden>
+          <Icon name="info" size={16} />
+        </span>
         <strong>Sample data.</strong> Nothing here describes your devices, and actions send nothing.
         {!demoOnly && (
           <button type="button" className="link-btn" onClick={signOut}>
@@ -109,6 +133,9 @@ function StatusBanner() {
   if (status === "unreachable" || status === "unauthorized" || age > SNAPSHOT_STALE_AFTER_MS)
     return (
       <div className="mode-banner mode-stale" role="alert">
+        <span className="mode-icon" aria-hidden>
+          <Icon name="alert" size={16} />
+        </span>
         <strong>{status === "unauthorized" ? "Signed out by the controller." : "Not current."}</strong> {error ?? "Updates stopped."} Showing what the controller reported {ago(data.fetchedAt)}; actions are paused.
         <button type="button" className="link-btn" onClick={() => void refresh()}>
           Retry
@@ -225,7 +252,7 @@ function Shell() {
             <span className="mono">rev {data.policyRevision}</span>
             <span className="muted">{mode === "demo" ? "sample data" : `live · ${data.viewer?.role ?? "?"}`}</span>
           </div>
-          <button type="button" className="icon-btn" onClick={toggle} aria-label="Toggle theme">
+          <button type="button" className="icon-btn" onClick={toggle} aria-label={theme === "light" ? "Switch to dark appearance" : "Switch to light appearance"} aria-pressed={theme === "dark"}>
             <Icon name={theme === "light" ? "moon" : "sun"} />
           </button>
         </div>
@@ -243,7 +270,7 @@ function Shell() {
                 Sign out
               </button>
             )}
-            <button type="button" className="icon-btn" onClick={toggle} aria-label="Toggle theme">
+            <button type="button" className="icon-btn" onClick={toggle} aria-label={theme === "light" ? "Switch to dark appearance" : "Switch to light appearance"} aria-pressed={theme === "dark"}>
               <Icon name={theme === "light" ? "moon" : "sun"} />
             </button>
           </div>
@@ -274,19 +301,19 @@ function Shell() {
   );
 }
 
-export function Logo() {
+/** The Moat mark: a keep inside a moat ring that opens only below the gate (brand/moat-mark.svg). */
+export function Logo({ size = 28 }: { size?: number }) {
   const gid = `lg-${useId().replace(/:/g, "")}`;
   return (
-    <svg width="26" height="26" viewBox="0 0 32 32" aria-hidden className="logo">
+    <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden className="logo">
       <defs>
-        <linearGradient id={gid} x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0" stopColor="var(--accent-2)" />
-          <stop offset="1" stopColor="var(--accent)" />
+        <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
+          <stop offset=".45" stopColor="var(--accent)" />
+          <stop offset="1" stopColor="var(--teal)" />
         </linearGradient>
       </defs>
-      <rect x="1" y="1" width="30" height="30" rx="9" fill={`url(#${gid})`} />
-      <path d="M7 21.5c2.2 0 2.2-1.6 4.5-1.6s2.3 1.6 4.5 1.6 2.3-1.6 4.5-1.6 2.3 1.6 4.5 1.6" fill="none" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" opacity=".95" />
-      <path d="M10 17V10.5l2 1.2 2-1.2 2 1.2 2-1.2 2 1.2 2-1.2V17" fill="none" stroke="#fff" strokeWidth="1.8" strokeLinejoin="round" strokeLinecap="round" />
+      <path fill={`url(#${gid})`} d="M10.55 20.73A8.85 8.85 0 1 1 13.45 20.73V22.65A10.75 10.75 0 1 0 10.55 22.65Z" />
+      <path fill="var(--accent)" fillRule="evenodd" d="M7.2 5.6h2.2v1.7h1.5V5.6h2.2v1.7h1.5V5.6h2.2V18H7.2Zm3.35 12.4v-3.6a1.45 1.45 0 0 1 2.9 0V18Z" />
     </svg>
   );
 }

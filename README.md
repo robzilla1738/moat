@@ -1,5 +1,7 @@
 <div align="center">
 
+<picture><source media="(prefers-color-scheme: dark)" srcset="brand/moat-mark-dark.svg"><img src="brand/moat-mark-light.svg" alt="Moat mark: a keep inside a moat ring that opens only below the gate" width="76" height="76"></picture>
+
 # Moat
 
 **Understand and control what software can send from your devices,<br>with stronger boundaries for the workloads you choose to protect.**
@@ -12,10 +14,18 @@ machines, enforced locally on each device, coordinated by an optional controller
 
 </div>
 
-<p align="center">
-  <img src="docs/screenshots/macos-overview-dark.png" alt="Moat for macOS: the Liquid Glass overview window, demo data" width="880">
-</p>
-<p align="center"><sub>The macOS app on macOS 26, captured from the real app window on the CI runner in demo mode (no signed install).</sub></p>
+<table>
+<tr>
+<td colspan="2"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/desktop-home-dark.png"><img src="docs/screenshots/desktop-home-light.png" alt="Moat web dashboard on desktop: apps, coverage, blocked and most-active cards (demo data)"></picture></td>
+</tr>
+<tr>
+<td width="64%"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/macos-apps-dark.png"><img src="docs/screenshots/macos-apps-light.png" alt="Moat for macOS: overview bento with coverage, counters, recent flows and most-blocked apps (demo data)"></picture></td>
+<td><picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/mobile-overview-dark.png"><img src="docs/screenshots/mobile-overview-light.png" alt="Moat on a phone: overview with KPI tiles and decisions (demo data)"></picture></td>
+</tr>
+<tr>
+<td colspan="2" align="center"><sub><b>CI captures on demo data, not real devices.</b> Each image follows your GitHub light or dark theme; both versions of every screen are in <a href="docs/screenshots">docs/screenshots</a> (desktop web: <a href="docs/screenshots/desktop-home-light.png">light</a> · <a href="docs/screenshots/desktop-home-dark.png">dark</a>; Mac: <a href="docs/screenshots/macos-apps-light.png">light</a> · <a href="docs/screenshots/macos-apps-dark.png">dark</a>; phone: <a href="docs/screenshots/mobile-overview-light.png">light</a> · <a href="docs/screenshots/mobile-overview-dark.png">dark</a>).</sub></td>
+</tr>
+</table>
 
 > **Read this first.** Moat is an **experimental build**. Nothing is supported on real devices: no claim is
 > `supported_installed`, and every result so far comes from GitHub CI runners or unit tests. The Linux
@@ -61,37 +71,39 @@ A launcher that only adds a label is an *instrumented* session, not a protected 
 
 <table>
 <tr>
-<td width="58%"><img src="docs/screenshots/macos-activity-light.png" alt="macOS Activity, light"></td>
-<td><img src="docs/screenshots/macos-menubar-dark.png" alt="macOS menu bar extra, dark"></td>
+<td width="58%"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/macos-activity-dark.png"><img src="docs/screenshots/macos-activity-light.png" alt="macOS Activity"></picture></td>
+<td><picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/macos-menubar-dark.png"><img src="docs/screenshots/macos-menubar-light.png" alt="macOS menu bar extra"></picture></td>
 </tr>
 <tr>
 <td><sub><b>macOS Activity.</b> Blocked flows say <i>blocked before data was sent</i>; observed flows are never called allowed; bytes appear only when macOS reported them.</sub></td>
 <td><sub><b>Menu bar extra.</b> Coverage at a glance, recent blocks, and Isolate this Mac behind a second explicit confirmation. Turning isolation off still needs the typed phrase in Recovery.</sub></td>
 </tr>
 <tr>
-<td><img src="docs/screenshots/macos-onboarding-light.png" alt="macOS first-run onboarding: what Moat can claim"></td>
-<td><img src="docs/screenshots/mobile-allow-once-dark.png" alt="Phone: allow once for this session"></td>
+<td><picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/desktop-overview-dark.png"><img src="docs/screenshots/desktop-overview-light.png" alt="Web overview: flows by verdict, blocked hour by hour, when traffic happens, evidence age"></picture></td>
+<td><picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/mobile-allow-once-dark.png"><img src="docs/screenshots/mobile-allow-once-light.png" alt="Phone: allow once for this session"></picture></td>
 </tr>
 <tr>
-<td><sub><b>First-run onboarding.</b> Starts with what Moat can and cannot claim on this Mac, then walks through extension approval, the content filter and adding your signer key (you add it; the app only reads it).</sub></td>
+<td><sub><b>Overview.</b> Hourly rollups by verdict, blocked attempts per hour, each device's evidence age against the 10-minute freshness limit, and endpoint receipts for the latest revision. Every chart is drawn from recorded fields; demo charts are tagged <i>Sample data</i>.</sub></td>
 <td><sub><b>Phone web UI.</b> "Allow once for this session" is bound to the incident, policy revision and session instance; stale approvals are rejected.</sub></td>
 </tr>
 <tr>
-<td><img src="docs/screenshots/desktop-rules-dark.png" alt="Fleet rules"></td>
-<td><img src="docs/screenshots/mobile-home-dark.png" alt="Phone home"></td>
+<td><picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/desktop-rules-dark.png"><img src="docs/screenshots/desktop-rules-light.png" alt="Fleet rules"></picture></td>
+<td><picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/macos-onboarding-dark.png"><img src="docs/screenshots/macos-onboarding-light.png" alt="macOS first-run onboarding: what Moat can claim"></picture></td>
 </tr>
 <tr>
 <td><sub><b>Rules.</b> Every revision shows its diff, who authorized it, per-device delivery state, and what each platform had to leave out.</sub></td>
-<td><sub><b>Home.</b> Which devices are covered, what is blocked, what needs a decision.</sub></td>
+<td><sub><b>First-run onboarding.</b> Starts with what Moat can and cannot claim on this Mac, then walks through extension approval, the content filter and adding your signer key (you add it; the app only reads it).</sub></td>
 </tr>
 </table>
 
-**About these images.** The `macos-*.png` files are captured from the real Moat app window (`screencapture -l`) on
-GitHub's `macos-26` runner, built unsigned with Xcode 26 and launched with `--demo`, so the data comes from the demo
-client backed by the real `ControlHandler`, not from a running content filter
-([`macos/scripts/capture-screenshots.sh`](macos/scripts/capture-screenshots.sh)). The window height is limited by the
-runner's small display. The phone and desktop images are the fleet web UI rendered in CI from its demo build. More in
-[docs/screenshots](docs/screenshots).
+**About these images.** They are CI captures on demo data, not real devices. The `macos-*.png` files are captured from
+the real Moat app window (`screencapture -l`) on GitHub's `macos-26` runner, built unsigned with Xcode 26 and launched
+with `--demo`, so the data comes from the demo client backed by the real `ControlHandler`, not from a running content
+filter ([`macos/scripts/capture-screenshots.sh`](macos/scripts/capture-screenshots.sh)). The window height is limited
+by the runner's small display. The phone and desktop images are the fleet web UI rendered by Playwright from its demo
+build ([`web/scripts/screenshots.mjs`](web/scripts/screenshots.mjs)), which also fails CI on overflow, clipped text or
+an AA contrast violation; `live-*.png` come from the browser tests against a real controller on the CI runner. The
+design system is in [docs/design.md](docs/design.md). More in [docs/screenshots](docs/screenshots).
 
 ## What's in this build
 

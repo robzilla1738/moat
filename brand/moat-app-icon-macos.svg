@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <title>Moat</title>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#8A8DF8"/><stop offset=".55" stop-color="#5B5BEA"/><stop offset="1" stop-color="#4338CA"/></linearGradient>
+    <linearGradient id="hl" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".22"/><stop offset=".5" stop-color="#fff" stop-opacity="0"/></linearGradient>
+    <linearGradient id="water" x1="0" y1="0" x2="0" y2="1"><stop offset=".5" stop-color="#FFFFFF"/><stop offset="1" stop-color="#7FE9D8"/></linearGradient>
+  </defs>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#bg)"/>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#hl)"/>
+  <g transform="translate(242.0 242.0) scale(22.5)">
+    <path fill="url(#water)" d="M10.55 20.73A8.85 8.85 0 1 1 13.45 20.73V22.65A10.75 10.75 0 1 0 10.55 22.65Z"/>
+    <path fill="#FFFFFF" fill-rule="evenodd" d="M7.2 5.6h2.2v1.7h1.5V5.6h2.2v1.7h1.5V5.6h2.2V18H7.2Zm3.35 12.4v-3.6a1.45 1.45 0 0 1 2.9 0V18Z"/>
+  </g>
+</svg>

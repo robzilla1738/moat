@@ -3,10 +3,11 @@
  * Live mode reads the controller's evidence views; demo mode says plainly that sample data has no live view.
  */
 import { useEffect, useState, type ReactNode } from "react";
-import { Badge, Card, Empty, Icon, Ident, SectionTitle, SubNav } from "../components/ui";
+import { Badge, Card, CoverageBadge, DeviceIcon, Empty, Icon, Ident, SectionTitle, SubNav } from "../components/ui";
+import { Kpi, Ring, SampleTag, Spark } from "../components/charts";
 import { useData, useFreshness, useStore } from "../data/store";
 import type { App, AppDetailView, DiagnosticsView, WhatChangedView } from "../data/types";
-import { ago } from "../format";
+import { ago, compact } from "../format";
 import { DecisionCard } from "./Activity";
 
 function useLive<T>(path: string | null): { data: T | null; error: string | null; loading: boolean } {
@@ -38,7 +39,9 @@ export function StatusLine() {
   const newest = data.devices.map((d) => d.lastSeen).filter((x): x is string => !!x).sort().at(-1);
   return (
     <div className="status-line" role="status">
-      <span className={`status-dot ${gaps ? "tone-amber" : "tone-green"}`} />
+      <span className={gaps ? "tone-text-icon tone-amber" : "tone-text-icon tone-green"} aria-hidden>
+        <Icon name={gaps ? "alert" : "check"} size={16} />
+      </span>
       <span>
         {data.devices.length === 1 ? (enforced ? "Enforcing on this computer" : `This computer: ${devs[0]!.f.coverage}`) : `${enforced}/${data.devices.length} devices enforcing`}
         {gaps > 0 && <strong> · {gaps} not confirmed</strong>}
@@ -89,25 +92,128 @@ export function AppCard({ a, go }: { a: App; go: (to: string) => void }) {
   );
 }
 
-/** Landing: Apps is the primary workspace. Decisions that need the owner come first; a quiet day says so. */
+/** Blocked count for an app from fields it already carries: live evidence counts, else per-destination deny counts. */
+function appBlocked(a: App) {
+  return a.counts ? a.counts.denied : a.destinations.filter((d) => d.verdict === "deny").reduce((n, d) => n + d.count, 0);
+}
+function appFlows(a: App) {
+  return a.counts ? a.counts.flows : a.destinations.reduce((n, d) => n + d.count, 0);
+}
+
+/**
+ * Landing: Apps is the primary workspace, laid out as a bento grid on wide screens and one column on a phone.
+ * Decisions that need the owner come first; a quiet day says so. Every figure comes from the snapshot.
+ */
 export function AppsHome({ go }: { go: (to: string) => void }) {
   const data = useData();
+  const fresh = useFreshness();
   const [q, setQ] = useState("");
   const decisions = data.incidents.filter((i) => i.state === "open" && i.kind === "blocked_connection" && i.sessionId);
   const list = data.apps.filter((a) => (a.name + a.family + a.exe + a.category).toLowerCase().includes(q.toLowerCase()));
+  const devs = data.devices.map((d) => ({ d, f: fresh(d) }));
+  const enforcing = devs.filter((x) => x.f.coverage === "enforced" || x.f.coverage === "protected-session").length;
+  const t = data.timeline;
+  const blocked = t.reduce((s, p) => s + p.blocked, 0);
+  const flows = t.reduce((s, p) => s + p.allowed + p.observed + p.blocked, 0);
+  const leaders = [...data.apps].map((a) => ({ a, n: appFlows(a), blocked: appBlocked(a) })).filter((x) => x.n > 0).sort((x, y) => y.n - x.n).slice(0, 4);
   return (
-    <div className="page">
+    <div className="page page-wide">
       <StatusLine />
       <div className="page-head">
         <h1>{decisions.length ? `${decisions.length} ${decisions.length === 1 ? "decision" : "decisions"} waiting.` : "All quiet."}</h1>
         <p className="lede">Apps on {data.devices.length === 1 ? "this computer" : "your devices"}, by executable identity. A name alone is never identity; unknown identity stays visible.</p>
       </div>
+
+      <div className="bento bento-stretch">
+        <Card className="b-4 coverage-card">
+          <div className="card-head">
+            <h2>Enforcing</h2>
+            <a href="#/devices" className="link">
+              {data.devices.length === 1 ? "This computer" : "Devices"}
+            </a>
+          </div>
+          <div className="coverage-top">
+            <Ring value={enforcing} total={data.devices.length} size={64} stroke={7} label={`${enforcing} of ${data.devices.length} enforcing`}>
+              <text x="32" y="37" textAnchor="middle" className="ring-text">
+                {enforcing}/{data.devices.length}
+              </text>
+            </Ring>
+            <div className="small muted">
+              {data.devices.length === 1 ? "This computer, from its last report." : `${enforcing} of ${data.devices.length} devices enforce policy now, from each device's last report.`}
+            </div>
+          </div>
+          <ul className="dev-list">
+            {devs.slice(0, 4).map(({ d, f }) => (
+              <li key={d.id}>
+                <a href={`#/devices/${encodeURIComponent(d.id)}`}>
+                  <DeviceIcon d={d} size={16} />
+                  <span className="ellipsis">
+                    <Ident value={d.name} />
+                  </span>
+                </a>
+                <CoverageBadge c={f.coverage} />
+              </li>
+            ))}
+          </ul>
+          {devs.length > 4 && (
+            <a href="#/devices" className="link small">
+              {devs.length - 4} more
+            </a>
+          )}
+        </Card>
+        <div className="b-4 bento-col bento-kpis-col">
+          <Card className="kpi-card">
+            <Kpi label="Blocked" icon="x" tone="blocked" value={compact(blocked)} sub={t.length ? `last ${t.length} h` : "no flow history yet"} chart={<Spark values={t.map((p) => p.blocked)} label="Blocked attempts per hour" />} />
+          </Card>
+          <Card className="kpi-card">
+            <Kpi label="Flows seen" icon="activity" tone="observed" value={compact(flows)} sub={t.length ? `last ${t.length} h, all verdicts` : "no flow history yet"} chart={<Spark values={t.map((p) => p.allowed + p.observed + p.blocked)} label="Flows per hour" />} />
+          </Card>
+        </div>
+        <Card className="b-4">
+          <div className="card-head">
+            <h2>
+              <Icon name="trophy" size={16} /> Most active
+            </h2>
+            <SampleTag />
+          </div>
+          <div className="qual">
+            <span>Apps</span>
+            <span>
+              <strong>by recorded flows</strong>
+            </span>
+          </div>
+          {leaders.length ? (
+            <ol className="leader">
+              {leaders.map(({ a, n, blocked }, i) => (
+                <li key={a.id}>
+                  <span className="leader-rank">#{i + 1}</span>
+                  <span className="leader-main">
+                    <span className="leader-name">{a.name}</span>
+                    <span className="leader-sub">
+                      <Ident value={[...a.destinations].sort((x, y) => y.count - x.count)[0]?.host ?? a.exe} kind="host" />
+                    </span>
+                  </span>
+                  <span className="leader-value">
+                    {compact(n)}
+                    <small>{blocked ? `${blocked} blocked` : "flows"}</small>
+                  </span>
+                </li>
+              ))}
+            </ol>
+          ) : (
+            <div className="muted small">No app activity recorded yet.</div>
+          )}
+        </Card>
+      </div>
+
       {decisions.length > 0 && (
         <>
           <SectionTitle action={<a href="#/activity" className="link">All activity</a>}>Needs a decision</SectionTitle>
-          <div className="stack">
+          <div className="bento">
             {decisions.slice(0, 2).map((i) => (
-              <DecisionCard key={i.id} incident={i} go={go} />
+              <div key={i.id} className="b-6">
+                <DecisionCard incident={i} go={go} />
+              </div>
             ))}
           </div>
         </>
@@ -122,7 +228,7 @@ export function AppsHome({ go }: { go: (to: string) => void }) {
           {data.apps.length ? null : "Apps appear here once an endpoint reports a connection. Nothing is shown before there is evidence."}
         </Empty>
       ) : (
-        <div className="stack">
+        <div className="apps-grid">
           {list.map((a) => (
             <AppCard key={a.id} a={a} go={go} />
           ))}
@@ -131,6 +237,7 @@ export function AppsHome({ go }: { go: (to: string) => void }) {
     </div>
   );
 }
+
 
 const HOW: Record<string, string> = { direct: "names this app", inherited: "applies to every app", session: "inside protected sessions", temporary: "temporary grant" };
 

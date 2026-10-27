@@ -76,12 +76,10 @@ struct OverviewScreen: View {
 
 }
 
-/// Full-bleed status hero at the top of Overview. Its artwork extends under the floating glass sidebar on macOS 26
-/// (`backgroundExtensionEffect`); the text sits on an opaque-enough scrim for contrast.
+/// The coverage status card at the head of the overview bento: icon, label and the claim that level supports.
+/// `headline` is the one-line summary used by the screen header.
 struct OverviewHero: View {
     @Environment(\.palette) private var p
-    @Environment(\.colorScheme) private var scheme
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let status: StatusReport
 
     static func headline(_ s: StatusReport) -> String {
@@ -98,38 +96,26 @@ struct OverviewHero: View {
 
     var body: some View {
         let tone = status.coverage.tone.color(p)
-        ZStack(alignment: .bottomLeading) {
-            ZStack {
-                LinearGradient(colors: [tone.opacity(scheme == .dark ? 0.55 : 0.38), p.accent.opacity(0.42), p.accent2.opacity(0.30)],
-                               startPoint: .topLeading, endPoint: .bottomTrailing)
-                Image(systemName: status.coverage.symbol)
-                    .font(.system(size: 230, weight: .ultraLight))
-                    .foregroundStyle(.white.opacity(scheme == .dark ? 0.08 : 0.18))
-                    .offset(x: 340, y: 30)
-                    .accessibilityHidden(true)
-            }
-            .moatBackgroundExtension()
-            LinearGradient(colors: [.clear, p.bg.opacity(scheme == .dark ? 0.75 : 0.6)], startPoint: .top, endPoint: .bottom)
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 8) {
-                Label {
-                    Text("This Mac · \(status.coverage.label)")
-                } icon: {
-                    Image(systemName: status.coverage.symbol).moatPulse(status.coverage == .isolated, reduceMotion: reduceMotion)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous).fill(tone.opacity(0.14)).frame(width: 36, height: 36)
+                    Image(systemName: status.coverage.symbol).font(.body.weight(.semibold)).foregroundStyle(tone)
                 }
-                .font(.headline)
-                .foregroundStyle(p.text)
-                Text(Self.headline(status)).font(.system(.largeTitle, design: .rounded).weight(.heavy)).foregroundStyle(p.text)
-                    .accessibilityAddTraits(.isHeader)
-                Text(status.coverage.claim).font(.title3).foregroundStyle(p.text2).fixedSize(horizontal: false, vertical: true)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("This Mac").font(.caption.weight(.semibold)).foregroundStyle(p.muted)
+                    Text(status.coverage.label).font(.headline).foregroundStyle(p.text)
+                }
             }
-            .padding(.horizontal, 32)
-            .padding(.bottom, 26)
-            .frame(maxWidth: 1040, alignment: .leading)
+            Text(status.coverage.claim).font(.callout).foregroundStyle(p.text2).fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+            Text(status.installed.map { "Policy r\($0.revision) · \($0.policyName)" } ?? "No signed policy (observing)")
+                .font(.caption).foregroundStyle(p.muted).lineLimit(2)
         }
-        .frame(height: 250)
-        .frame(maxWidth: .infinity)
-        .clipped()
+        .padding(16)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(p.surface))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(p.border, lineWidth: 1))
         .accessibilityElement(children: .combine)
     }
 }
