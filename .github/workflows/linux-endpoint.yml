@@ -36,3 +36,17 @@ jobs:
         run: sudo ./target/debug/moatd capabilities
       - name: netns enforcement test (nftables + cgroup v2 + moat-launch)
         run: sudo REQUIRE_NFT=1 linux/tests/netns-enforcement.sh target/debug
+
+  installed:
+    name: installed systemd unit (W11)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install nftables, jq
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq nftables jq
+      - name: Build
+        run: cargo build -p moatd -p moatctl
+      - name: Packaged unit under systemd, real user, real home
+        run: sudo linux/tests/installed-unit.sh target/debug
