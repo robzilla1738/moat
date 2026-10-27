@@ -111,7 +111,7 @@ jobs:
           sha256sum -- * > /tmp/SHA256SUMS && mv /tmp/SHA256SUMS SHA256SUMS
           cat SHA256SUMS
           { echo '### Release assets'; echo '```'; cat SHA256SUMS; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
-      - name: drill (integrity, unsigned build): checksums and negative control
+      - name: "drill (integrity, unsigned build): checksums and negative control"
         run: release/recovery-drill.sh integrity dist
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -144,7 +144,7 @@ jobs:
         run: |
           cp "${{ steps.attest.outputs.bundle-path }}" dist/provenance.sigstore.json
           cosign sign-blob --yes --bundle dist/SHA256SUMS.sigstore.json dist/SHA256SUMS
-      - name: drill (integrity, signed build): checksums, signature, attestations, negative controls
+      - name: "drill (integrity, signed build): checksums, signature, attestations, negative controls"
         env:
           GH_TOKEN: ${{ github.token }}
           MOAT_DRILL_REQUIRE_SIGNATURES: "1"
