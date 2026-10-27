@@ -34,6 +34,21 @@ export function newIssuer(seed: Uint8Array = ed.utils.randomPrivateKey()): Issue
   return { seedHex: bytesToHex(seed), publicHex, keyId: keyIdOf(publicHex), delegation: null };
 }
 
+/** Canonical JSON (contracts/README.md): sorted keys, no whitespace, absent optional fields omitted. */
+export function canonicalJson(v: unknown): string {
+  if (v === null || typeof v !== "object") return JSON.stringify(v);
+  if (Array.isArray(v)) return `[${v.map((x) => canonicalJson(x)).join(",")}]`;
+  const o = v as Record<string, unknown>;
+  return `{${Object.keys(o)
+    .filter((k) => o[k] !== undefined)
+    .sort()
+    .map((k) => `${JSON.stringify(k)}:${canonicalJson(o[k])}`)
+    .join(",")}}`;
+}
+
+/** `sha256:` + hex of the canonical form: the digest the signer checks the approval against. */
+export const contractDigest = (v: unknown) => `sha256:${bytesToHex(sha256(utf8ToBytes(canonicalJson(v))))}`;
+
 /** The exact string the signer verifies (crypto.ts grantApprovalString). */
 export const approvalString = (digest: string) => `moat-grant-approval-v1\n${digest}\n`;
 

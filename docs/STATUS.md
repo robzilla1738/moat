@@ -1,7 +1,7 @@
 # Status: claim ledger
 
 Moat is an **experimental build**. Release gate G0 ("truthful experimental build", MASTER_ROADMAP §13) is **not yet
-met**: the open defects below include grant scope loss in the controller path. Until they are closed, treat every protection below as
+met**: the open defects below include packaged systemd restrictions that break launched coding workloads. Until they are closed, treat every protection below as
 unproven outside the environment named next to it.
 
 The machine-readable source is [`claim-ledger.json`](claim-ledger.json). A test
@@ -40,7 +40,7 @@ real-workflow evidence, if a claim cites a defect that does not exist, or if thi
 | `core.diff.broadening` | implemented_unproven | semantic | unit | pass (local, W02) | Conservative structured diff + differential counterexample search; signer should parse structured `changes`. |
 | `core.compile.capability-gate` | implemented_unproven | semantic | unit | pass (local, W02) | Profiles capability-checked; Linux backend id collisions rejected. |
 | `core.signing.snapshot` | implemented_unproven | semantic | unit | pass, rust 40493342610 @ d5270bd | Canonical policy digest; effective digest binds overlays. |
-| `core.grant.scope` | implemented_unproven | semantic | unit | pass (local, W03 core) | Core keeps scope end to end; controller adapter pending (Lane B): `D-GRANT-SCOPE-LOSS`, `D-GRANT-IDEMPOTENCY`. |
+| `core.grant.scope` | implemented_unproven | semantic | unit | pass (W03 core + controller/signer CI) | Controller plans `moat.grant.v1`, signer compiles with `moatctl compile --grants` and decides from `diff.changes[]`; process grants refused; Linux app grants reported not_enforceable. No installed endpoint has applied a grant yet. |
 | `linux.session.direct-egress` | implemented_unproven | native_ci | ci-ubuntu-26.04-x86_64 | pass, linux-endpoint 40493342431 @ d5270bd | Script-run as root, not the installed unit; `D-SYSTEMD-WORKSPACE`. |
 | `linux.session.launch-authority` | implemented_unproven | native_ci | ci-ubuntu-26.04-x86_64 | pass, linux-endpoint 40534200207 @ adca7c2 | Kernel-attested callers; contained caller limited to its own profile. Not via the installed unit; external brokers (docker, ssh-agent) outside the claim. |
 | `linux.session.hostname-proxy` | implemented_unproven | native_ci | ci-ubuntu-26.04-x86_64 | pass, linux-endpoint 40537109945 @ 48f8ee5 | Authorize-before-DNS; streams end at expiry (1.15 s), deny (0.80 s), task close, isolation, daemon stop ([contract](proxy-stream-contract.md)); not the installed unit; domain fronting possible; UDP IP-only. |
@@ -66,8 +66,8 @@ above is updated with the run that proves it.
 | `D-DIFF-UNKNOWN-FIELDS` | Changes to fields the diff does not inspect are not broadening. | W02 | **closed** (W02) |
 | `D-PROFILE-CAPABILITY` | Unsupported restrictive profiles compile and silently fall back. | W02 | **closed** (W02) |
 | `D-DIGEST-CANONICAL` | Digests are not canonical; effective digest excludes overlays. | W01/W03 | **closed** (W03 core) |
-| `D-GRANT-SCOPE-LOSS` | Generated grants lose device and process-generation scope. Core fixed; controller must use `moatctl compile --grants`. | W03 (core done, controller Lane B) | open |
-| `D-GRANT-IDEMPOTENCY` | A retried grant request mints a fresh expiry. Core `GrantLedger` keeps the original; controller must adopt. | W03 (core done, controller Lane B) | open |
+| `D-GRANT-SCOPE-LOSS` | Generated grants lose device and process-generation scope. Core and controller fixed (`moatctl compile --grants`, no controller-rendered rules). | W03 | closed (controller/test/grants.test.ts) |
+| `D-GRANT-IDEMPOTENCY` | A retried grant request mints a fresh expiry. Controller follows `GrantLedger` semantics (same key + same request = original grant; different request = 409). | W03 | closed (controller/test/grants.test.ts) |
 | `D-LAUNCH-AUTHORITY` | A contained caller can request a looser session through the control socket. | W04 | **closed** (W04, netns run 40534200207) |
 | `D-PROXY-DNS-BEFORE-AUTH` | A denied hostname can be resolved before authorization. | W05 | **closed** (W05, netns run 40537109945) |
 | `D-PROXY-STREAM-LIFETIME` | No stream registry; admission vs stream expiry undefined. | W05 | **closed** (W05, netns run 40537109945) |

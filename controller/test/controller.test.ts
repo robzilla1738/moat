@@ -4,7 +4,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { generateKeyPair, requestString, signB64, token } from "../src/crypto.ts";
-import { Signer } from "../src/signer.ts";
+import { grantProblem, Signer, type GrantV1 } from "../src/signer.ts";
 import { authorize, bootstrap, fixture, HOME, type Fixture } from "./helpers.ts";
 
 function deviceHeaders(seed: ReturnType<typeof generateKeyPair>, deviceId: string, body: string, ts: string, nonce = token(18)) {
@@ -190,11 +190,11 @@ test("allow once for this session: bound to incident, revision, session and owne
   assert.equal(g.authorized_by, "temporary_grant_overlay");
   assert.equal(Date.parse(g.expires_at) - f.clock.t, 8 * 3600_000, "TTL clamped to the maximum");
   const effective = f.c.currentRevision()!.effective_source;
-  const eff = JSON.parse(effective) as { device_groups: Record<string, string[]>; rules: { id: string; selector: { device_groups: string[]; session?: { session_ids: string[] } }; destinations: { cidrs: string[] } }[] };
+  const eff = JSON.parse(effective) as { rules: { id: string; selector: { devices?: string[]; session?: { session_ids: string[] } }; destinations: { cidrs: string[] } }[] };
   const rule = eff.rules.find((r) => r.id.startsWith("grant-"))!;
   assert.deepEqual(rule.selector.session!.session_ids, ["20261026-a1b2"]);
   assert.deepEqual(rule.destinations.cidrs, ["203.0.113.50/32"]);
-  assert.deepEqual(eff.device_groups[rule.selector.device_groups[0]!], ["omarchy"], "scoped to exactly the incident's device");
+  assert.deepEqual(rule.selector.devices, ["omarchy"], "scoped to exactly the incident's device");
   assert.equal((await f.moatctl.validate(effective)).ok, true);
   // the same action again is stale (policy moved to revision 2)
   await assert.rejects(f.c.allowOnce(owner, { incident_id: inc.id, incident_revision: inc.revision, policy_revision: 1 }), /stale: policy/);
@@ -209,19 +209,14 @@ test("allow once for this session: bound to incident, revision, session and owne
 });
 
 test("signer refuses grants that are not bounded, and grant inputs are validated", async () => {
-  const now = new Date("2026-10-26T12:00:00Z");
-  const base = { id: "g", action: "allow", layer: "override", expires_at: "2026-10-26T13:00:00Z", selector: { session: { session_ids: ["s1"] } }, destinations: { cidrs: ["203.0.113.5/32"] }, ports: [443], provenance: { kind: "owner_action", audit_ref: "audit:1" } };
-  assert.equal(Signer.boundedGrant(base, now), null);
-  assert.match(String(Signer.boundedGrant({ ...base, destinations: { cidrs: ["203.0.113.0/24"] } }, now)), /single address/);
-  assert.match(String(Signer.boundedGrant({ ...base, expires_at: "2026-10-28T12:00:00Z" }, now)), /within 24h/);
-  assert.match(String(Signer.boundedGrant({ ...base, selector: {} }, now)), /scoped/);
-  assert.match(String(Signer.boundedGrant({ ...base, destinations: { any: true } }, now)), /exactly one/);
-  assert.match(String(Signer.boundedGrant({ ...base, layer: "explicit" }, now)), /override/);
-  assert.match(String(Signer.boundedGrant({ ...base, selector: { session: { any_protected: true } } }, now)), /every protected session/);
-  assert.match(String(Signer.boundedGrant({ ...base, ports: [] }, now)), /exactly one port/);
-  assert.match(String(Signer.boundedGrant({ ...base, selector: { session: { session_ids: ["s1", "s2"] } } }, now)), /exactly one session/);
-  assert.deepEqual(Signer.grantDevice(base as never, { rules: [] }), { error: "not scoped to exactly one device (reserved moat-grant-* group)" });
-  assert.deepEqual(Signer.grantDevice({ ...base, selector: { device_groups: ["moat-grant-g"], session: { session_ids: ["s1"] } } } as never, { rules: [], device_groups: { "moat-grant-g": ["a", "b"] } }), { error: "device group moat-grant-g must have exactly one member" });
+  const digest = "sha256:" + "1".repeat(64);
+  const g: GrantV1 = { schema: "moat.grant.v1", grant_id: "g", idempotency_key: "k-12345678", scope: { kind: "task", device_id: "omarchy", boot_id: "b1", task_id: "s1" }, destination: { kind: "address", address: "203.0.113.5" }, transport: "tcp", port: 443, issued_at: "2026-10-26T12:00:00Z", not_before: "2026-10-26T12:00:00Z", admission_until: "2026-10-26T13:00:00Z", stream_policy: "admission_only", base_policy_digest: digest, issuer: { principal: "owner:robert", role: "owner" }, approval_digest: digest };
+  assert.equal(grantProblem(g, digest), null);
+  assert.match(String(grantProblem({ ...g, scope: { kind: "process_instance", device_id: "omarchy", boot_id: "b1", process: { pid: 1, start_generation: 2 } } }, digest)), /process-scoped grants are unavailable/);
+  assert.match(String(grantProblem({ ...g, admission_until: "2026-10-28T12:00:00Z" }, digest)), /at most 24h/);
+  assert.match(String(grantProblem({ ...g, scope: { kind: "task", device_id: "omarchy", task_id: "s1" } }, digest)), /task and boot/);
+  assert.match(String(grantProblem({ ...g, scope: { kind: "app_on_device", device_id: "omarchy" } }, digest)), /executable/);
+  assert.match(String(grantProblem(g, "sha256:" + "2".repeat(64))), /not the current base policy/);
   const f = fixture();
   await bootstrap(f);
   const owner = f.c.authenticate(f.ownerToken)!;

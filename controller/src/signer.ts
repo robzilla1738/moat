@@ -3,18 +3,22 @@
  *
  * It holds the snapshot signing key and its own list of owner public keys (a file the controller cannot write in a
  * real deployment: run it as the `moat-signer` user with `moat-signer serve`). It never signs bytes the controller
- * hands it. It receives policy *source*, compiles it itself with moatctl, compares it with the last source *it*
- * signed, and decides:
+ * hands it. It receives the base policy *source* plus the temporary grants as `moat.grant.v1` objects, compiles them
+ * itself with `moatctl compile --grants` (the Rust core turns each grant into its exact device/app/task rule and binds
+ * every overlay into `report.effective_digest`), and decides from structured evidence only:
  *
- *   - narrowing or neutral change ................. sign ("narrowing")
- *   - broadening where every broadening item is an exact temporary grant: an override-layer allow, owner_action
- *     provenance, expiring within MAX_GRANT_SECONDS, one address or hostname, one port, scoped to exactly one device
- *     (a reserved `moat-grant-*` device group with one member) and one session/task or one app executable, and
- *       * a delegated issuer (a phone) signed the exact grant plan, within the scope the owner key delegated to it
- *         ........................................................................ sign ("delegated_issuer")
- *       * or, only when this signer was started with controller-attested grants enabled, the controller attests
- *         that an authenticated owner session asked .......................... sign ("temporary_grant_overlay")
- *   - any other broadening ......................... only with a valid owner-key signature over the exact source
+ *   - the base policy is compared with the last base it signed using `moatctl diff`; the decision reads
+ *     `diff.changes[].direction` (W02), never the human `broadening` text. Any `broadening` change needs a valid
+ *     owner-key signature over the exact source.
+ *   - grants are compared by id and authority digest with the last grant set it signed. Removing one only removes
+ *     authority. A new grant must be an exact `moat.grant.v1` (one device, one app or task, one destination, one
+ *     port, at most 24 h, bound to the digest of this base) and be authorized by
+ *       * a delegated issuer (a phone) whose owner-signed delegation covers the grant's kind, device and lifetime and
+ *         who signed this exact grant's digest ............................................ ("delegated_issuer")
+ *       * or, only when this signer was started with MOAT_SIGNER_CONTROLLER_GRANTS=1 (off by default), the
+ *         controller's attestation that an authenticated owner session asked ............ ("temporary_grant_overlay")
+ *   - a grant id cannot be reused with different content, and a removed (revoked) grant cannot be re-added.
+ *   - process-scoped grants are refused: no endpoint enforces a process-generation selector yet.
  *
  * Every signature is journaled by publication id before it is returned, so a controller that lost the reply can
  * recover the same revision instead of minting a conflicting one.
@@ -24,28 +28,44 @@ import { canonicalJson, delegationString, grantApprovalString, keyPairFromSeed, 
 import type { Moatctl } from "./moatctl.ts";
 
 export const MAX_GRANT_SECONDS = 24 * 3600;
-export const GRANT_GROUP_PREFIX = "moat-grant-";
 const JOURNAL_KEEP = 64;
+const CLOCK_SKEW_MS = 15 * 60_000;
 
 export interface OwnerAuthorization { key_id: string; signature: string }
 
-/** The exact grant a person approved (a `moat.grant.v1` record without issuer signature fields). */
-export interface GrantPlan {
+/** `moat.grant.v1` (contracts/schemas/moat.grant.v1.schema.json). Optional fields are omitted, never null. */
+export interface GrantV1 {
   schema: "moat.grant.v1";
   grant_id: string;
   idempotency_key: string;
-  kind: "allow_once" | "temporary";
-  scope: { kind: "task"; device_id: string; boot_id?: string | null; task_id: string } | { kind: "app_on_device"; device_id: string; executable: { path: string } };
+  scope: {
+    kind: "app_on_device" | "process_instance" | "task";
+    device_id: string;
+    boot_id?: string;
+    task_id?: string;
+    process?: { pid: number; start_generation: number };
+    executable?: { path?: string; team_id?: string; signing_id?: string; bundle_id?: string; digest?: string };
+  };
   destination: { kind: "address"; address: string } | { kind: "hostname"; hostname: string };
   transport: "tcp" | "udp";
   port: number;
   issued_at: string;
   not_before: string;
   admission_until: string;
-  stream_policy: "admission_only";
+  stream_policy: "admission_only" | "terminate_at_deadline";
   base_policy_digest: string;
-  incident: { id: string; revision: number } | null;
-  reason: string;
+  issuer: { principal: string; role: "owner" | "delegated"; key_id?: string };
+  approval_digest: string;
+  reason?: string;
+}
+
+/** What the person was shown and approved besides the grant itself. `grant.approval_digest` = digest of this. */
+export interface ApprovalContext {
+  schema: "moat.grant_context.v1";
+  kind: "allow_once" | "temporary";
+  policy_revision: number;
+  requested_by: string;
+  incident?: { id: string; revision: number };
 }
 
 /** Owner-signed delegation of a bounded approval scope to another key (e.g. a phone's browser). */
@@ -60,42 +80,54 @@ export interface Delegation {
   signature: string;
 }
 
-export interface GrantApproval { plan: GrantPlan; delegation: Delegation; issuer_signature: string }
+/** A delegated issuer's signature over one exact grant (`moat-grant-approval-v1\n<grantDigest>\n`). */
+export interface GrantApproval { grant_id: string; context: ApprovalContext; delegation: Delegation; issuer_signature: string }
 
 export interface SignRequest {
   /** Journal key: the same publication id always yields the same signed revision. */
   publicationId?: string;
   /** Proposal or grant id the owner authorized (bound into the authorization). */
   subject: string;
+  /** The reviewed base policy (TOML or JSON). Grants are never rendered into it. */
   source: string;
+  /** Every live temporary grant (W03 overlay), as `moat.grant.v1` objects. */
+  grants?: GrantV1[];
   revision: number;
   rollbackOf?: number | null;
   platforms: ("linux" | "macos" | "dns")[];
   ownerAuthorization?: OwnerAuthorization | null;
-  /** Controller attestation that an authenticated owner session requested a temporary grant (only honored when enabled). */
+  /** Controller attestation that an authenticated owner session requested the new owner-issued grants (only honored when enabled). */
   ownerSessionAttested?: boolean;
-  /** Delegated-issuer approvals of exact grant plans, one per new grant rule. */
+  /** Delegated-issuer approvals, one per new delegated grant. */
   grantApprovals?: GrantApproval[];
   issuedAt: Date;
 }
 export type AuthorizedBy = "narrowing" | "temporary_grant_overlay" | "delegated_issuer" | "owner_key";
-export interface SignResult { revision: number; publication_id: string | null; snapshots: { platform: string; signed: SignedSnapshot; report: unknown }[]; broadening: string[]; authorizedBy: AuthorizedBy; issuers?: string[] }
+export interface SignResult {
+  revision: number;
+  publication_id: string | null;
+  snapshots: { platform: string; signed: SignedSnapshot; report: unknown }[];
+  /** Human summary of what needed authority (display only; the decision used structured fields). */
+  broadening: string[];
+  authorizedBy: AuthorizedBy;
+  issuers?: string[];
+  /** Grant ids carried by this revision, and the core's effective-policy digest (base + overlays + compiler). */
+  grants?: string[];
+  effective_digest?: string | null;
+}
+
+export interface SemanticChange { item: string; kind: string; direction: "broadening" | "narrowing" | "neutral"; fields?: string[]; detail: string }
 
 interface JournalEntry { id: string; revision: number; digest: string; result: SignResult }
-interface SignerState { last_revision: number; last_source: string | null; journal?: JournalEntry[] }
-
-interface RuleJson {
-  id: string;
-  action: string;
-  layer?: string;
-  expires_at?: string;
-  transport?: string;
-  ports?: unknown[];
-  selector?: { apps?: { executable?: string }[]; device_groups?: string[]; users?: unknown[]; ancestors?: unknown[]; session?: { profiles?: string[]; session_ids?: string[]; any_protected?: boolean } };
-  destinations: { hosts?: string[]; cidrs?: string[]; scopes?: unknown[]; sets?: unknown[]; providers?: unknown[]; any?: boolean };
-  provenance: { kind: string; audit_ref?: string };
+interface SignerState {
+  last_revision: number;
+  last_source: string | null;
+  /** grant id → authority digest of every grant in the last signed revision */
+  last_grants?: Record<string, string>;
+  /** grant id → original deadline, for grants removed before their deadline (never re-added) */
+  retired?: Record<string, string>;
+  journal?: JournalEntry[];
 }
-interface PolicyJson { rules: RuleJson[]; device_groups?: Record<string, string[]> }
 
 export class SignerError extends Error {
   status: number;
@@ -105,11 +137,39 @@ export class SignerError extends Error {
   }
 }
 
-export function planDigest(plan: GrantPlan): string {
-  return `sha256:${sha256hex(canonicalJson(plan))}`;
+/** Canonical digest of a contract object (contracts/README.md rule 9): what a delegated issuer signs. */
+export function grantDigest(g: GrantV1): string {
+  return `sha256:${sha256hex(canonicalJson(g))}`;
 }
+/** Authority digest: the grant without its display-only `reason` (Grant::authority_digest). */
+export function authorityDigest(g: GrantV1): string {
+  const { reason: _r, ...rest } = g;
+  return `sha256:${sha256hex(canonicalJson(rest))}`;
+}
+export function contextDigest(c: ApprovalContext): string {
+  return `sha256:${sha256hex(canonicalJson(c))}`;
+}
+/** sha256 policy digest of a normalized policy (`moatctl normalize` output, canonical JSON). */
+export function policyDigest(normalized: unknown): string {
+  return `sha256:${sha256hex(canonicalJson(normalized))}`;
+}
+/** Canonical contract timestamp: UTC, whole seconds. */
+export const contractTime = (d: Date) => d.toISOString().replace(/\.\d{3}Z$/, "Z");
 
-const sameSet = (a: string[] = [], b: string[] = []) => a.length === b.length && [...a].sort().join("\u0000") === [...b].sort().join("\u0000");
+/** Structural problems with a grant this signer refuses regardless of who approved it, or null. */
+export function grantProblem(g: GrantV1, baseDigest: string): string | null {
+  if (g?.schema !== "moat.grant.v1") return "not a moat.grant.v1 object";
+  if (g.scope?.kind === "process_instance") return "process-scoped grants are unavailable: no endpoint enforces a process-generation selector yet";
+  if (g.scope?.kind !== "app_on_device" && g.scope?.kind !== "task") return "unsupported grant scope";
+  if (!g.scope.device_id) return "a grant must name exactly one device";
+  if (g.scope.kind === "app_on_device" && !g.scope.executable) return "an app grant must name its executable";
+  if (g.scope.kind === "task" && (!g.scope.task_id || !g.scope.boot_id)) return "a task grant must name its task and boot";
+  if (g.base_policy_digest !== baseDigest) return `approved against ${g.base_policy_digest}, not the current base policy ${baseDigest}`;
+  const nb = Date.parse(g.not_before);
+  const until = Date.parse(g.admission_until);
+  if (!(until > nb) || (until - nb) / 1000 > MAX_GRANT_SECONDS) return `admission window must be positive and at most ${MAX_GRANT_SECONDS / 3600}h`;
+  return null;
+}
 
 export class Signer {
   private kp: KeyPair;
@@ -126,6 +186,8 @@ export class Signer {
     this.controllerAttestedGrants = opts.controllerAttestedGrants ?? false;
     this.state = this.statePath && existsSync(this.statePath) ? (JSON.parse(readFileSync(this.statePath, "utf8")) as SignerState) : { last_revision: 0, last_source: null };
     this.state.journal ??= [];
+    this.state.last_grants ??= {};
+    this.state.retired ??= {};
   }
 
   get keyId() {
@@ -149,78 +211,35 @@ export class Signer {
     renameSync(`${this.statePath}.tmp`, this.statePath);
   }
 
-  private async normalize(source: string): Promise<PolicyJson> {
+  private async normalize(source: string): Promise<unknown> {
     const r = await this.moatctl.run(["normalize", "@p.toml"], { "p.toml": source });
     if (r.code !== 0) throw new SignerError(422, `policy invalid: ${(r.stderr || r.stdout).trim()}`);
-    return JSON.parse(r.stdout) as PolicyJson;
+    return JSON.parse(r.stdout) as unknown;
   }
 
-  /** Is this added rule a bounded temporary grant (before device/authority checks)? */
-  static boundedGrant(r: RuleJson, now: Date): string | null {
-    if (r.action !== "allow") return "not an allow";
-    if (r.layer !== "override") return "not in the override layer";
-    if (r.provenance.kind !== "owner_action" || !r.provenance.audit_ref) return "missing owner_action provenance with an audit record";
-    if (!r.expires_at) return "does not expire";
-    const ttl = (Date.parse(r.expires_at) - now.getTime()) / 1000;
-    if (!(ttl > 0 && ttl <= MAX_GRANT_SECONDS)) return `expiry must be within ${MAX_GRANT_SECONDS / 3600}h`;
-    const narrow = (r.selector?.apps?.length ?? 0) > 0 || !!r.selector?.session;
-    if (!narrow) return "not scoped to an app or session";
-    if (r.selector?.session?.any_protected) return "scoped to every protected session";
-    if (r.selector?.session && !(r.selector.session.session_ids?.length === 1)) return "a session grant must name exactly one session";
-    if ((r.selector?.apps?.length ?? 0) > 1) return "an app grant must name exactly one executable";
-    if (r.selector?.users?.length || r.selector?.ancestors?.length) return "user/ancestor selectors are not temporary-grant material";
-    const d = r.destinations;
-    const single = (d.hosts?.length ?? 0) + (d.cidrs?.length ?? 0) === 1 && !d.any && !d.scopes?.length && !d.sets?.length && !d.providers?.length;
-    if (!single) return "must name exactly one host or address";
-    const c = d.cidrs?.[0];
-    if (c && !(c.endsWith("/32") || c.endsWith("/128"))) return "address grants must be a single address";
-    if (d.hosts?.[0]?.startsWith("*")) return "wildcard hosts are not temporary-grant material";
-    if (!r.ports || r.ports.length !== 1 || typeof r.ports[0] !== "number") return "must name exactly one port";
-    return null;
-  }
-
-  /** Device scope: exactly one reserved grant group with exactly one member. Returns the device id or a reason. */
-  static grantDevice(r: RuleJson, p: PolicyJson): { device: string } | { error: string } {
-    const groups = r.selector?.device_groups ?? [];
-    if (groups.length !== 1 || !groups[0]!.startsWith(GRANT_GROUP_PREFIX)) return { error: "not scoped to exactly one device (reserved moat-grant-* group)" };
-    const members = p.device_groups?.[groups[0]!] ?? [];
-    if (members.length !== 1) return { error: `device group ${groups[0]} must have exactly one member` };
-    return { device: members[0]! };
-  }
-
-  /** Does a delegated-issuer approval authorize exactly this rule? */
-  private checkApproval(r: RuleJson, device: string, a: GrantApproval, issuedAt: Date): string | null {
-    const plan = a.plan;
+  /** Does a delegated-issuer approval authorize exactly this grant? Returns a reason or null. */
+  private checkApproval(g: GrantV1, a: GrantApproval, issuedAt: Date): string | null {
     const del = a.delegation;
-    if (plan.grant_id !== r.id) return "plan names a different grant";
-    if (plan.scope.device_id !== device) return "plan names a different device";
-    if (plan.scope.kind === "task") {
-      if (!sameSet(r.selector?.session?.session_ids, [plan.scope.task_id]) || r.selector?.apps?.length) return "rule scope differs from the approved task";
-    } else if (plan.scope.kind === "app_on_device") {
-      if (r.selector?.session || r.selector?.apps?.length !== 1 || r.selector.apps[0]!.executable !== plan.scope.executable.path) return "rule scope differs from the approved app";
-    } else return "unsupported plan scope";
-    const want = plan.destination.kind === "address" ? { cidrs: [`${plan.destination.address}/${plan.destination.address.includes(":") ? 128 : 32}`] } : { hosts: [plan.destination.hostname] };
-    if (!sameSet(r.destinations.cidrs, want.cidrs) || !sameSet(r.destinations.hosts, want.hosts)) return "rule destination differs from the approved plan";
-    if ((r.transport ?? "tcp") !== plan.transport || r.ports?.[0] !== plan.port) return "rule transport/port differs from the approved plan";
-    if (!r.expires_at || Date.parse(r.expires_at) !== Date.parse(plan.admission_until)) return "rule expiry differs from the approved plan";
-    // the delegation itself
+    if (a.grant_id !== g.grant_id) return "approval names a different grant";
+    if (g.issuer.role !== "delegated" || g.issuer.key_id !== del.issuer_key_id) return "the grant does not name this delegated issuer";
+    if (a.context?.schema !== "moat.grant_context.v1" || contextDigest(a.context) !== g.approval_digest) return "approval context does not match the grant's approval digest";
     const ownerHex = this.ownerKeys.get(del.owner_key_id);
     if (!ownerHex) return "delegation is not signed by a trusted owner key";
     const { signature, ...body } = del;
     if (!verifyB64(publicFromHex(ownerHex), delegationString(body), signature)) return "delegation signature invalid";
     if (keyIdOf(del.issuer_public_hex) !== del.issuer_key_id) return "delegation issuer key id mismatch";
     if (!(Date.parse(del.not_after) > issuedAt.getTime())) return "delegation expired";
-    if (!del.scope.kinds.includes(plan.kind)) return `delegation does not cover ${plan.kind}`;
-    if (!del.scope.devices.includes(plan.scope.device_id)) return `delegation does not cover device ${plan.scope.device_id}`;
-    const ttl = (Date.parse(plan.admission_until) - Date.parse(plan.issued_at)) / 1000;
+    if (!del.scope.kinds.includes(a.context.kind)) return `delegation does not cover ${a.context.kind}`;
+    if (!del.scope.devices.includes(g.scope.device_id)) return `delegation does not cover device ${g.scope.device_id}`;
+    const ttl = (Date.parse(g.admission_until) - Date.parse(g.issued_at)) / 1000;
     if (!(ttl > 0 && ttl <= Math.min(del.scope.max_ttl_seconds, MAX_GRANT_SECONDS))) return `lifetime exceeds the delegated maximum (${del.scope.max_ttl_seconds}s)`;
-    if (Math.abs(Date.parse(plan.issued_at) - issuedAt.getTime()) > 15 * 60_000) return "plan issue time is not current";
-    if (!verifyB64(publicFromHex(del.issuer_public_hex), grantApprovalString(planDigest(plan)), a.issuer_signature)) return "issuer signature over the plan is invalid";
+    if (!verifyB64(publicFromHex(del.issuer_public_hex), grantApprovalString(grantDigest(g)), a.issuer_signature)) return "issuer signature over the grant is invalid";
     return null;
   }
 
   async sign(req: SignRequest): Promise<SignResult> {
-    const digest = sha256hex(canonicalJson({ source: req.source, revision: req.revision, platforms: req.platforms, rollbackOf: req.rollbackOf ?? null }));
+    const grants = req.grants ?? [];
+    const digest = sha256hex(canonicalJson({ source: req.source, grants, revision: req.revision, platforms: req.platforms, rollbackOf: req.rollbackOf ?? null }));
     if (req.publicationId) {
       const seen = this.state.journal!.find((j) => j.id === req.publicationId);
       if (seen) {
@@ -229,87 +248,85 @@ export class Signer {
       }
     }
     if (req.revision <= this.state.last_revision) throw new SignerError(409, `revision ${req.revision} is not newer than ${this.state.last_revision}`);
-    const proposed = await this.normalize(req.source);
-    let broadening: string[] = [];
-    let addedRuleIds: string[] = [];
-    let previous: PolicyJson | null = null;
-    if (this.state.last_source === null) {
-      broadening = ["first policy for this signer"];
-    } else {
+    const now = req.issuedAt.getTime();
+    const baseDigest = policyDigest(await this.normalize(req.source));
+
+    // ---- base policy: structured semantic diff against the last base this signer signed
+    const needsOwner: string[] = [];
+    if (this.state.last_source === null) needsOwner.push("first policy for this signer");
+    else {
       const d = await this.moatctl.diff(this.state.last_source, req.source);
-      broadening = ((d.diff.broadening as string[] | undefined) ?? []).slice();
-      addedRuleIds = (d.diff.added as string[] | undefined) ?? [];
-      previous = await this.normalize(this.state.last_source);
-    }
-    let authorizedBy: AuthorizedBy = "narrowing";
-    const issuers = new Set<string>();
-    if (broadening.length) {
-      const owner = req.ownerAuthorization ? this.checkOwner(req.subject, req.source, req.ownerAuthorization) : false;
-      if (owner) authorizedBy = "owner_key";
-      else {
-        const why: string[] = [];
-        const grantIds: string[] = [];
-        for (const b of broadening) {
-          if (b.startsWith("new allow rule ")) grantIds.push(b.slice("new allow rule ".length));
-          else if (!/^device group/i.test(b)) why.push(`not only new grant rules (${b})`);
-        }
-        if (!previous) why.push("no previously signed policy to compare against");
-        let attested = 0;
-        let delegated = 0;
-        for (const gid of grantIds) {
-          const r = proposed.rules.find((x) => x.id === gid);
-          if (!r || !addedRuleIds.includes(gid)) {
-            why.push(`${gid}: unknown rule`);
-            continue;
-          }
-          const bounded = Signer.boundedGrant(r, req.issuedAt);
-          if (bounded) {
-            why.push(`${gid}: ${bounded}`);
-            continue;
-          }
-          const dev = Signer.grantDevice(r, proposed);
-          if ("error" in dev) {
-            why.push(`${gid}: ${dev.error}`);
-            continue;
-          }
-          const approval = (req.grantApprovals ?? []).find((a) => a.plan.grant_id === gid);
-          if (approval) {
-            const bad = this.checkApproval(r, dev.device, approval, req.issuedAt);
-            if (bad) why.push(`${gid}: ${bad}`);
-            else (delegated++, issuers.add(approval.delegation.issuer_key_id));
-          } else if (req.ownerSessionAttested && this.controllerAttestedGrants) attested++;
-          else why.push(`${gid}: needs a delegated issuer's signature over the exact grant${this.controllerAttestedGrants ? " or an authenticated owner session" : ""}`);
-        }
-        // device groups: only reserved one-member grant groups may appear or change, and only for the new grant rules
-        if (previous) {
-          const before = previous.device_groups ?? {};
-          const after = proposed.device_groups ?? {};
-          for (const [g, members] of Object.entries(after)) {
-            if (sameSet(before[g], members) && g in before) continue;
-            if (!g.startsWith(GRANT_GROUP_PREFIX)) {
-              why.push(`device group ${g} changed`);
-              continue;
-            }
-            const users = proposed.rules.filter((x) => x.selector?.device_groups?.includes(g));
-            if (members.length !== 1 || users.some((u) => !grantIds.includes(u.id) || u.selector!.device_groups!.length !== 1)) why.push(`device group ${g} is not a one-device group used only by new grants`);
-          }
-        }
-        if (why.length || (grantIds.length > 0 && attested + delegated === 0)) {
-          throw new SignerError(403, `broadening change (${broadening.join("; ")}) needs a local owner authorization signed with an owner key${why.length ? `; not an exact temporary grant: ${why.join("; ")}` : ""}`);
-        }
-        // only reserved grant groups disappeared (expired/revoked grants): that removes authority
-        authorizedBy = grantIds.length === 0 ? "narrowing" : delegated > 0 && attested === 0 ? "delegated_issuer" : "temporary_grant_overlay";
+      const changes = d.diff.changes;
+      if (!Array.isArray(changes)) throw new SignerError(500, "moatctl diff returned no structured diff.changes[]; refusing to decide from text");
+      for (const c of changes as SemanticChange[]) {
+        if (c.direction === "broadening") needsOwner.push(`${c.kind} ${c.item}`);
+        else if (c.direction !== "narrowing" && c.direction !== "neutral") throw new SignerError(500, `unknown change direction ${String(c.direction)} for ${c.item}; refusing`);
       }
     }
+
+    // ---- grants: exact moat.grant.v1 overlays compared by id and authority digest
+    const prev = this.state.last_grants!;
+    const seen = new Set<string>();
+    const fresh: GrantV1[] = [];
+    for (const g of grants) {
+      if (seen.has(g.grant_id)) throw new SignerError(422, `grant ${g.grant_id} appears twice`);
+      seen.add(g.grant_id);
+      const bad = grantProblem(g, baseDigest);
+      if (bad) throw new SignerError(bad.startsWith("approved against") ? 409 : 422, `grant ${g.grant_id}: ${bad}`);
+      if (prev[g.grant_id] !== undefined) {
+        if (prev[g.grant_id] !== authorityDigest(g)) throw new SignerError(409, `grant ${g.grant_id} was signed before with different content; a grant id is never reused`);
+        continue;
+      }
+      if (this.state.retired![g.grant_id]) throw new SignerError(409, `grant ${g.grant_id} was removed before its deadline and cannot be re-added`);
+      fresh.push(g);
+    }
+    const why: string[] = [];
+    let attested = 0;
+    let delegated = 0;
+    const issuers = new Set<string>();
+    for (const g of fresh) {
+      if (Math.abs(Date.parse(g.issued_at) - now) > CLOCK_SKEW_MS) {
+        why.push(`${g.grant_id}: issue time is not current`);
+        continue;
+      }
+      if (!(Date.parse(g.admission_until) > now)) {
+        why.push(`${g.grant_id}: already past its deadline`);
+        continue;
+      }
+      const approval = (req.grantApprovals ?? []).find((a) => a.grant_id === g.grant_id);
+      if (approval) {
+        const bad = this.checkApproval(g, approval, req.issuedAt);
+        if (bad) why.push(`${g.grant_id}: ${bad}`);
+        else (delegated++, issuers.add(approval.delegation.issuer_key_id));
+      } else if (g.issuer.role === "owner" && req.ownerSessionAttested && this.controllerAttestedGrants) attested++;
+      else why.push(`${g.grant_id}: needs a delegated issuer's signature over the exact grant${this.controllerAttestedGrants ? " or an authenticated owner session" : ""}`);
+    }
+    if (why.length) throw new SignerError(403, `refusing to sign new temporary grant(s): ${why.join("; ")}`);
+
+    let authorizedBy: AuthorizedBy = fresh.length === 0 ? "narrowing" : delegated > 0 && attested === 0 ? "delegated_issuer" : "temporary_grant_overlay";
+    if (needsOwner.length) {
+      const owner = req.ownerAuthorization ? this.checkOwner(req.subject, req.source, req.ownerAuthorization) : false;
+      if (!owner) throw new SignerError(403, `broadening change (${needsOwner.join("; ")}) needs a local owner authorization signed with an owner key`);
+      authorizedBy = "owner_key";
+    }
+
     const snapshots: SignResult["snapshots"] = [];
+    let effectiveDigest: string | null = null;
     for (const p of req.platforms) {
-      const c = await this.moatctl.compile(req.source, p, req.revision, req.issuedAt, req.rollbackOf ?? null);
+      const c = await this.moatctl.compile(req.source, p, req.revision, req.issuedAt, req.rollbackOf ?? null, grants);
       if (!c.ok) throw new SignerError(422, `does not compile for ${p}: ${c.error}`);
-      const report = (JSON.parse(c.snapshot) as { report: unknown }).report;
+      const report = (JSON.parse(c.snapshot) as { report: { effective_digest?: string | null } }).report;
+      effectiveDigest ??= report.effective_digest ?? null;
       snapshots.push({ platform: p, signed: signSnapshotBytes(this.kp, c.snapshot), report });
     }
-    const result: SignResult = { revision: req.revision, publication_id: req.publicationId ?? null, snapshots, broadening, authorizedBy, ...(issuers.size ? { issuers: [...issuers] } : {}) };
-    this.state = { last_revision: req.revision, last_source: req.source, journal: [...(this.state.journal ?? []), ...(req.publicationId ? [{ id: req.publicationId, revision: req.revision, digest, result }] : [])].slice(-JOURNAL_KEEP) };
+    const broadening = [...needsOwner, ...fresh.map((g) => `new temporary grant ${g.grant_id}`)];
+    const result: SignResult = { revision: req.revision, publication_id: req.publicationId ?? null, snapshots, broadening, authorizedBy, ...(issuers.size ? { issuers: [...issuers] } : {}), grants: grants.map((g) => g.grant_id), effective_digest: effectiveDigest };
+    const nextGrants: Record<string, string> = Object.fromEntries(grants.map((g) => [g.grant_id, authorityDigest(g)]));
+    const retired = { ...this.state.retired! };
+    for (const [gid] of Object.entries(prev)) if (!(gid in nextGrants)) retired[gid] = String(req.issuedAt.toISOString());
+    // keep a removed grant's id only while it could still have been valid (24 h bounds every grant)
+    for (const [gid, at] of Object.entries(retired)) if (now - Date.parse(at) > MAX_GRANT_SECONDS * 1000 + CLOCK_SKEW_MS) delete retired[gid];
+    this.state = { last_revision: req.revision, last_source: req.source, last_grants: nextGrants, retired, journal: [...(this.state.journal ?? []), ...(req.publicationId ? [{ id: req.publicationId, revision: req.revision, digest, result }] : [])].slice(-JOURNAL_KEEP) };
     // durable before the reply leaves: a lost reply is recovered from this journal, never re-signed differently
     this.save();
     return result;

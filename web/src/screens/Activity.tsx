@@ -29,7 +29,7 @@ function PlanReview({ i, a }: { i: Incident; a: ActionState }) {
   const data = useData();
   const p = a.plan!.plan;
   const dev = data.devices.find((d) => d.id === p.scope.device_id);
-  const delegated = issuer?.delegation?.scope.devices.includes(p.scope.device_id);
+  const delegated = !!issuer && p.issuer.role === "delegated" && p.issuer.key_id === issuer.keyId;
   return (
     <div className="plan" aria-label="Exact permission to approve">
       <dl className="facts plan-facts">
