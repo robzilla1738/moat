@@ -6,6 +6,12 @@ Status: **decided (observation); enforcement deferred.** Evidence: workflow `w09
 native.log, OpenSnitch journal and log, nftables rulesets, timestamped trace). Summary table:
 [`linux/experiments/w09/results/run-40545113846.md`](../../linux/experiments/w09/results/run-40545113846.md).
 
+> **Follow-up (2026-10-27).** Increment 1 shipped as planned (#30). Increment 2 shipped **observe-only**, with
+> bpftrace on `sock:inet_sock_set_state` rather than an eBPF program loaded from Rust (#41,
+> [W10 decision](W10-enforcement.md)); UDP is not attributed by that path. The Rust loader (aya + a separate C
+> program) was decided in [W10 increment 3](W10-increment-3-loader.md) (#49) and is not built; its licence is
+> [#53](https://github.com/robzilla1738/moat/issues/53). Enforcement stays unavailable. The decision below is unchanged.
+
 ## Decision
 
 1. **Do not adopt OpenSnitch as Moat's ordinary-app adapter**, read-only or enforcing. Keep the harness so the

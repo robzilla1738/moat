@@ -161,9 +161,7 @@
         "date": "2026-10-27"
       },
       "limits": "Run by the test script as root, not by the installed systemd service. Omarchy kernel untested. New packets of established flows hit the rule; no conntrack flush.",
-      "open_defects": [
-        "D-SYSTEMD-WORKSPACE"
-      ]
+      "open_defects": []
     },
     {
       "id": "linux.session.launch-authority",

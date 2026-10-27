@@ -1,5 +1,20 @@
 # OpenSnitch adapter: feasibility assessment
 
+> **Superseded — decision made (W09, 2026-10-27).** OpenSnitch is **not** adopted as Moat's ordinary-app adapter,
+> read-only or enforcing. The question below was answered by measurement, not by this desk review: workflow
+> `w09-experiment`, run [40545113846](https://github.com/robzilla1738/moat/actions/runs/40545113846), OpenSnitch 1.8.0
+> on a GitHub Ubuntu runner (#25). OpenSnitch missed 16 of 200 short-lived connections and 1762 of 2000 under
+> overload without a loss signal on its UI channel, and a stopped or restarting daemon let traffic pass unobserved
+> (`QueueBypass: true`, table removed on stop).
+>
+> * Decision: [docs/decisions/W09-linux-ordinary-apps.md](../decisions/W09-linux-ordinary-apps.md)
+> * What replaced it: native observe-only inventory in `moatd` (W10, [platforms/linux.md](linux.md#ordinary-app-inventory-w10-observe-only))
+> * Ordinary-app enforcement on Linux stays unavailable: [docs/decisions/W10-enforcement.md](../decisions/W10-enforcement.md),
+>   loader choice [W10-increment-3-loader.md](../decisions/W10-increment-3-loader.md)
+>
+> The text below is the original desk assessment, kept for the record. Its recommendation 2 (an optional OpenSnitch
+> sensor/enforcer adapter) and its exit criteria are **no longer planned**.
+
 **Question (roadmap §6, phase 0 item 4):** can a maintained OpenSnitch adapter supply Moat's required Linux policy
 semantics, events and device integration, so Moat does not need its own Linux enforcement path?
 
@@ -58,5 +73,7 @@ adapter would talk to it over its gRPC protocol as a separate program (see [lice
 * Confirm the adapter can detect daemon restarts and mark spool gaps.
 * Confirm OpenSnitch and `moatd`'s nftables table coexist (hook priorities, NFQUEUE vs `reject`).
 
-Until those run, OpenSnitch integration is **design only** and is listed under "needs real-device proof" in
-[STATUS](../STATUS.md).
+These criteria were partly run in CI by W09 (conformance replay was not part of W09; daemon stop, restart and overload
+were measured) and the integration was rejected. OpenSnitch integration is not on the roadmap and is not a
+device-proof item. If a later OpenSnitch release is re-measured, the W09 harness (`linux/experiments/w09/`) is the
+starting point.

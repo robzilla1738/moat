@@ -10,9 +10,11 @@ every line here is an independent implementation. Contributors must not paste or
 this repository; a PR that does will be rejected.
 
 * An **OpenSnitch adapter** (talking to an unmodified OpenSnitch daemon over its documented protocol, distributed
-  separately) was evaluated in [platforms/opensnitch-adapter-feasibility.md](platforms/opensnitch-adapter-feasibility.md).
-  A separate-process architecture is useful engineering separation, **not an automatic legal exemption**; any
-  distributed combination needs a focused license review first.
+  separately) was assessed on paper in [platforms/opensnitch-adapter-feasibility.md](platforms/opensnitch-adapter-feasibility.md),
+  then measured and **rejected** in W09 ([decision](decisions/W09-linux-ordinary-apps.md)). Moat neither bundles
+  nor talks to OpenSnitch; only the W09 CI harness (`linux/experiments/w09/`) installs the upstream package on a CI
+  runner to re-measure it. A separate-process architecture is useful engineering separation, **not an automatic
+  legal exemption**; any distributed combination would need a focused license review first.
 * Apache-2.0 for Moat does not relicense anything copied from elsewhere. Provenance of adapted code is recorded at
   the top of the file.
 

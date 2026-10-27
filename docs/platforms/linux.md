@@ -11,6 +11,10 @@ and offers local recovery that works without the controller.
 > sessions** they are enforced for TCP by the session egress proxy (TLS SNI / HTTP CONNECT / HTTP Host, no TLS
 > interception; see below). The proxy is implemented and checked in CI on a real kernel, and stays labelled
 > *untested* until it has run on Omarchy.
+>
+> **Evidence:** every Linux claim in the [ledger](../STATUS.md) is `implemented_unproven` from a GitHub Ubuntu runner
+> (netns lab, packaged unit under systemd, recovery drill). **Nothing has run on Omarchy**
+> ([#6](https://github.com/robzilla1738/moat/issues/6)).
 
 ## Install
 
@@ -101,6 +105,14 @@ What happens, in order, between fork and exec of the workload:
 4. `no_new_privs` is set, so setuid helpers (`sudo`, `pkexec`) cannot regain privileges;
 5. every inherited descriptor above stderr is marked close-on-exec, so no preexisting socket crosses in;
 6. the argv is executed directly. There is no shell and no command string.
+
+**Who may ask for a session (W04, #20).** `moatd` takes the caller's uid and cgroup from the kernel (`SO_PEERCRED`
+and `/proc`), never from the request (`linux/moatd/src/caller.rs`). A caller that is already inside a protected
+session may launch only its own profile again; asking for a broader profile, writing a raw request to the control
+socket from inside a session, or using a control connection opened outside and passed in are all refused
+(`contained_callers_cannot_broaden`, `pre_opened_connections_are_judged_by_the_sender`; netns `W04:` checks, installed
+`containment: a nested launch of the broader w11-open profile is refused`). Brokers outside Moat (docker, ssh-agent)
+are outside this claim.
 
 nftables matches the session by cgroup ancestry (`socket cgroupv2 level 2 "moat.slice/p-<profile>"`), so every child,
 grandchild and detached process inherits the session's rules. A process found anywhere under `moat.slice` without a
@@ -212,7 +224,15 @@ What it does **not** do:
 * **No path, method or repository restrictions.** Only the name and port are checked.
 * **Plain-HTTP keep-alive:** only the first request's `Host` is checked.
 * **Encrypted ClientHello** exposes only its public outer name, and that is the name evaluated.
-* **Domain fronting** through an allowed host's CDN remains possible.
+* **Domain fronting:** a *visible* mismatch is refused: a `CONNECT` to an allowed name carrying a TLS SNI for another
+  name is closed before the upstream is dialed (#46, `a_host_mismatch_inside_a_connect_tunnel_is_refused_before_the_upstream_is_dialed`,
+  netns "proxy: CONNECT allowed.lab carrying TLS SNI denied.lab is refused"). An **encrypted** Host behind an allowed
+  SNI is still possible; it reaches only the allowed name's own server, never another address (netns "proxy LIMIT
+  (documented)").
+* **WebSocket** upgrades (through `CONNECT` or plain HTTP) pass and are supervised like any other stream (unit test
+  `websocket_upgrade_works_through_connect_and_plain_http_and_is_ended_like_any_stream`).
+* **Resource bounds:** at most 512 proxied connections and 16 concurrent lookups per daemon; beyond that the proxy
+  refuses with a `proxy_limit` event and never lets a connection through unchecked.
 * **DNS:** in transparent mode the client still resolves names itself (through the system resolver, a broker; see
   above). With `HTTPS_PROXY` the proxy does the resolving, and only **after** authorizing the name: a name no rule
   can allow is refused without any lookup.
@@ -312,8 +332,12 @@ Not proven: a real controller round trip with two endpoints (W13 acceptance need
 | --- | --- | --- |
 | `cargo test -p moatd` | anywhere | rendering, precedence order, scope tables vs `classify`, spool, recovery, endpoint state machine |
 | `tests/privileged.rs` | CI (ubuntu-latest, root) and any cgroup v2 host | boundary mechanics on a real kernel |
-| `linux/tests/netns-enforcement.sh` | CI (ubuntu-latest, root, nf_tables) | real packets: allow, deny, safety precedence, IPv6, UDP, grandchildren, escape attempts, refusal, replay, recovery, isolation stickiness, offline restart |
+| `linux/tests/netns-enforcement.sh` | CI (ubuntu-latest, root, nf_tables) | real packets: allow, deny, safety precedence, IPv6, UDP, grandchildren, escape attempts, refusal, replay, recovery, isolation stickiness, offline restart, trial rollback; W04 launch authority; W05 authorize-before-DNS, direct/proxied agreement and stream termination with measured delays; W06 restart (sessions stopped, not adopted) and a real disk-full episode; W13 outbox acks |
+| `linux/moatd/src/endpoint/journal_faults.rs` | anywhere (`cargo test -p moatd`) | W06 fault matrix: every activation and rollback step × disk full, failed rename, crash; torn commit; corrupt journal and replay mark; slow disk; newer-schema state; first canary |
+| `linux/tests/ordinary-inventory.sh`, `ordinary-inventory-ebpf.sh` | CI (ubuntu-latest, root) | W10 observe-only inventory and bpftrace attribution against an independent receiver and the kernel's ActiveOpens |
+| `release/recovery-drill.sh local` | CI (`release` workflow) | local recovery with real `moatd` in a netns ([recovery drill](../recovery-drill.md)) |
 | `linux/tests/installed-unit.sh` | CI (ubuntu-latest, packaged unit under systemd) | the installed service: a real user's workload writes its project and /tmp; containment probes fail; `systemctl restart` restores durable state |
 
-These run on GitHub's Ubuntu kernel, **not yet on Omarchy**. Robert's Arch/Omarchy kernel, systemd and network stack
+These run on GitHub's Ubuntu kernel, **not yet on Omarchy**. Each case is mapped in the
+[adversarial matrix](../adversarial-matrix.md). Robert's Arch/Omarchy kernel, systemd and network stack
 are on the [device-proof list](../STATUS.md).

@@ -1,6 +1,6 @@
 # Decision for Robert: `CAP_SYS_PTRACE` in the packaged moatd unit (W11)
 
-Status: **open, needs Robert.** The unit merged with W11 keeps `CAP_SYS_PTRACE` so installed workloads can write
+Status: **open, needs Robert** ([#54](https://github.com/robzilla1738/moat/issues/54)). The unit merged with W11 keeps `CAP_SYS_PTRACE` so installed workloads can write
 their project. This page records why, what it costs, and the alternative that would let us drop it.
 
 ## Problem

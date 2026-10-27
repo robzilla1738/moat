@@ -29,12 +29,17 @@ controller renders grant rules: the Rust core turns each grant into its exact ru
 | Path | Requirement | Default |
 |---|---|---|
 | Delegated issuer (`delegated_issuer`) | An owner-signed `moat.delegation.v1` covering the grant's kind (`allow_once`/`temporary`), device and lifetime; the grant names that issuer; the issuer signed this grant's digest; `approval_digest` matches the context. | on |
-| Controller attestation (`temporary_grant_overlay`) | The grant's issuer is the owner and the controller attests an authenticated owner session asked. | **off**: only when `moat-signer serve` runs with `MOAT_SIGNER_CONTROLLER_GRANTS=1` |
+| Controller attestation (`temporary_grant_overlay`) | The grant's issuer is the owner and the controller attests an authenticated owner session asked. | **off**: only when the signer service (`moat-controller signer-serve`) runs with `MOAT_SIGNER_CONTROLLER_GRANTS=1` |
 
 `MOAT_SIGNER_CONTROLLER_GRANTS` stays off by default because with it on, anyone who controls the controller process
 (or an owner bearer token) can mint bounded grants without a second device. Turn it on only for a single-user,
 single-host setup where the controller and the owner share one trust domain, and know that the signer then trusts the
-controller's word for owner presence.
+controller's word for owner presence. The default is an open decision ([#56](https://github.com/robzilla1738/moat/issues/56));
+grant lifetimes are [#57](https://github.com/robzilla1738/moat/issues/57).
+
+A delegation is created with `moat-controller delegate-issuer <owner-key-file> <issuer-public-hex> --devices a,b
+[--max-ttl 3600] [--days 30] [--kinds allow_once]`. The web UI's phone approver recomputes the digest it signs
+(`web/src/issuer.test.ts` checks it against the shared contract fixtures).
 
 ## Invariants (tested in `controller/test/grants.test.ts`)
 
@@ -52,5 +57,6 @@ controller's word for owner presence.
 
 ## Limits
 
-Unit and integration evidence (real `moatctl`, real signer process in the e2e) only. No installed endpoint has applied
-a grant in CI. Stream behavior is `admission_only`: open connections are not cut at the deadline.
+Unit and integration evidence (real `moatctl`, real signer process in the e2e) only; claim `core.grant.scope` is
+`implemented_unproven` ([STATUS](STATUS.md)). No installed endpoint has applied a grant in CI. Merged in #15
+(controller/signer) and #17 (core). Stream behavior is `admission_only`: open connections are not cut at the deadline.

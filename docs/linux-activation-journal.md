@@ -74,8 +74,13 @@ future change and would need its own tests.
   failed rename and crash, each followed by a restart on the same disk with the kernel as the failure left it;
   backend error; torn commit; corrupt journal; corrupt replay mark; rollback not durable (retained, completed after
   restart); rollback backend failure (retried, never confirmed, no spool flood); crash at each rollback step; first
-  canary; orphan sessions.
+  canary; orphan sessions; a slow disk that delays activation but never reorders it or outlives a trial deadline;
+  state left by a newer schema after an interrupted upgrade, kept and refused rather than reset (both #46).
 * CI netns (`linux-endpoint`): a session running across a real daemon restart is stopped; journal status after
   restart; a real `ENOSPC` on a tmpfs state directory refuses the activation as `not durable` while the prior
   revision stays enforced, and the same revision applies once space returns.
-* Not covered: power loss on real storage (fsync semantics of the actual disk), installed systemd unit (W11).
+* Recovery drill (`release/recovery-drill.sh local`, release 40569608036): trial revert and rollback, corrupt
+  journal, newer-schema state and an untrusted signer with real `moatd` in a CI netns ([recovery-drill.md](recovery-drill.md)).
+* Not covered: power loss on real storage (fsync semantics of the actual disk), a reboot, and Omarchy. The packaged
+  unit runs under systemd only on an Ubuntu runner (W11, `linux.packaging.systemd`). Claim
+  `linux.activation.trial-rollback` is `implemented_unproven` ([STATUS](STATUS.md)).

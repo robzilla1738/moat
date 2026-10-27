@@ -22,5 +22,17 @@ broadening proposal (`POST /v1/packs/propose`). Pack count is not a success metr
 
 ## Not yet proven
 
+Claim `learning.reviewed-baselines`: `implemented_unproven`, component evidence ([STATUS](STATUS.md)).
 Learning runs on recorded flows from real endpoints only when those endpoints send them; recorded-flow rehearsal is an
-estimate. There is no web or macOS review screen for candidates yet (API only).
+estimate. No capture from a real device has been reviewed, and alert volume and learning quality are unmeasured.
+
+## Review surfaces (#61)
+
+Web (`web/src/screens/Learning.tsx`) and macOS (`macos/MoatKit/Sources/MoatUI/LearningScreens.swift`,
+`MoatKit/Learning.swift`) show captures, candidate review with a permission diff, gaps, unknown identity and
+connections that were only ever refused, owner-only accept, the drift queue and a pack browser with per-device
+unsupported cells. On the web, enforcing a baseline prepares an unsigned proposal that waits for an owner-key
+authorization made off the page (`moat-controller owner-authorize`). On the Mac, accepting needs the Keychain owner key
+behind user presence and is refused without it. Tests: `controller/test/learning.test.ts`, `web/src/learning.test.tsx`,
+the live e2e (`web/e2e/live.e2e.ts`) and `macos/MoatKit/Tests/MoatKitTests/LearningTests.swift`. Screenshots:
+`docs/screenshots/*learning*`, `*packs*`, `macos-candidate-light.png`.

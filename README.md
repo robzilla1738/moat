@@ -51,7 +51,7 @@ signed or notarized macOS build yet.
 
 | | What it means | Where |
 | --- | --- | --- |
-| **Observed** | Moat sees a connection and records it. Nothing is blocked, and the UI says *permitted, not enforced*. | macOS, Linux |
+| **Observed** | Moat sees a connection and records it. Nothing is blocked, and the UI says *permitted, not enforced*. | macOS (filter with no signed policy), Linux (ordinary-app inventory, observe-only) |
 | **Enforced** | Your signed policy decides; a deny happens at the OS hook before data passes. | macOS per-app (untested on device), Linux device/user-wide |
 | **Protected session** | A boundary built **before the workload runs**, inherited by every child, escape-tested. Hostname rules for TCP are enforced by a per-session egress proxy (TLS SNI / HTTP CONNECT / Host, no TLS interception). | Linux `moat-launch` (cgroup v2 + nftables); proxy CI-tested, *untested* on Omarchy |
 
@@ -95,21 +95,41 @@ runner's small display. The phone and desktop images are the fleet web UI render
 
 ## What's in this build
 
-* **macOS app in Liquid Glass.** Rebuilt for macOS 26: glass sidebar and toolbar, glass controls and morphing
-  status, with macOS 14/15 fallbacks and support for Reduce Transparency, Increase Contrast and Reduce Motion.
-  Builds and is captured in CI; not yet checked by eye on a real Mac.
-* **Menu bar extra.** Status, recent blocks and a confirmed isolate, without opening the window.
-* **First-run onboarding.** Honest coverage labels first, then extension approval, the content filter and signer
-  key. The approval steps need a signed build on a real Mac and have not run there yet.
-* **Linux timed rollback.** `moatd apply --trial-secs N` installs a trial revision that reverts on its own unless you
-  run `moatd recover confirm`; `recover rollback` reverts now. The replay mark is kept, the first revision cannot be a
-  trial, and rollback never touches isolation. Passes CI's netns suite and the recovery drill; untested on Omarchy.
-* **Session hostname proxy (Linux).** Inside a protected session, TCP hostname rules are enforced by a per-session
-  loopback proxy that reads TLS SNI, HTTP CONNECT or Host, resolves the name itself and connects only to what it
-  resolved; nftables fences the listener. No TLS interception. UDP stays IP-only and domain fronting is still
-  possible. Advertised as `untested` until run on Omarchy.
+Everything here is implemented and tested on GitHub CI runners or in unit tests, at the level the
+[claim ledger](docs/STATUS.md) records. None of it has run on Omarchy or a signed Mac.
 
-See [docs/STATUS.md](docs/STATUS.md) for exactly what each of these has and has not been proven on.
+* **Policy core (W01–W03).** Versioned contracts with canonical digests and shared fixtures; a conservative
+  structured diff (anything it cannot prove narrowing counts as broadening); exact grants that keep their device,
+  task or executable, destination and port through serialization, idempotent per request, bound to the base policy
+  digest, with delegated (phone) issuers limited by an owner-signed delegation.
+  [Temporary grants](docs/temporary-grants.md) · [contracts](contracts/README.md)
+* **Linux protected sessions (W04–W06, W11).** `moat-launch` builds the boundary before exec; a contained caller can
+  only relaunch its own profile. TCP hostname rules go through a per-session egress proxy that refuses a forbidden
+  name before any DNS lookup, checks every resolved address, refuses a visible `CONNECT`/SNI mismatch and ends open
+  streams on expiry, revocation, isolation, task end and daemon stop. Activation is journaled step by step, the
+  replay high-water mark is independent and never lowered, trial revisions roll back unless confirmed, the first
+  revision cannot be a trial, and sessions are stopped (not adopted) on restart. Passes the CI netns suite, the
+  packaged unit under systemd on an Ubuntu runner and the recovery drill. [Linux](docs/platforms/linux.md) ·
+  [proxy contract](docs/proxy-stream-contract.md) · [activation journal](docs/linux-activation-journal.md)
+* **Linux ordinary apps (W09–W10).** Observe-only inventory (socket tables, optional bpftrace connect attribution) with
+  counted loss. OpenSnitch was measured and not adopted; app rules stay rejected because no enforcing hook is proven.
+  [W09](docs/decisions/W09-linux-ordinary-apps.md) · [W10](docs/decisions/W10-enforcement.md)
+* **macOS app and filter (W07, W12, W14).** Apps-first app in Liquid Glass (with macOS 14/15 fallbacks and
+  accessibility settings), menu bar extra and honest onboarding. The engine is generation-bound, its cache never
+  outlives a timed permission, restored state is re-verified, trust reloads live, and a first canary is refused.
+  Standalone rules are compiled by moat-core and signed by the Keychain owner key behind user presence. Unsigned CI
+  builds only; never checked by eye or run as a signed extension on a real Mac. [macOS](docs/platforms/macos.md)
+* **Truthful UI (W08).** Live and demo are separate; *applied* and *active* come only from endpoint receipts; a
+  notification reference opens exactly its incident; floods collapse into one summary per window.
+  [UI evidence](docs/ui-evidence.md)
+* **Fleet, learning, DNS (W13, W14, W16).** Contiguous acknowledgements with declared gaps, receipt-based
+  reconciliation, staged rollout and offline local changes held for the owner; reviewed, immutable learning baselines
+  and three workflow packs with review screens in web and macOS; read-only AdGuard Home and Pi-hole v6 adapters with
+  DNS-only labelling; a Digital Kingdom feed that enforces producer authority. Component tests only.
+  [Fleet sync](docs/fleet-sync.md) · [learning](docs/learning.md) · [integrations](docs/integrations.md)
+* **Release engineering (W15).** SBOMs with a coverage gate, licence report with a copyleft gate, SHA256SUMS, keyless
+  signing and provenance attestations, a release manifest generated from the ledger, pinned actions, and a recovery
+  drill. [Recovery drill](docs/recovery-drill.md) · [support matrix](docs/support-matrix.md)
 
 ## Architecture
 
@@ -186,24 +206,27 @@ tested, and names any open defect.
 
 ## Documentation
 
-[Protection contract](docs/protection-contract.md) ·
-[Failure behavior](docs/failure-behavior.md) ·
-[Policy semantics](docs/policy-semantics.md) ·
-[Threat model](docs/threat-model.md) ·
-[Privacy](docs/privacy.md) ·
-[VPN test matrix](docs/vpn-test-matrix.md) ·
-[Compatibility suite](docs/compatibility-suite.md) ·
-[Feasibility checklist](docs/feasibility-checklist.md) ·
-[Licensing](docs/licensing.md) ·
-[Linux](docs/platforms/linux.md) ·
-[macOS](docs/platforms/macos.md) ·
-[OpenSnitch adapter feasibility](docs/platforms/opensnitch-adapter-feasibility.md) ·
-[Support matrix](docs/support-matrix.md) ·
-[Recovery drill](docs/recovery-drill.md) ·
-[Recovery and update policy](docs/recovery-update-policy.md) ·
-[Naming](docs/naming.md) ·
-[Security](SECURITY.md) ·
-[**Status**](docs/STATUS.md)
+**Where things stand:** [Status and claim ledger](docs/STATUS.md) · [Support matrix](docs/support-matrix.md) ·
+[Adversarial matrix](docs/adversarial-matrix.md) · [Source roadmap](docs/ROADMAP.md)
+
+**Contracts and behavior:** [Protection contract](docs/protection-contract.md) ·
+[Policy semantics](docs/policy-semantics.md) · [Contracts and fixtures](contracts/README.md) ·
+[Temporary grants](docs/temporary-grants.md) · [Failure behavior](docs/failure-behavior.md) ·
+[Threat model](docs/threat-model.md) · [Privacy](docs/privacy.md) · [UI evidence](docs/ui-evidence.md)
+
+**Platforms:** [Linux](docs/platforms/linux.md) · [Proxy stream contract](docs/proxy-stream-contract.md) ·
+[Linux activation journal](docs/linux-activation-journal.md) · [macOS](docs/platforms/macos.md) ·
+[Fleet sync](docs/fleet-sync.md) · [Learning](docs/learning.md) · [DNS and Digital Kingdom](docs/integrations.md)
+
+**Decisions:** [W09 ordinary apps on Linux](docs/decisions/W09-linux-ordinary-apps.md) ·
+[W10 enforcement](docs/decisions/W10-enforcement.md) · [W10 BPF loader](docs/decisions/W10-increment-3-loader.md) ·
+[W11 `CAP_SYS_PTRACE`](docs/decisions/W11-cap-sys-ptrace.md) · [Naming](docs/naming.md) ·
+[OpenSnitch desk assessment](docs/platforms/opensnitch-adapter-feasibility.md) (superseded by W09)
+
+**Testing and release:** [VPN test matrix](docs/vpn-test-matrix.md) · [Compatibility suite](docs/compatibility-suite.md) ·
+[Feasibility checklist](docs/feasibility-checklist.md) (historical) · [Recovery drill](docs/recovery-drill.md) ·
+[Recovery and update policy](docs/recovery-update-policy.md) · [Release engineering](release/README.md) ·
+[Licensing](docs/licensing.md) · [Security](SECURITY.md)
 
 ## License
 

@@ -26,7 +26,9 @@ is open** (stream).
 2. **Resolved-address recheck.** Every resolved address is evaluated with the hostname evidence; the first allowed
    one is used. Address rules still apply (a safety deny on the controller wins over an allowed name). A hostname rule
    alone cannot reach loopback, link-local, multicast or unspecified addresses; an address rule must allow those.
-3. **The proxy connects to the address it resolved**, never the one the client dialed.
+3. **The proxy connects to the address it resolved**, never the one the client dialed. Inside a `CONNECT` tunnel, a
+   TLS SNI that differs from the `CONNECT` host is refused before the upstream is dialed (#46,
+   `a_host_mismatch_inside_a_connect_tunnel_is_refused_before_the_upstream_is_dialed`).
 4. **No policy, isolation, or a resource bound reached → refuse.** Connection and resolver bounds
    (`Limits { max_connections: 512, max_lookups: 16 }` per daemon) refuse with a `proxy_limit` event; they never let
    a connection through unchecked.
@@ -57,12 +59,20 @@ spooled as `stream_terminated { session_id, stream, destination, hostname, admit
 
 What is **not** promised:
 
-* **Daemon restart does not adopt streams.** Proxied streams end when `moatd` stops, and a session that outlives a
-  restart is not re-attached to a proxy (the adopt/stop contract for sessions across restart is W06). The
-  consequence is fail-closed: such a session loses proxied egress, it does not gain unproxied egress.
+* **Daemon restart does not adopt streams.** Proxied streams end when `moatd` stops. W06 settled the session side:
+  sessions running when the daemon restarts are **stopped, not adopted** (`session_not_adopted`,
+  [linux-activation-journal.md](linux-activation-journal.md); decision [#55](https://github.com/robzilla1738/moat/issues/55)).
+  Until the new daemon stops them they stay in their profile's chain without a proxy redirect, which is fail-closed.
 * **Clock changes.** Expiry is checked against wall-clock UTC on each tick. A wall clock moved backwards delays
   expiry by the same amount; monotonic-deadline handling across reboot is W06/§7.2 work and not claimed here.
 * **Plain-HTTP keep-alive** is re-evaluated as a stream (by its first `Host`), not per request.
+* **WebSocket** upgrades are streams like any other: admitted once, then ended by the triggers above (unit
+  `websocket_upgrade_works_through_connect_and_plain_http_and_is_ended_like_any_stream`; not separately measured in
+  netns).
+* **Encrypted Host behind an allowed SNI** (fronting) is not detected; it reaches only the allowed name's own server.
+
+Evidence status: claim `linux.session.hostname-proxy`, `implemented_unproven`, native CI only; not the installed unit
+and not Omarchy ([STATUS](STATUS.md)).
 
 ### Measured (CI netns, linux-endpoint run 40537109945, commit 48f8ee5, 1 s tick)
 
