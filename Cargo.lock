@@ -594,11 +594,13 @@ dependencies = [
 name = "moat-ffi"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "chrono",
  "hex",
  "moat-core",
  "serde",
  "serde_json",
+ "sha2",
 ]
 
 [[package]]
