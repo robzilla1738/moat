@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+  <title>Moat</title>
+  <!-- The moat: a ring around the keep, open only below the gate (the one supervised way out). -->
+  <path d="M10.55 20.73A8.85 8.85 0 1 1 13.45 20.73V22.65A10.75 10.75 0 1 0 10.55 22.65Z"/>
+  <!-- The keep: three merlons and a gate. -->
+  <path fill-rule="evenodd" d="M7.2 5.6h2.2v1.7h1.5V5.6h2.2v1.7h1.5V5.6h2.2V18H7.2Zm3.35 12.4v-3.6a1.45 1.45 0 0 1 2.9 0V18Z"/>
+</svg>
