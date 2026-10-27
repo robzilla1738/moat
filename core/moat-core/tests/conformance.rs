@@ -72,7 +72,13 @@ fn policy_cases() {
 fn compile_cases() {
     let all = cases("compile");
     assert!(all.len() >= 4);
-    let opts = CompileOptions { revision: 1, rollback_of: None, issued_at: "2026-10-26T12:00:00Z".parse().unwrap(), not_after: None };
+    let opts = CompileOptions {
+        target_devices: vec![],
+        revision: 1,
+        rollback_of: None,
+        issued_at: "2026-10-26T12:00:00Z".parse().unwrap(),
+        not_after: None,
+    };
     for (path, c) in all {
         let name = c["name"].as_str().unwrap();
         let policy = load_policy(&path, c["policy"].as_str().unwrap());
@@ -84,9 +90,16 @@ fn compile_cases() {
             other => panic!("unknown adapter {other}"),
         };
         let exp = &c["expect"];
+        // Optional: the devices the snapshot targets (issue #26). Absent means fleet-wide.
+        let targets: Vec<String> =
+            c.get("target_devices").and_then(|v| v.as_array()).into_iter().flatten().map(|d| d.as_str().unwrap().to_string()).collect();
+        let opts = CompileOptions { target_devices: targets.clone(), ..opts.clone() };
         let res = compile(&policy, &adv, &opts);
         if exp["compiles"].as_bool().unwrap() {
             let s = res.unwrap_or_else(|e| panic!("{name}: {e:?}"));
+            let mut want = targets.clone();
+            want.sort();
+            assert_eq!(s.devices, want, "{name}: the snapshot binds its target devices");
             for id in exp.get("omitted_contains").and_then(|v| v.as_array()).into_iter().flatten() {
                 assert!(s.report.omitted.iter().any(|o| o.rule_id == id.as_str().unwrap()), "{name}: {id} not omitted");
             }

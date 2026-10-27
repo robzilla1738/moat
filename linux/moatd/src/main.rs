@@ -194,8 +194,15 @@ fn run(cli: Cli) -> Result<(), String> {
             let s: moat_core::signing::SignedSnapshot =
                 serde_json::from_str(&fs::read_to_string(&signed).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
             let trust = moatd::endpoint::load_trust(&cli.state.join("trusted"));
-            let snap = moat_core::signing::verify_snapshot(&s, &trust, moat_core::Platform::Linux, None, chrono::Utc::now())
-                .map_err(|e| e.to_string())?;
+            let snap = moat_core::signing::verify_snapshot_for_device(
+                &s,
+                &trust,
+                moat_core::Platform::Linux,
+                Some(&device_id),
+                None,
+                chrono::Utc::now(),
+            )
+            .map_err(|e| e.to_string())?;
             let (rules, rep) =
                 nft::render(&snap, &device_id, &nft::CgroupLayout::default(), &moatd::endpoint::lookup_uid).map_err(|e| e.0)?;
             print!("{rules}");

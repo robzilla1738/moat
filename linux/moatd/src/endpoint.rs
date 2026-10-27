@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use chrono::{DateTime, Utc};
 use moat_core::capability::{Capability, CapabilityAdvertisement, Platform, Support};
 use moat_core::compile::Snapshot;
-use moat_core::signing::{verify_snapshot, verifying_key_from_hex, SignedSnapshot, TrustStore};
+use moat_core::signing::{verify_snapshot_for_device, verifying_key_from_hex, SignedSnapshot, TrustStore};
 use serde::{Deserialize, Serialize};
 
 use crate::cgroup::{Cgroups, SessionCgroup};
@@ -255,7 +255,7 @@ impl<B: NftBackend> Endpoint<B> {
                 Ok(signed) => {
                     // Verify signature/platform/policy at the snapshot's own issue time; staleness is reported.
                     let probe_time = Self::decode_issued_at(&signed).unwrap_or_else(Utc::now);
-                    match verify_snapshot(&signed, &self.trust, Platform::Linux, None, probe_time) {
+                    match verify_snapshot_for_device(&signed, &self.trust, Platform::Linux, Some(&self.device_id), None, probe_time) {
                         Ok(snap) => match nft::render(&snap, &self.device_id, &self.layout(), &self.uid_of) {
                             Ok((_, rep)) => {
                                 self.last_applied = Some(snap.revision);
@@ -629,7 +629,9 @@ impl<B: NftBackend> Endpoint<B> {
             return self.reject("a rollback is still pending; a new trial cannot start until it completes".to_string());
         }
         let checked = (|| {
-            let snap = verify_snapshot(&signed, &self.trust, Platform::Linux, self.last_applied, Utc::now()).map_err(|e| e.to_string())?;
+            let snap =
+                verify_snapshot_for_device(&signed, &self.trust, Platform::Linux, Some(&self.device_id), self.last_applied, Utc::now())
+                    .map_err(|e| e.to_string())?;
             let (_, rep) = nft::render(&snap, &self.device_id, &self.layout(), &self.uid_of).map_err(|e| e.0)?;
             Ok::<_, String>((snap, rep))
         })();
@@ -840,7 +842,8 @@ impl<B: NftBackend> Endpoint<B> {
             let signed =
                 Self::read_signed(&self.state_dir.join(trial::LAST_GOOD)).ok_or("the last confirmed snapshot is missing or unreadable")?;
             let at = Self::decode_issued_at(&signed).unwrap_or_else(Utc::now);
-            let snap = verify_snapshot(&signed, &self.trust, Platform::Linux, None, at).map_err(|e| e.to_string())?;
+            let snap = verify_snapshot_for_device(&signed, &self.trust, Platform::Linux, Some(&self.device_id), None, at)
+                .map_err(|e| e.to_string())?;
             if snap.revision != to {
                 return Err(format!("the stored rollback target is revision {}, expected {to}", snap.revision));
             }
@@ -1165,7 +1168,13 @@ pub(crate) mod tests {
         let s = compile(
             &p,
             &CapabilityAdvertisement::linux_nftables_cgroup(),
-            &CompileOptions { revision: rev, rollback_of: None, issued_at: Utc::now() - Duration::seconds(5), not_after: None },
+            &CompileOptions {
+                target_devices: vec![],
+                revision: rev,
+                rollback_of: None,
+                issued_at: Utc::now() - Duration::seconds(5),
+                not_after: None,
+            },
         )
         .unwrap();
         sign_snapshot(&s, key)

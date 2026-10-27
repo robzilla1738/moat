@@ -30,6 +30,10 @@ pub struct OmittedRule {
     pub action: Action,
     pub missing: Vec<Capability>,
     pub reason: String,
+    /// The rule's device scope excludes every device this snapshot targets: it can never match there, so it is
+    /// left out without a capability check (issue #26). Never set for an untargeted (fleet-wide) compile.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub not_targeted: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
@@ -59,6 +63,11 @@ pub struct Snapshot {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rollback_of: Option<u64>,
     pub platform: Platform,
+    /// Devices this snapshot was compiled for. Empty: fleet-wide (every rule was capability-checked for this
+    /// platform). Non-empty: rules scoped only to other devices were left out, so only a listed endpoint may install
+    /// it (`verify_snapshot_for_device`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub devices: Vec<String>,
     pub adapter: String,
     pub policy_name: String,
     /// sha256 of the canonical JSON of the source policy.
@@ -73,6 +82,11 @@ pub struct Snapshot {
 
 #[derive(Clone, Debug)]
 pub struct CompileOptions {
+    /// The endpoints (device ids) this snapshot is for, all on the advertised platform. Empty compiles fleet-wide:
+    /// every rule is checked against this platform. Non-empty: a rule or profile whose device scope excludes all of
+    /// them is left out (reported, never capability-checked here); everything that can apply to one of them is
+    /// checked exactly as before, so an unsupported restrictive cell on a targeted device is still rejected.
+    pub target_devices: Vec<String>,
     pub revision: u64,
     pub rollback_of: Option<u64>,
     pub issued_at: DateTime<Utc>,
@@ -99,6 +113,18 @@ pub fn compile_with_grants(
     let mut s = compile(&eff, adv, opts)?;
     s.report.effective_digest = Some(crate::grants::effective_digest(base, grants));
     Ok(s)
+}
+
+/// Can a selector's device scope (`devices` AND `device_groups`, as in `eval::selector_matches`) include `device`?
+pub fn device_scope_includes(policy: &Policy, s: &crate::policy::Selector, device: &str) -> bool {
+    (s.devices.is_empty() || s.devices.iter().any(|d| d == device))
+        && (s.device_groups.is_empty()
+            || s.device_groups.iter().any(|g| policy.device_groups.get(g).is_some_and(|m| m.iter().any(|d| d == device))))
+}
+
+/// True when the compile targets specific devices and the selector can match none of them.
+fn excluded_by_target(policy: &Policy, s: &crate::policy::Selector, targets: &[String]) -> bool {
+    !targets.is_empty() && !targets.iter().any(|t| device_scope_includes(policy, s, t))
 }
 
 fn capability_name(c: Capability) -> String {
@@ -135,11 +161,24 @@ fn check_profiles(
     policy: &Policy,
     adv: &CapabilityAdvertisement,
     sessions_supported: bool,
+    targets: &[String],
     report: &mut CompileReport,
     errors: &mut Vec<PolicyError>,
 ) {
     let fallback = policy.profile(&policy.fallback_profile).map(|p| p.default).unwrap_or(DefaultAction::Deny);
     for (i, p) in policy.profiles.iter().enumerate() {
+        // The fallback profile always applies (it is where unselected flows land), so it is never skipped.
+        if p.id != policy.fallback_profile && excluded_by_target(policy, &p.applies_to, targets) {
+            report.items.push(ItemDisposition {
+                item: format!("profile:{}", p.id),
+                restrictive: p.default == DefaultAction::Deny,
+                disposition: Disposition::OmittedAccepted,
+                omission: Some(Omission::SubjectUnavailable),
+                missing: vec![],
+                note: Some("scoped to devices this snapshot does not target; it can never select flows here".into()),
+            });
+            continue;
+        }
         let session_only = p.applies_to.session.is_some();
         let mut missing: Vec<Capability> =
             profile_capabilities(p).into_iter().filter(|c| adv.support(*c) == Support::Unsupported).collect();
@@ -211,9 +250,25 @@ pub fn compile(policy: &Policy, adv: &CapabilityAdvertisement, opts: &CompileOpt
         report.unavailable_session_profiles = profs.into_iter().collect();
     }
 
+    let mut targets = opts.target_devices.clone();
+    targets.sort();
+    targets.dedup();
     for (i, r) in policy.rules.iter().enumerate() {
         if r.expires_at.map(|e| e <= opts.issued_at).unwrap_or(false) {
             report.expired.push(r.id.clone());
+            continue;
+        }
+        // Issue #26: a rule scoped only to devices this snapshot does not target can never match on them. It is left
+        // out and reported, and is not checked against this platform's capabilities (an app-scoped block for a Mac
+        // does not make the Linux snapshot fail). A rule that can apply to a targeted device is checked below.
+        if excluded_by_target(policy, &r.selector, &targets) {
+            report.omitted.push(OmittedRule {
+                rule_id: r.id.clone(),
+                action: r.action,
+                missing: vec![],
+                reason: format!("scoped to devices this {} snapshot does not target ({})", adv.platform.label(), targets.join(", ")),
+                not_targeted: true,
+            });
             continue;
         }
         let caps = policy.implied_capabilities(r);
@@ -225,6 +280,7 @@ pub fn compile(policy: &Policy, adv: &CapabilityAdvertisement, opts: &CompileOpt
                 action: r.action,
                 missing: vec![Capability::SessionEnforcement],
                 reason: format!("{} has no protected-session boundary; sessions for this profile are refused at launch", adv.adapter),
+                not_targeted: false,
             });
             continue;
         }
@@ -291,6 +347,7 @@ pub fn compile(policy: &Policy, adv: &CapabilityAdvertisement, opts: &CompileOpt
                         names.join(", "),
                         adv.adapter
                     ),
+                    not_targeted: false,
                 });
                 continue;
             }
@@ -309,7 +366,7 @@ pub fn compile(policy: &Policy, adv: &CapabilityAdvertisement, opts: &CompileOpt
         report.required_capabilities.extend(caps);
         out.rules.push(r.clone());
     }
-    check_profiles(policy, adv, sessions_supported, &mut report, &mut errors);
+    check_profiles(policy, adv, sessions_supported, &targets, &mut report, &mut errors);
     if adv.platform == Platform::Linux {
         errors.extend(crate::backend_ids::linux_collisions(policy));
     }
@@ -334,8 +391,9 @@ pub fn compile(policy: &Policy, adv: &CapabilityAdvertisement, opts: &CompileOpt
             item: format!("rule:{}", o.rule_id),
             restrictive: o.action == Action::Deny,
             disposition: Disposition::OmittedAccepted,
-            // Session rules on a platform without sessions can never match; any other omission is an allow.
-            omission: Some(if o.missing.contains(&Capability::SessionEnforcement) {
+            // Session rules on a platform without sessions, and rules scoped to devices this snapshot does not
+            // target, can never match; any other omission is an allow.
+            omission: Some(if o.not_targeted || o.missing.contains(&Capability::SessionEnforcement) {
                 Omission::SubjectUnavailable
             } else {
                 Omission::Stricter
@@ -351,6 +409,7 @@ pub fn compile(policy: &Policy, adv: &CapabilityAdvertisement, opts: &CompileOpt
         revision: opts.revision,
         rollback_of: opts.rollback_of,
         platform: adv.platform,
+        devices: targets,
         adapter: adv.adapter.clone(),
         policy_name: policy.name.clone(),
         policy_digest: policy_digest(policy),
@@ -366,7 +425,13 @@ mod tests {
     use super::*;
 
     fn opts() -> CompileOptions {
-        CompileOptions { revision: 7, rollback_of: None, issued_at: "2026-10-26T12:00:00Z".parse().unwrap(), not_after: None }
+        CompileOptions {
+            target_devices: vec![],
+            revision: 7,
+            rollback_of: None,
+            issued_at: "2026-10-26T12:00:00Z".parse().unwrap(),
+            not_after: None,
+        }
     }
 
     fn home() -> Policy {
@@ -519,5 +584,84 @@ mod tests {
             d.validate().unwrap_or_else(|e| panic!("{}: {e:?}", adv.adapter));
             assert!(!s.report.items.is_empty());
         }
+    }
+
+    // ---- issue #26: device-scoped rules compile only against the targeted device's platform ----
+
+    const APP_BLOCK_ON_MAC: &str = "[[rules]]\nid = \"mac-block-zoom\"\naction = \"deny\"\nselector = { devices = [\"mbp-m1\"], apps = [{ bundle_id = \"us.zoom.xos\" }] }\ndestinations = { cidrs = [\"0.0.0.0/0\"] }\nprovenance = { kind = \"git\", reference = \"t\" }\n";
+    const HOST_BLOCK_ON_LAPTOPS: &str = "[[rules]]\nid = \"laptops-block-tracker\"\naction = \"deny\"\nselector = { device_groups = [\"laptops\"] }\ndestinations = { hosts = [\"tracker.example\"] }\nprovenance = { kind = \"git\", reference = \"t\" }\n";
+
+    fn targeted(devs: &[&str]) -> CompileOptions {
+        CompileOptions { target_devices: devs.iter().map(|d| d.to_string()).collect(), ..opts() }
+    }
+
+    #[test]
+    fn a_mac_app_block_does_not_refuse_the_linux_snapshot_for_linux_devices() {
+        let p = with_rule(APP_BLOCK_ON_MAC);
+        let linux = CapabilityAdvertisement::linux_nftables_cgroup();
+        // Untargeted (fleet-wide) compile keeps the conservative behaviour: refused.
+        let e = compile(&p, &linux, &opts()).unwrap_err();
+        assert!(e.iter().any(|x| x.message.contains("mac-block-zoom")), "{e:?}");
+        // Targeted at the Linux device: the rule can never match there; left out, reported, not capability-checked.
+        let s = compile(&p, &linux, &targeted(&["omarchy"])).unwrap();
+        assert!(!s.policy.rules.iter().any(|r| r.id == "mac-block-zoom"));
+        let o = s.report.omitted.iter().find(|o| o.rule_id == "mac-block-zoom").expect("reported");
+        assert!(o.not_targeted && o.missing.is_empty(), "{o:?}");
+        let item = s.report.items.iter().find(|i| i.item == "rule:mac-block-zoom").unwrap();
+        assert_eq!(item.disposition, Disposition::OmittedAccepted);
+        assert_eq!(item.omission, Some(Omission::SubjectUnavailable), "a deny can only be omitted as subject_unavailable");
+        assert_eq!(s.devices, vec!["omarchy".to_string()], "the snapshot binds its target devices");
+        // On the Mac it is kept and enforced.
+        let m = compile(&p, &CapabilityAdvertisement::macos_network_extension(), &targeted(&["mbp-m1"])).unwrap();
+        assert!(m.policy.rules.iter().any(|r| r.id == "mac-block-zoom"));
+    }
+
+    #[test]
+    fn an_unsupported_cell_on_a_targeted_device_is_still_rejected() {
+        // Same app-scoped deny, but now aimed at the Linux device itself: nftables cannot match apps -> refused.
+        let p = with_rule(&APP_BLOCK_ON_MAC.replace("mbp-m1", "omarchy"));
+        let e = compile(&p, &CapabilityAdvertisement::linux_nftables_cgroup(), &targeted(&["omarchy"])).unwrap_err();
+        assert!(e.iter().any(|x| x.message.contains("mac-block-zoom") && x.message.contains("refusing")), "{e:?}");
+        // A snapshot targeting several devices is checked for every one of them: one in scope is enough to refuse.
+        let p = with_rule(APP_BLOCK_ON_MAC);
+        let e = compile(&p, &CapabilityAdvertisement::linux_nftables_cgroup(), &targeted(&["omarchy", "mbp-m1"])).unwrap_err();
+        assert!(e.iter().any(|x| x.message.contains("mac-block-zoom")), "{e:?}");
+        // An unscoped rule applies to every device, so targeting never skips it.
+        let p = with_rule(&APP_BLOCK_ON_MAC.replace("devices = [\"mbp-m1\"], ", ""));
+        assert!(compile(&p, &CapabilityAdvertisement::linux_nftables_cgroup(), &targeted(&["omarchy"])).is_err());
+    }
+
+    #[test]
+    fn a_hostname_block_on_a_device_group_follows_group_membership() {
+        let p = with_rule(HOST_BLOCK_ON_LAPTOPS);
+        let ip_only = CapabilityAdvertisement::linux_nftables_cgroup_ip_only();
+        assert!(compile(&p, &ip_only, &opts()).is_err(), "fleet-wide: Linux cannot enforce a hostname deny");
+        let s = compile(&p, &ip_only, &targeted(&["omarchy"])).unwrap();
+        assert!(s.report.omitted.iter().any(|o| o.rule_id == "laptops-block-tracker" && o.not_targeted));
+        // A Linux device that is (oddly) in the laptops group gets the rule checked, and refused.
+        let mut p2 = p.clone();
+        p2.device_groups.get_mut("laptops").unwrap().push("omarchy".into());
+        assert!(compile(&p2, &ip_only, &targeted(&["omarchy"])).is_err());
+        // devices AND device_groups: a rule naming a laptop outside the group matches nobody in the group.
+        let both = with_rule(
+            &HOST_BLOCK_ON_LAPTOPS.replace("device_groups = [\"laptops\"]", "devices = [\"omarchy\"], device_groups = [\"laptops\"]"),
+        );
+        assert!(
+            compile(&both, &ip_only, &targeted(&["omarchy"])).is_ok(),
+            "omarchy is not a laptop: the selector matches no targeted device"
+        );
+    }
+
+    #[test]
+    fn a_device_scoped_profile_is_not_checked_for_other_devices_but_the_fallback_always_is() {
+        let extra = "[[profiles]]\nid = \"mac-apps-locked\"\ndefault = \"deny\"\napplies_to = { devices = [\"mbp-m1\"], apps = [{ bundle_id = \"com.example.app\" }] }\n";
+        let src = include_str!("../../../conformance/policies/home.toml").replacen("[[profiles]]", &format!("{extra}\n[[profiles]]"), 1);
+        let p = Policy::parse(&src).unwrap();
+        let linux = CapabilityAdvertisement::linux_nftables_cgroup();
+        let e = compile(&p, &linux, &opts()).unwrap_err();
+        assert!(e.iter().any(|x| x.message.contains("mac-apps-locked")), "{e:?}");
+        let s = compile(&p, &linux, &targeted(&["omarchy"])).unwrap();
+        let item = s.report.items.iter().find(|i| i.item == "profile:mac-apps-locked").unwrap();
+        assert_eq!(item.omission, Some(Omission::SubjectUnavailable));
     }
 }

@@ -296,7 +296,13 @@ mod tests {
         let s = compile(
             &wire,
             &CapabilityAdvertisement::macos_network_extension(),
-            &CompileOptions { revision: 1, rollback_of: None, issued_at: t("2026-10-27T15:01:00Z"), not_after: None },
+            &CompileOptions {
+                target_devices: vec![],
+                revision: 1,
+                rollback_of: None,
+                issued_at: t("2026-10-27T15:01:00Z"),
+                not_after: None,
+            },
         )
         .unwrap();
         let r = s.policy.rules.iter().find(|r| r.id == "grant-01hx").unwrap();
@@ -328,7 +334,13 @@ mod tests {
             let s = compile(
                 &eff,
                 &adv,
-                &CompileOptions { revision: 1, rollback_of: None, issued_at: t("2026-10-27T15:01:00Z"), not_after: None },
+                &CompileOptions {
+                    target_devices: vec![],
+                    revision: 1,
+                    rollback_of: None,
+                    issued_at: t("2026-10-27T15:01:00Z"),
+                    not_after: None,
+                },
             )
             .unwrap();
             assert!(s.policy.rules.iter().all(|r| r.id != "grant-01hz"), "{}", adv.adapter);

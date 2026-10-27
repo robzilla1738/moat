@@ -18,7 +18,8 @@ use moat_core::diff::diff;
 use moat_core::enrichment::Enricher;
 use moat_core::eval::{evaluate, EvalContext, FlowAttempt, Verdict, Winner};
 use moat_core::signing::{
-    generate_key, key_id, sign_snapshot, signing_key_from_hex, verify_snapshot, verifying_key_from_hex, SignedSnapshot, TrustStore,
+    generate_key, key_id, sign_snapshot, signing_key_from_hex, verify_snapshot_for_device, verifying_key_from_hex, SignedSnapshot,
+    TrustStore,
 };
 use moat_core::simulate::{simulate, SimulationInput};
 use moat_core::{CapabilityAdvertisement, Platform, Policy};
@@ -85,6 +86,10 @@ enum Cmd {
         /// JSON array of `moat.grant.v1` objects to overlay (each keeps its exact device/process/task scope).
         #[arg(long)]
         grants: Option<PathBuf>,
+        /// Compile for these devices only (repeatable). Rules scoped to other devices are left out with a report and
+        /// are not checked against this adapter; the signed snapshot installs only on a listed device.
+        #[arg(long = "device")]
+        devices: Vec<String>,
         #[arg(short, long)]
         out: Option<PathBuf>,
     },
@@ -131,6 +136,9 @@ enum Cmd {
         /// Highest revision already applied (replay protection).
         #[arg(long)]
         last_applied: Option<u64>,
+        /// The verifying endpoint's device id (required for a device-targeted snapshot).
+        #[arg(long)]
+        device: Option<String>,
     },
     /// Explain the decision for one flow attempt: winning rule, overridden rules and uncertainty.
     Explain {
@@ -259,7 +267,7 @@ fn run(cmd: Cmd, o: &mut Out) -> Result<(), String> {
                 return Ok(());
             }
             let adapters = if adapters.is_empty() { vec![Adapter::Macos, Adapter::Linux, Adapter::Dns] } else { adapters };
-            let opts = CompileOptions { revision: 1, rollback_of: None, issued_at: Utc::now(), not_after: None };
+            let opts = CompileOptions { target_devices: vec![], revision: 1, rollback_of: None, issued_at: Utc::now(), not_after: None };
             let mut results = Vec::new();
             for a in adapters {
                 let adv = a.adv();
@@ -303,11 +311,16 @@ fn run(cmd: Cmd, o: &mut Out) -> Result<(), String> {
             }
             Ok(())
         }
-        Cmd::Compile { policy, adapter, revision, rollback_of, valid_hours, issued_at, grants, out } => {
+        Cmd::Compile { policy, adapter, revision, rollback_of, valid_hours, issued_at, grants, devices, out } => {
             let p = load_policy(&policy)?;
             let issued = issued_at.unwrap_or_else(Utc::now);
-            let opts =
-                CompileOptions { revision, rollback_of, issued_at: issued, not_after: valid_hours.map(|h| issued + Duration::hours(h)) };
+            let opts = CompileOptions {
+                target_devices: devices,
+                revision,
+                rollback_of,
+                issued_at: issued,
+                not_after: valid_hours.map(|h| issued + Duration::hours(h)),
+            };
             let gs: Vec<moat_core::contracts::Grant> = match &grants {
                 None => vec![],
                 Some(path) => {
@@ -379,7 +392,13 @@ fn run(cmd: Cmd, o: &mut Out) -> Result<(), String> {
                 observations: &flows,
                 enricher: &e,
                 platforms: &plats,
-                compile_options: CompileOptions { revision: 0, rollback_of: None, issued_at: Utc::now(), not_after: None },
+                compile_options: CompileOptions {
+                    target_devices: vec![],
+                    revision: 0,
+                    rollback_of: None,
+                    issued_at: Utc::now(),
+                    not_after: None,
+                },
                 unacknowledged_devices: unacknowledged,
             });
             if o.json {
@@ -458,13 +477,13 @@ fn run(cmd: Cmd, o: &mut Out) -> Result<(), String> {
             let s = sign_snapshot(&snap, &k);
             write_out(&out, &serde_json::to_string_pretty(&s).unwrap())
         }
-        Cmd::Verify { signed, pubkeys, adapter, last_applied } => {
+        Cmd::Verify { signed, pubkeys, adapter, last_applied, device } => {
             let s: SignedSnapshot = serde_json::from_str(&read(&signed)?).map_err(|e| format!("{}: {e}", signed.display()))?;
             let mut t = TrustStore::new();
             for p in &pubkeys {
                 t.trust(verifying_key_from_hex(&read(p)?)?);
             }
-            match verify_snapshot(&s, &t, adapter.platform(), last_applied, Utc::now()) {
+            match verify_snapshot_for_device(&s, &t, adapter.platform(), device.as_deref(), last_applied, Utc::now()) {
                 Ok(snap) => {
                     if o.json {
                         println!(
@@ -534,7 +553,7 @@ fn conformance(dir: &Path, o: &mut Out) -> Result<(), String> {
     let mut pass = 0usize;
     let mut failures: Vec<String> = Vec::new();
     let e = Enricher::new();
-    let opts = CompileOptions { revision: 1, rollback_of: None, issued_at: Utc::now(), not_after: None };
+    let opts = CompileOptions { target_devices: vec![], revision: 1, rollback_of: None, issued_at: Utc::now(), not_after: None };
     for sub in ["policy", "compile"] {
         let d = dir.join("cases").join(sub);
         let mut entries: Vec<PathBuf> = fs::read_dir(&d)
@@ -579,6 +598,14 @@ fn conformance(dir: &Path, o: &mut Out) -> Result<(), String> {
                     "macos" => Adapter::Macos.adv(),
                     _ => Adapter::Dns.adv(),
                 };
+                let targets: Vec<String> = c
+                    .get("target_devices")
+                    .and_then(|v| v.as_array())
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|d| d.as_str().map(String::from))
+                    .collect();
+                let opts = CompileOptions { target_devices: targets, ..opts.clone() };
                 match (compile(&pol, &adv, &opts), exp["compiles"].as_bool().unwrap_or(true)) {
                     (Ok(s), true) => {
                         let missing: Vec<String> = exp

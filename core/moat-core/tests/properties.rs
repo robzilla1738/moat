@@ -125,7 +125,7 @@ proptest! {
         trust.trust(k.verifying_key());
         let p = base_policy(vec![]);
         let rev = applied.saturating_sub(offset).max(1);
-        let s = compile(&p, &CapabilityAdvertisement::linux_nftables_cgroup(), &CompileOptions { revision: rev, rollback_of: None, issued_at: t(), not_after: None }).unwrap();
+        let s = compile(&p, &CapabilityAdvertisement::linux_nftables_cgroup(), &CompileOptions { target_devices: vec![], revision: rev, rollback_of: None, issued_at: t(), not_after: None }).unwrap();
         let signed = sign_snapshot(&s, &k);
         let r = verify_snapshot(&signed, &trust, Platform::Linux, Some(applied), t());
         let is_replay = matches!(r, Err(VerifyError::Replay { .. }));

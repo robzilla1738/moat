@@ -1,0 +1,14 @@
+{
+  "schema": "moat.conformance.compile_case.v1",
+  "policy": "../../policies/home-device-scoped.toml",
+  "name": "linux-targeted-at-a-mac-device-still-refuses",
+  "adapter": "linux",
+  "target_devices": [
+    "omarchy",
+    "mbp-m1"
+  ],
+  "expect": {
+    "compiles": false,
+    "error_contains": "mac-block-zoom"
+  }
+}

@@ -71,6 +71,7 @@ above is updated with the run that proves it.
 | `D-LAUNCH-AUTHORITY` | A contained caller can request a looser session through the control socket. | W04 | **closed** (W04, netns run 40534200207) |
 | `D-PROXY-DNS-BEFORE-AUTH` | A denied hostname can be resolved before authorization. | W05 | **closed** (W05, netns run 40537109945) |
 | `D-PROXY-STREAM-LIFETIME` | No stream registry; admission vs stream expiry undefined. | W05 | **closed** (W05, netns run 40537109945) |
+| `D-DEVICE-SCOPE-FLEET` | Device-scoped rules refused for the whole fleet (issue #26). | W02 | **closed** (device-targeted compiles) |
 | `D-ACTIVATION-JOURNAL` | Apply/rollback state not journaled or fault-tested. | W06 | **closed** (W06, netns run 40539984069) |
 | `D-SYSTEMD-WORKSPACE` | Packaged systemd restrictions break launched coding workloads. | W11 | **closed** (W11, installed-unit job in linux-endpoint 40540159764) |
 | `D-MAC-CACHE-TRUST` | Mac cache, trust reload, first canary, stale status. | W06–W08 (Lane B) | open |

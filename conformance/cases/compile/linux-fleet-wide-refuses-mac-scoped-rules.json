@@ -1,0 +1,10 @@
+{
+  "schema": "moat.conformance.compile_case.v1",
+  "policy": "../../policies/home-device-scoped.toml",
+  "name": "linux-fleet-wide-refuses-mac-scoped-rules",
+  "adapter": "linux",
+  "expect": {
+    "compiles": false,
+    "error_contains": "mac-block-zoom"
+  }
+}
