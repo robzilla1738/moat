@@ -1,0 +1,25 @@
+name: controller
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  typescript:
+    name: TS typecheck + tests (against the Rust moatctl)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build -p moatctl
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck -w controller
+      - run: npm test -w controller
+        env:
+          MOATCTL: ${{ github.workspace }}/target/debug/moatctl
