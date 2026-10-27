@@ -206,25 +206,24 @@
     },
     {
       "id": "linux.activation.trial-rollback",
-      "capability": "timed trial with automatic rollback; replay high-water kept across rollback",
+      "capability": "durable activation journal; timed trial with automatic rollback; replay high-water kept across rollback; restart stops (does not adopt) running sessions",
       "backend": "moatd 0.1.0",
       "evidence_level": "native_ci",
       "disposition": "implemented_unproven",
       "tests": [
         "linux/moatd/src/endpoint.rs::tests",
-        "linux/tests/netns-enforcement.sh (trial checks)"
+        "linux/moatd/src/endpoint/journal_faults.rs",
+        "linux/tests/netns-enforcement.sh (trial and W06 checks)"
       ],
       "environment": "ci-ubuntu-26.04-x86_64",
       "last_result": {
         "result": "pass",
-        "run": "linux-endpoint 40493342431",
-        "commit": "d5270bd",
+        "run": "linux-endpoint 40539984069",
+        "commit": "d0b7336",
         "date": "2026-10-27"
       },
-      "limits": "No durable activation journal; disk-full, failed rename, corrupt file and crash-at-each-step are not fault-injected.",
-      "open_defects": [
-        "D-ACTIVATION-JOURNAL"
-      ]
+      "limits": "Fault injection is in-process (FaultStore) plus one real disk-full episode on a small tmpfs in CI netns. Not run under the installed systemd unit or on Omarchy; a power cut between the kernel update and the journal commit is reconciled by the documented restart path, not proven on hardware.",
+      "open_defects": []
     },
     {
       "id": "linux.spool.gaps",
@@ -488,7 +487,15 @@
       "id": "D-ACTIVATION-JOURNAL",
       "summary": "Apply/rollback state is not journaled; storage failures are not fault-tested.",
       "package": "W06",
-      "status": "open"
+      "status": "closed",
+      "closed_by": "W06 (linux/moatd/src/journal.rs, endpoint.rs recover_journal/attempt_rollback/stop_orphan_sessions; docs/linux-activation-journal.md)",
+      "regression_tests": [
+        "linux/moatd/src/endpoint/journal_faults.rs (12 fault-injection tests: disk full, failed rename, crash at every plain and trial step, backend error, torn commit, corrupt journal, corrupt replay mark, retained rollback intent, failed and crashed rollback, first canary, stop-not-adopt)",
+        "netns: W06 disk full refuses activation as not durable, prior revision stays enforced, same revision applies after space returns, restart confirms",
+        "netns: W06 spool records the session that was not adopted across the restart",
+        "rust 40539983884 @ d0b7336",
+        "linux-endpoint 40539984069 @ d0b7336"
+      ]
     },
     {
       "id": "D-SYSTEMD-WORKSPACE",

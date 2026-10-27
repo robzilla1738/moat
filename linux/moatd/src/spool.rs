@@ -106,6 +106,20 @@ pub enum Event {
         revision: u64,
         reason: String,
     },
+    /// The activation journal reconciled or could not reconcile state (W06): an interrupted activation, a lost
+    /// phase write, a corrupt journal or replay mark, a stale trial file. `phase` uses moat.activation.v1 names.
+    ActivationRecovery {
+        phase: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        active_revision: Option<u64>,
+        detail: String,
+    },
+    /// A protected session that was running when the previous daemon stopped; not adopted (stopped).
+    SessionNotAdopted {
+        session_id: String,
+        profile: String,
+        reason: String,
+    },
     /// A proxied stream was ended by Moat (policy or grant no longer allows it, isolation, session closed).
     StreamTerminated {
         session_id: String,

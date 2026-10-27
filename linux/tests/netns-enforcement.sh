@@ -30,6 +30,7 @@ cleanup() {
   ip netns del moat-a 2>/dev/null; ip netns del moat-b 2>/dev/null
   for d in /sys/fs/cgroup/moat.slice/p-*/s-*; do [[ -d "$d" ]] && echo 1 > "$d/cgroup.kill" 2>/dev/null; rmdir "$d" 2>/dev/null; done
   rmdir /sys/fs/cgroup/moat.slice/p-* /sys/fs/cgroup/moat.slice 2>/dev/null
+  umount "$WORK/small" 2>/dev/null
   [[ -f "$WORK/hosts.orig" ]] && cp "$WORK/hosts.orig" /etc/hosts
   rm -rf "$WORK"
 }
@@ -386,6 +387,11 @@ wait_for '.isolation_active | not' || bad "W05: clear isolation"
 # --- restart: controller-free operation -------------------------------------------------------------------------
 stream_bg rst1
 stream_started rst1 && ok "W05: stream open before the daemon stops" || bad "W05: rst1 admitted"
+# W06: a protected session running across a daemon restart is stopped, not adopted
+mk orphan "sleep 45"
+as_nobody "MOAT_QUIET=1 $BIN/moat-launch --socket $SOCK --profile lab-deny -- bash $WORK/s/orphan.sh" >/dev/null 2>&1 &
+for _ in $(seq 40); do pgrep -u nobody -f "sleep 45" >/dev/null && break; sleep 0.25; done
+pgrep -u nobody -f "sleep 45" >/dev/null && ok "W06: a long-running session is up before the restart" || bad "W06: orphan session started"
 kill "$DAEMON_PID"; T0=$(now); wait "$DAEMON_PID" 2>/dev/null || true
 E=$(ended_at "$STREAMLOG" rst1 6)
 if [[ -n "$E" ]]; then
@@ -397,7 +403,39 @@ start_daemon
 wait_for '.revision == 8 and .enforcement_active' && ok "restart restores last valid policy offline" || bad "restart restore"
 stream_bg rst2 2
 stream_started rst2 && ok "W05: after restart a new session's stream is admitted again" || bad "W05: rst2 admitted after restart"
+pgrep -u nobody -f "sleep 45" >/dev/null && bad "W06: a session from before the restart is still running" || ok "W06: sessions from before the restart are stopped (not adopted)"
+status | jq -e '.activation.phase == "confirmed" and .activation.active == 8 and .activation.durability == "durable" and .activation.replay_high_water >= 8' >/dev/null \
+  && ok "W06: activation journal reports confirmed revision 8, durable, high-water >= 8" || bad "W06: activation status ($(status | jq -c .activation))"
+
 expect "lab-deny still blocked after restart" blocked "$(launch lab-deny tcp4_8080)"
+
+# --- W06: disk full on a real filesystem ------------------------------------------------------------------------
+# The state directory moves to a small tmpfs; the daemon is paused while the snapshot is queued and the disk filled,
+# so the first durable step (the journal intent) meets ENOSPC.
+kill "$DAEMON_PID"; wait "$DAEMON_PID" 2>/dev/null || true
+SMALL="$WORK/small"; mkdir -p "$SMALL"; mount -t tmpfs -o size=8m tmpfs "$SMALL"
+cp -a "$S"/. "$SMALL"/; rm -rf "$SMALL"/spool; S_FULL="$S"; S="$SMALL"
+start_daemon
+wait_for '.revision == 8 and .enforcement_active' && ok "W06: daemon on the small state filesystem enforces revision 8" || bad "W06: small-fs start"
+"$BIN/moatctl" compile "$HERE/lab.toml" --adapter linux --revision 9 -o "$WORK/snap9.json"
+"$BIN/moatctl" sign "$WORK/snap9.json" --key "$WORK/signer.key" -o "$WORK/signed9.json"
+kill -STOP "$DAEMON_PID"
+"$BIN/moatd" --state "$S" apply "$WORK/signed9.json" >/dev/null
+dd if=/dev/zero of="$S/filler" bs=64k >/dev/null 2>&1 || true
+kill -CONT "$DAEMON_PID"
+wait_for '.last_rejection != null and (.last_rejection | test("not durable"))' \
+  && ok "W06: disk full: activation refused as not durable ($(status | jq -r .last_rejection | cut -c1-90))" || bad "W06: disk-full rejection ($(status | jq -c '{r: .revision, l: .last_rejection}'))"
+status | jq -e '.revision == 8 and .enforcement_active and .activation.phase == "confirmed" and .activation.active == 8' >/dev/null \
+  && ok "W06: disk full: revision 8 stays reported and enforced" || bad "W06: disk-full state ($(status | jq -c .activation))"
+expect "W06: disk full: lab-deny still blocked" blocked "$(launch lab-deny tcp4_8080)"
+rm -f "$S/filler"
+"$BIN/moatd" --state "$S" apply "$WORK/signed9.json" >/dev/null
+wait_for '.revision == 9 and .activation.phase == "confirmed"' && ok "W06: after space returns, the same revision applies (no revision burnt by the failed intent)" || bad "W06: apply after disk full"
+kill "$DAEMON_PID"; wait "$DAEMON_PID" 2>/dev/null || true
+start_daemon
+wait_for '.revision == 9 and .activation.phase == "confirmed"' && ok "W06: restart after the disk-full episode: revision 9, confirmed" || bad "W06: restart after disk full"
+kill "$DAEMON_PID"; wait "$DAEMON_PID" 2>/dev/null || true; DAEMON_PID=""
+umount "$SMALL"; S="$S_FULL"
 
 # --- spool ------------------------------------------------------------------------------------------------------
 SP=$(cat "$S"/spool/seg-*.jsonl)
@@ -411,6 +449,8 @@ echo "$SP" | jq -s -e '[.[] | select(.event.type == "flow") | .event.attempt.dns
   && ok "W05: spool records which proxy decisions were refused before any lookup" || bad "W05: dns_lookup in spool"
 echo "$SP" | jq -s -e '[.[] | select(.event.type == "stream_terminated") | .event.reason] | (map(select(startswith("no longer allowed"))) | length >= 2) and (index("emergency isolation") != null) and (index("session closed") != null)' >/dev/null \
   && ok "W05: spool records each stream Moat ended, with the reason" || bad "W05: stream_terminated in spool ($(echo "$SP" | jq -c 'select(.event.type == "stream_terminated") | .event.reason' | tr '\n' ' '))"
+echo "$SP" | jq -s -e '[.[] | select(.event.type == "session_not_adopted")] | length >= 1' >/dev/null \
+  && ok "W06: spool records the session that was not adopted across the restart" || bad "W06: session_not_adopted in spool"
 echo "$SP" | jq -s -e '[.[].seq] as $s | ($s == ($s | sort)) and ($s | length) == ($s | unique | length)' >/dev/null \
   && ok "spool sequence monotonic and unique" || bad "spool sequence"
 echo "$SP" | jq -s -e '[.[] | select(.event.type == "restart")] | last | .event.clean_shutdown == true' >/dev/null \

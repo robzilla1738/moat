@@ -1,7 +1,7 @@
 # Status: claim ledger
 
 Moat is an **experimental build**. Release gate G0 ("truthful experimental build", MASTER_ROADMAP §13) is **not yet
-met**: the open defects below include grant scope loss in the controller path and activation state that is not durably journaled. Until they are closed, treat every protection below as
+met**: the open defects below include grant scope loss in the controller path. Until they are closed, treat every protection below as
 unproven outside the environment named next to it.
 
 The machine-readable source is [`claim-ledger.json`](claim-ledger.json). A test
@@ -44,7 +44,7 @@ real-workflow evidence, if a claim cites a defect that does not exist, or if thi
 | `linux.session.direct-egress` | implemented_unproven | native_ci | ci-ubuntu-26.04-x86_64 | pass, linux-endpoint 40493342431 @ d5270bd | Script-run as root, not the installed unit; `D-SYSTEMD-WORKSPACE`. |
 | `linux.session.launch-authority` | implemented_unproven | native_ci | ci-ubuntu-26.04-x86_64 | pass, linux-endpoint 40534200207 @ adca7c2 | Kernel-attested callers; contained caller limited to its own profile. Not via the installed unit; external brokers (docker, ssh-agent) outside the claim. |
 | `linux.session.hostname-proxy` | implemented_unproven | native_ci | ci-ubuntu-26.04-x86_64 | pass, linux-endpoint 40537109945 @ 48f8ee5 | Authorize-before-DNS; streams end at expiry (1.15 s), deny (0.80 s), task close, isolation, daemon stop ([contract](proxy-stream-contract.md)); not the installed unit; domain fronting possible; UDP IP-only. |
-| `linux.activation.trial-rollback` | implemented_unproven | native_ci | ci-ubuntu-26.04-x86_64 | pass, linux-endpoint 40493342431 @ d5270bd | Not journaled or fault-injected: `D-ACTIVATION-JOURNAL`. |
+| `linux.activation.trial-rollback` | implemented_unproven | native_ci | ci-ubuntu-26.04-x86_64 | pass, linux-endpoint 40539984069 @ d0b7336 | Durable journal, fault injection at every step, real disk-full episode in CI netns ([contract](linux-activation-journal.md)); not the installed unit. |
 | `linux.spool.gaps` | implemented_unproven | component | unit | pass, rust 40493342610 @ d5270bd | No W01 event envelope yet. |
 | `linux.ordinary-apps.inventory` | unsupported_rejected | none | unit | not_run | Not implemented; W09/W10. |
 | `linux.ordinary-apps.app-rules` | unsupported_rejected | semantic | unit | pass (rejection), rust 40493342610 | nftables cannot match executables; rejected at compile. |
@@ -71,7 +71,7 @@ above is updated with the run that proves it.
 | `D-LAUNCH-AUTHORITY` | A contained caller can request a looser session through the control socket. | W04 | **closed** (W04, netns run 40534200207) |
 | `D-PROXY-DNS-BEFORE-AUTH` | A denied hostname can be resolved before authorization. | W05 | **closed** (W05, netns run 40537109945) |
 | `D-PROXY-STREAM-LIFETIME` | No stream registry; admission vs stream expiry undefined. | W05 | **closed** (W05, netns run 40537109945) |
-| `D-ACTIVATION-JOURNAL` | Apply/rollback state not journaled or fault-tested. | W06 | open |
+| `D-ACTIVATION-JOURNAL` | Apply/rollback state not journaled or fault-tested. | W06 | **closed** (W06, netns run 40539984069) |
 | `D-SYSTEMD-WORKSPACE` | Packaged systemd restrictions break launched coding workloads. | W11 | open |
 | `D-MAC-CACHE-TRUST` | Mac cache, trust reload, first canary, stale status. | W06–W08 (Lane B) | open |
 | `D-WEB-DEMO-SUCCESS` | Live web actions reuse demo success behavior. | W08 (Lane B) | open |
@@ -86,7 +86,7 @@ above is updated with the run that proves it.
 | W03 exact grants (core side) | Lane A | core done: device/process/task scope through serialization, idempotent ledger, effective digest; controller adoption and signer/publication journal are Lane B |
 | W04 Linux launch authority | Lane A | done in CI netns (kernel caller identity, own-profile-only nested launch, raw/pre-opened socket refused); installed-unit proof is W11 |
 | W05 proxy semantics | Lane A | done in CI netns: authorize-before-DNS, stream registry with measured stopping delays, direct/proxied agreement; installed-unit proof is W11 |
-| W06 durable activation (Linux) | Lane A | not started |
+| W06 durable activation (Linux) | Lane A | done in CI netns: journal, fault injection at each persistence/backend step, retained rollback intent, independent replay high-water, stop-not-adopt restart; installed-unit proof is W11 |
 | W07 Mac engine | Lane B | see Lane B |
 | W08 truthful UI | Lane B | see Lane B |
 | W09 ordinary-app Linux experiment | Lane A | not started |

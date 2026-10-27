@@ -11,6 +11,7 @@ pub mod caller;
 pub mod cgroup;
 pub mod control;
 pub mod endpoint;
+pub mod journal;
 pub mod launch;
 pub mod nft;
 pub mod probe;
