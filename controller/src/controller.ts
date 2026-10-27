@@ -247,11 +247,11 @@ export class Controller {
           }
           break;
         case "flow": {
-          const a = (e.attempt ?? {}) as { app?: { family?: string; executable?: string }; remote_ip?: string; remote_port?: number; transport?: string; hostname?: { name?: string }; session?: { id?: string; verified?: boolean }; process?: { pid?: number; start_generation?: number; boot_id?: string } };
+          const a = (e.attempt ?? {}) as { app?: { family?: string; executable?: string; team_id?: string; signing_id?: string }; remote_ip?: string; remote_port?: number; transport?: string; hostname?: { name?: string }; session?: { id?: string; verified?: boolean }; process?: { pid?: number; start_generation?: number; boot_id?: string } };
           const dec = (e.decision ?? {}) as { verdict?: "allow" | "deny"; permitted_by_observation?: boolean; rule?: string; profile?: string; policy_revision?: number };
           const dest = a.hostname?.name ?? a.remote_ip ?? "unknown";
           const pi = a.process ? `${d.id}/${a.process.boot_id ?? ""}/${a.process.pid}@${a.process.start_generation}` : null;
-          flowRecs.push({ attempt: e.attempt ? JSON.stringify(e.attempt) : null, seq: r.seq, at: r.at, kind: "flow", app: a.app?.family ?? a.app?.executable ?? null, session_id: a.session?.verified ? a.session.id ?? null : null, process_instance: pi, destination: dest, port: a.remote_port ?? null, transport: a.transport ?? null, verdict: dec.verdict ?? null, observed: !!dec.permitted_by_observation, rule: dec.rule ?? (dec.profile ? `default:${dec.profile}` : null), policy_revision: dec.policy_revision ?? null, measurement_source: String(e.measurement_source ?? "endpoint flow decision") });
+          flowRecs.push({ attempt: e.attempt ? JSON.stringify(e.attempt) : null, seq: r.seq, at: r.at, kind: "flow", app: a.app?.family ?? a.app?.executable ?? null, session_id: a.session?.verified ? a.session.id ?? null : null, process_instance: pi, destination: dest, port: a.remote_port ?? null, transport: a.transport ?? null, verdict: dec.verdict ?? null, observed: !!dec.permitted_by_observation, rule: dec.rule ?? (dec.profile ? `default:${dec.profile}` : null), policy_revision: dec.policy_revision ?? null, measurement_source: String(e.measurement_source ?? "endpoint flow decision"), exe: a.app?.executable ?? null, signer: a.app?.team_id || a.app?.signing_id ? [a.app?.team_id, a.app?.signing_id].filter(Boolean).join("/") : null });
           if (dec.verdict === "deny") {
             this.raise({ kind: "blocked_connection", device: d.id, session: a.session?.verified ? a.session.id : undefined, process: pi ?? undefined, app: a.app?.family ?? a.app?.executable, destination: dest, port: a.remote_port, transport: a.transport, rule: dec.rule ?? `default:${dec.profile ?? "?"}`, revision: dec.policy_revision, reason: dec.rule ? `blocked by ${dec.rule}` : `blocked by the ${dec.profile ?? "profile"} default`, urgency: a.session?.verified ? "high" : "medium", ref: `seq:${r.seq}`, at: r.at, facts: { chain: e.chain ?? null, transfer: e.transfer ?? null } });
           }
@@ -271,7 +271,7 @@ export class Controller {
           const level = String(e.level);
           this.db.prepare("UPDATE devices SET coverage = ? WHERE id = ?").run(level, d.id);
           if (level === "degraded") this.raise({ kind: "coverage_lost", device: d.id, destination: "-", reason: String(e.detail ?? "enforcement not active"), urgency: "high", ref: `seq:${r.seq}`, at: r.at });
-          flowRecs.push({ seq: r.seq, at: r.at, kind: "coverage" });
+          flowRecs.push({ seq: r.seq, at: r.at, kind: "coverage", detail: level });
           break;
         }
         case "gap":
@@ -413,7 +413,7 @@ export class Controller {
   }
 
   /** Was this rule omitted from a platform's compiled snapshot for a revision (its selector cannot be enforced there)? */
-  private omittedOn(revision: number, platform: string, ruleId: string): string | null {
+  omittedOn(revision: number, platform: string, ruleId: string): string | null {
     const row = this.db.prepare("SELECT report FROM snapshots WHERE revision = ? AND platform = ?").get(revision, platformAdapter(platform)) as { report: string } | undefined;
     if (!row) return null;
     const o = ((JSON.parse(row.report) as { omitted?: { rule_id: string; reason?: string; missing?: string[] }[] }).omitted ?? []).find((x) => x.rule_id === ruleId);

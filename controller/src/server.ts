@@ -3,6 +3,8 @@
  * device-signed requests and receive controller-signed responses. Listen on the tailnet or LAN interface only;
  * localhost is not treated as trusted — every route authenticates.
  */
+import { apps, appDetail, diagnostics, whatChanged } from "./standalone.ts";
+export const CONTROLLER_VERSION = "0.1.0";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { readFileSync, existsSync, statSync } from "node:fs";
 import { extname, join, normalize } from "node:path";
@@ -68,6 +70,16 @@ r("POST", "/v1/grants", ({ c, p, json }) => c.createGrant(c.require(p, "owner"),
 r("GET", "/v1/grants/:id", ({ c, p, params }) => (c.require(p, "owner", "viewer"), c.grantStatus(params[0]!)));
 r("POST", "/v1/grants/:id/revoke", ({ c, p, params }) => c.revokeGrant(c.require(p, "owner"), params[0]!));
 r("GET", "/v1/sessions", ({ c, p, query }) => (c.require(p, "owner", "viewer", "launcher"), c.sessions(query.get("device") ?? undefined)));
+// W12 standalone read models: Apps-first UI, app detail, "What changed?", local diagnostics.
+r("GET", "/v1/apps", ({ c, p, query }) => (c.require(p, "owner", "viewer"), apps(c, { deviceId: query.get("device") ?? undefined })));
+r("GET", "/v1/apps/:id", async ({ c, p, params }) => {
+  c.require(p, "owner", "viewer");
+  const d = await appDetail(c, params[0]!);
+  if (!d) throw new HttpError(404, "no app with that identity was seen in the last 7 days");
+  return d;
+});
+r("GET", "/v1/what-changed", ({ c, p, query }) => (c.require(p, "owner", "viewer"), whatChanged(c, { device: query.get("device"), app: query.get("app"), working: query.get("working"), failing: query.get("failing") })));
+r("GET", "/v1/diagnostics", ({ c, p }) => (c.require(p, "owner", "viewer"), diagnostics(c, CONTROLLER_VERSION)));
 r("GET", "/v1/dns/clients", ({ c, p }) => (c.require(p, "owner", "viewer"), dnsClients(c.db)));
 r("GET", "/v1/notifications", ({ c, p }) => (c.require(p, "owner"), { destinations: c.notifier.list(), status: c.notifier.status() }));
 r("POST", "/v1/notifications/destinations", ({ c, p, json }) => (c.require(p, "owner"), c.notifier.addDestination(json)));
