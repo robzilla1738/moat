@@ -73,15 +73,23 @@ public final class AppModel: ObservableObject {
     /// The local owner signer (Keychain + user presence). Nil in demo/screenshot runs that must not touch the Keychain.
     public var ownerSigner: OwnerSigner?
     @Published public var lastAuthorization: OwnerAuthorization?
+    /// Standalone apply (compile with moat-core, sign with the owner key, install through the extension). Nil when this
+    /// build has no policy compiler; the UI then says a rule can be authorized but not applied from this Mac alone.
+    public var applier: StandaloneApplier?
+    @Published public var lastApplied: StandaloneApplyResult?
     public let client: ControlClient
     public let isDemo: Bool
 
-    public init(client: ControlClient, isDemo: Bool = false, screen: Screen = .apps, ownerSigner: OwnerSigner? = nil) {
+    public init(client: ControlClient, isDemo: Bool = false, screen: Screen = .apps, ownerSigner: OwnerSigner? = nil, applier: StandaloneApplier? = nil) {
         self.client = client
         self.isDemo = isDemo
         self.screen = screen
         self.ownerSigner = ownerSigner
+        self.applier = applier
     }
+
+    /// True when a locally authorized rule can be enforced from this Mac alone.
+    public var canApplyStandalone: Bool { applier != nil }
 
     public var apps: [AppSummary] { AppSummary.from(flows) }
     public var selectedApp: AppSummary? { apps.first { $0.id == selectedAppID } }
@@ -94,12 +102,26 @@ public final class AppModel: ObservableObject {
         screen = .appDetail
     }
 
-    /// Owner-authorize a narrow local rule plan with the Keychain key (OS user presence). The authorization is shown
-    /// and kept for audit; applying it needs a compiled snapshot (see `standaloneApplyUnavailable`).
+    /// Owner-authorize a narrow local rule plan with the Keychain key (OS user presence). With a standalone applier the
+    /// signature is over the compiled snapshot itself and the extension installs it (verified against the trusted-keys
+    /// file and this Mac's device id); without one the authorization is kept for audit and the rule is not applied.
     public func authorize(_ plan: LocalRulePlan, now: Date = Date()) async {
         let problems = plan.problems(now: now)
         guard problems.isEmpty else {
             lastError = problems.joined(separator: " ")
+            return
+        }
+        let id = "local-\(Int(now.timeIntervalSince1970))"
+        if let applier {
+            do {
+                let r = try await applier.apply(plan, id: id, now: now)
+                lastApplied = r
+                notice = "Applied on this Mac: revision \(r.summary.revision), signed with your owner key \(r.keyID). The rule ends \(plan.expires.formatted(date: .omitted, time: .shortened))."
+                lastError = nil
+                await refresh(now: now)
+            } catch {
+                lastError = "\(error)"
+            }
             return
         }
         guard let signer = ownerSigner else {
@@ -108,7 +130,6 @@ public final class AppModel: ObservableObject {
         }
         do {
             if signer.keyID == nil { try signer.createKey() }
-            let id = "local-\(Int(now.timeIntervalSince1970))"
             lastAuthorization = try await signer.authorize(plan.ownerPlan(id: id))
             notice = "Authorized with your owner key \(signer.keyID ?? ""). \(Self.standaloneApplyUnavailable)"
             lastError = nil
@@ -117,9 +138,11 @@ public final class AppModel: ObservableObject {
         }
     }
 
-    /// Why a locally authorized rule is not yet enforced on its own: compiling a snapshot needs moat-core's compiler
-    /// in the app (moat-ffi has verify/evaluate/parse only). Shown verbatim; never replaced by a pretend success.
-    public static let standaloneApplyUnavailable = "Enforcing it from this Mac alone needs the policy compiler in the app, which is not available yet; apply it through your controller or with moatctl."
+    /// Shown only when this build has no policy compiler (no applier): never replaced by a pretend success.
+    public static let standaloneApplyUnavailable = "This build has no policy compiler, so the rule is authorized but not applied from this Mac; apply it through your controller or with moatctl."
+
+    /// Shown under the plan when standalone apply is available.
+    public static let standaloneApplyHow = "Moat compiles the rule with its policy core, your owner key signs that exact snapshot, and the filter extension verifies it against your trusted keys before enforcing it. No controller is needed."
 
     /// True when `lastError` came from failing to reach the extension (cleared by the next good refresh).
     /// Errors from an owner action stay visible until dismissed.

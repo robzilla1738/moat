@@ -167,13 +167,14 @@ struct RuleAuthoringCard: View {
             Text(plan.ownerPlan(id: "preview").display).font(.system(.callout, design: .monospaced))
             ForEach(plan.problems(), id: \.self) { pr in Text(pr).font(.caption).foregroundStyle(p.red) }
             HStack {
-                MoatButton(title: "Authorize with Touch ID or password", systemImage: "touchid", kind: .primary, disabled: !plan.problems().isEmpty || model.ownerSigner == nil) {
+                MoatButton(title: model.canApplyStandalone ? "Authorize and apply with Touch ID or password" : "Authorize with Touch ID or password", systemImage: "touchid", kind: .primary, disabled: !plan.problems().isEmpty || (model.ownerSigner == nil && model.applier == nil)) {
                     model.trialDenyHost = action == .deny ? dest : model.trialDenyHost
                     Task { await model.authorize(plan) }
                 }
                 if let a = model.lastAuthorization { Pill(text: "signed by \(a.keyID)", tone: .green) }
+                if let r = model.lastApplied { Pill(text: "installed as revision \(r.summary.revision)", tone: .green) }
             }
-            Text("macOS asks for your fingerprint or password and shows this exact plan. A typed phrase is never accepted as authorization. \(AppModel.standaloneApplyUnavailable)").font(.caption).foregroundStyle(p.muted)
+            Text("macOS asks for your fingerprint or password and shows this exact plan. A typed phrase is never accepted as authorization. \(model.canApplyStandalone ? AppModel.standaloneApplyHow : AppModel.standaloneApplyUnavailable)").font(.caption).foregroundStyle(p.muted)
         }
     }
 }

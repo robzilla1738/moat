@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import MoatCoreBridge
 import MoatKit
 import MoatUI
 import SwiftUI
@@ -56,7 +57,17 @@ struct MoatApp: App {
         let client: ControlClient = launch.demo ? DemoControlClient(isolated: launch.isolated) : XPCControlClient(machServiceName: service)
         // The local owner key lives in the Keychain behind user presence; demo and screenshot runs never touch it.
         let signer: OwnerSigner? = launch.demo || launch.screenshotMode ? nil : OwnerSigner(store: KeychainOwnerKeyStore(), presence: LocalAuthenticationPresence())
-        _model = StateObject(wrappedValue: AppModel(client: client, isDemo: launch.demo, screen: launch.screen, ownerSigner: signer))
+        // Standalone apply: moat-core compiles, the owner key signs the exact bytes, the extension verifies and installs.
+        // Only when this moat-ffi build exports the compiler; otherwise the UI says apply is unavailable.
+        var applier: StandaloneApplier?
+        if let signer, CoreSnapshotAuthoring.available {
+            let deviceID = (try? String(contentsOfFile: "/Library/Application Support/Moat/device-id", encoding: .utf8))?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ProcessInfo.processInfo.hostName
+            let book = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+                .appendingPathComponent("Moat/standalone-policy.json")
+            applier = StandaloneApplier(authoring: CoreSnapshotAuthoring(), signer: signer, client: client, bookURL: book, deviceID: deviceID)
+        }
+        _model = StateObject(wrappedValue: AppModel(client: client, isDemo: launch.demo, screen: launch.screen, ownerSigner: signer, applier: applier))
         if launch.screenshotMode {
             NotificationCenter.default.addObserver(forName: NSApplication.didFinishLaunchingNotification, object: nil, queue: .main) { _ in
                 ScreenshotReporter.report(launch)

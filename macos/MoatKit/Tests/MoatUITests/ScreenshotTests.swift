@@ -154,4 +154,31 @@ final class AppModelTests: XCTestCase {
         let iso = FlowDecision(verdict: .deny, source: .emergencyIsolation, summary: "")
         XCTAssertEqual(iso.pill.0, "Isolated")
     }
+
+    func testApplyCopyFollowsTheAvailablePath() {
+        let plain = model(.appDetail)
+        XCTAssertFalse(plain.canApplyStandalone)
+        let withApplier = model(.appDetail)
+        withApplier.applier = StandaloneApplier(authoring: RefusingAuthoring(), signer: OwnerSigner(store: NoStore(), presence: NoPresence()), client: withApplier.client, bookURL: FileManager.default.temporaryDirectory.appendingPathComponent("moat-ui-book-\(UUID().uuidString).json"), deviceID: "mbp-m1")
+        XCTAssertTrue(withApplier.canApplyStandalone)
+        XCTAssertFalse(AppModel.standaloneApplyHow.contains("not available"), "once the path exists the UI no longer says apply is unavailable")
+        XCTAssertTrue(AppModel.standaloneApplyUnavailable.contains("no policy compiler"))
+    }
+}
+
+private struct RefusingAuthoring: SnapshotAuthoring {
+    func compile(policyText: String, revision: UInt64, issuedAt: Date, deviceID: String?) throws -> CompiledSnapshot { throw StandaloneApplyError("not in UI tests") }
+    func assemble(payload: Data, signature: Data, publicKeyHex: String) throws -> Data { throw StandaloneApplyError("not in UI tests") }
+}
+
+private final class NoStore: ProtectedKeyStore {
+    var requiresUserPresence: Bool { true }
+    func publicKey() -> Data? { nil }
+    func create(seed: Data, publicKey: Data) throws { throw OwnerSigningError.keychain(-1) }
+    func readSeed(context: OwnerPresenceContext) throws -> Data { throw OwnerSigningError.noKey }
+    func delete() throws {}
+}
+
+private struct NoPresence: OwnerPresence {
+    func authenticate(reason: String) async throws -> OwnerPresenceContext { throw OwnerSigningError.presenceDenied("UI test") }
 }
