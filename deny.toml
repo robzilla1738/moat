@@ -1,0 +1,34 @@
+# cargo-deny: licence and source policy for the Rust workspace (all crates are Apache-2.0).
+# Run in CI by .github/workflows/release-engineering.yml. A dependency under a licence not listed here fails CI;
+# copyleft (GPL, AGPL, LGPL without a permissive alternative) is never listed. See docs/licensing.md.
+[graph]
+all-features = true
+
+[licenses]
+version = 2
+confidence-threshold = 0.9
+allow = [
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "MIT",
+  "BSD-3-Clause",
+  "Unicode-3.0",
+]
+# Only licences actually present are listed; adding one is a reviewed change to this file.
+
+[licenses.private]
+ignore = true
+
+[bans]
+multiple-versions = "allow"
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+
+[advisories]
+version = 2
+yanked = "warn"

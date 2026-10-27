@@ -1,4 +1,5 @@
 [package]
+publish = false
 name = "moatctl"
 description = "Moat policy CLI: validate, compile, diff, simulate, sign, verify, explain"
 version.workspace = true
