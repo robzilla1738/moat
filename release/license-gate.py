@@ -55,6 +55,7 @@ def main():
     ap.add_argument("--cargo", required=True)
     ap.add_argument("--npm", required=True)
     ap.add_argument("--out", required=True)
+    ap.add_argument("--npm-lock", help="package-lock.json: every locked npm package must appear in the npm report")
     a = ap.parse_args()
     rows, bad = [], []
 
@@ -77,6 +78,28 @@ def main():
     for r in rows:
         if r[4] in ("copyleft", "no_licence"):
             bad.append(r)
+
+    # Coverage: a report that silently lists nothing would pass the gate vacuously (license-checker --production
+    # lists 0 packages in an npm workspace root). Every locked package must have been checked.
+    if a.npm_lock:
+        reported = {(r[1], r[2]) for r in rows if r[0] == "npm"}
+        lock = json.load(open(a.npm_lock))
+        for path, v in lock.get("packages", {}).items():
+            if "node_modules/" not in path or v.get("link"):
+                continue
+            name = path.rsplit("node_modules/", 1)[1]
+            if (name, v.get("version")) in reported:
+                continue
+            if v.get("optional"):
+                # Platform-specific optional packages (esbuild/rollup binaries, fsevents) are not installed on this
+                # runner, so license-checker cannot see them; gate them on the licence the lockfile records.
+                lic = v.get("license") or ""
+                row = ("npm", name, v.get("version", "?"), (lic or "NONE") + " (lockfile, not installed)", verdict(lic))
+                rows.append(row)
+                if row[4] in ("copyleft", "no_licence"):
+                    bad.append(row)
+            else:
+                bad.append(("npm", name, v.get("version", "?"), "NOT IN REPORT", "unchecked"))
     with open(a.out, "w") as f:
         f.write("# Dependency licence report\n\n")
         f.write(f"{sum(1 for r in rows if r[0]=='cargo')} Rust crates, {sum(1 for r in rows if r[0]=='npm')} npm packages. ")
