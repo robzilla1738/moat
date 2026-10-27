@@ -12,6 +12,8 @@ final class ExtensionManager: NSObject, ObservableObject, OSSystemExtensionReque
     @Published var extensionState = "Not requested"
     @Published var filterState = "Unknown"
     @Published var busy = false
+    @Published var extensionActive = false
+    @Published var filterEnabled = false
 
     var extensionID: String {
         Bundle.main.object(forInfoDictionaryKey: "MoatFilterBundleID") as? String ?? ""
@@ -29,6 +31,7 @@ final class ExtensionManager: NSObject, ObservableObject, OSSystemExtensionReque
                 }
                 let m = NEFilterManager.shared()
                 self.filterState = m.providerConfiguration == nil ? "Not configured" : (m.isEnabled ? "Enabled" : "Disabled")
+                self.filterEnabled = m.providerConfiguration != nil && m.isEnabled
                 if m.providerConfiguration == nil || !m.isEnabled { self.showSetup = true }
             }
         }
@@ -73,6 +76,7 @@ final class ExtensionManager: NSObject, ObservableObject, OSSystemExtensionReque
             m.saveToPreferences { error in
                 DispatchQueue.main.async {
                     self?.filterState = error.map { "Not enabled: \($0.localizedDescription)" } ?? "Enabled"
+                    self?.filterEnabled = error == nil
                     self?.busy = false
                 }
             }
@@ -92,7 +96,9 @@ final class ExtensionManager: NSObject, ObservableObject, OSSystemExtensionReque
     func request(_ request: OSSystemExtensionRequest, didFinishWithResult result: OSSystemExtensionRequest.Result) {
         busy = false
         switch result {
-        case .completed: extensionState = "Active"
+        case .completed:
+            extensionState = "Active"
+            extensionActive = true
         case .willCompleteAfterReboot: extensionState = "Active after restart"
         @unknown default: extensionState = "Finished (\(result.rawValue))"
         }
@@ -104,39 +110,3 @@ final class ExtensionManager: NSObject, ObservableObject, OSSystemExtensionReque
     }
 }
 
-struct SetupView: View {
-    @ObservedObject var installer: ExtensionManager
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            Text("Set up the Moat filter").font(.system(size: 22, weight: .semibold))
-            Text("Moat uses a macOS content filter (a Network Extension) to see and decide outbound connections on this Mac. macOS will ask you to approve it. Until a signed policy is applied, Moat only observes.")
-                .foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true)
-            step(1, "Activate the system extension", installer.extensionState, "Activate") { installer.activate() }
-            step(2, "Enable the content filter", installer.filterState, "Enable") { installer.enableFilter() }
-            Text("Inbound connections are not filtered. Process ancestry is not available without Endpoint Security. Nothing here bypasses macOS approval prompts.")
-                .font(.footnote).foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true)
-            HStack {
-                Button("Remove extension…", role: .destructive) { installer.deactivate() }
-                Spacer()
-                Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
-            }
-        }
-        .padding(28)
-        .frame(width: 520)
-        .disabled(installer.busy)
-    }
-
-    private func step(_ n: Int, _ title: String, _ state: String, _ action: String, _ run: @escaping () -> Void) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            Text("\(n)").font(.headline).frame(width: 26, height: 26).background(Circle().fill(Color.accentColor.opacity(0.15)))
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.headline)
-                Text(state).font(.callout).foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true)
-            }
-            Spacer()
-            Button(action, action: run)
-        }
-    }
-}

@@ -10,7 +10,7 @@ import PackageDescription
 
 let package = Package(
     name: "MoatKit",
-    platforms: [.macOS(.v13)],
+    platforms: [.macOS(.v14)],
     products: [
         .library(name: "MoatKit", targets: ["MoatKit"]),
         .library(name: "MoatCoreBridge", targets: ["MoatCoreBridge"]),

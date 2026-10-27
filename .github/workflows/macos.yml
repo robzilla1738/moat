@@ -8,12 +8,19 @@ permissions:
   contents: read
 jobs:
   moatkit:
-    name: MoatKit build + unit tests (unsigned) + screenshots
-    runs-on: macos-15
+    name: MoatKit build + unit tests (unsigned) + view renders
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - name: Select Xcode 26
+        run: |
+          ls -d /Applications/Xcode*.app
+          X=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+          if [ -n "$X" ]; then sudo xcode-select -s "$X"; fi
+          xcodebuild -version
+          xcodebuild -version | grep -q "Xcode 26" || { echo "::error::Liquid Glass needs Xcode 26 (macOS 26 SDK)"; exit 1; }
       - name: Toolchain
         run: |
           sw_vers
@@ -32,16 +39,23 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: macos-screenshots
+          name: macos-view-renders
           path: macos/build/screenshots
           if-no-files-found: warn
   app:
-    name: Moat.app + system extension (xcodebuild, unsigned)
-    runs-on: macos-15
+    name: Moat.app + system extension (xcodebuild, unsigned) + window screenshots
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - name: Select Xcode 26
+        run: |
+          ls -d /Applications/Xcode*.app
+          X=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+          if [ -n "$X" ]; then sudo xcode-select -s "$X"; fi
+          xcodebuild -version
+          xcodebuild -version | grep -q "Xcode 26" || { echo "::error::Liquid Glass needs Xcode 26 (macOS 26 SDK)"; exit 1; }
       - name: Build moat-ffi static library
         run: macos/scripts/build-ffi.sh
       - name: Generate Xcode project
@@ -68,3 +82,13 @@ jobs:
           macos/scripts/release.sh
           code=$?
           test "$code" = 2 || { echo "release.sh should refuse (exit 2) without signing credentials, got $code"; exit 1; }
+      - name: Capture real window screenshots (demo mode, Liquid Glass)
+        run: |
+          sw_vers
+          macos/scripts/capture-screenshots.sh "$RUNNER_TEMP/dd/Build/Products/Debug/Moat.app" macos/build/window-screenshots
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: macos-screenshots
+          path: macos/build/window-screenshots
+          if-no-files-found: warn

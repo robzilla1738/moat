@@ -8,7 +8,7 @@ configFiles:
   Release: Config/Moat.xcconfig
 options:
   deploymentTarget:
-    macOS: "13.0"
+    macOS: "14.0"
   createIntermediateGroups: true
 packages:
   MoatKit:

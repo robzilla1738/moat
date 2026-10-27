@@ -1,45 +1,83 @@
+import AppKit
+import Combine
 import MoatKit
 import MoatUI
 import SwiftUI
+
+/// Command-line switches for demo and screenshot runs (CI renders the real window with these).
+struct LaunchOptions {
+    var demo = false
+    var isolated = false
+    var screen: Screen = .overview
+    /// "menubar" or "onboarding" render that surface in the main window for a screenshot.
+    var special: String?
+    var onboardingStep: OnboardingStep = .coverage
+    var appearance: ColorScheme?
+    var windowIDFile: String?
+    var snapshotPath: String?
+
+    var screenshotMode: Bool { windowIDFile != nil || snapshotPath != nil }
+
+    static func parse(_ args: [String]) -> LaunchOptions {
+        var o = LaunchOptions()
+        func value(_ flag: String) -> String? {
+            guard let i = args.firstIndex(of: flag), i + 1 < args.count else { return nil }
+            return args[i + 1]
+        }
+        o.demo = args.contains("--demo")
+        o.isolated = args.contains("--isolated")
+        if let s = value("--screen") {
+            if let sc = Screen(rawValue: s) { o.screen = sc } else { o.special = s }
+        }
+        if let st = value("--onboarding-step"), let step = OnboardingStep.allCases.first(where: { "\($0)" == st }) { o.onboardingStep = step }
+        switch value("--appearance") {
+        case "dark": o.appearance = .dark
+        case "light": o.appearance = .light
+        default: break
+        }
+        o.windowIDFile = value("--window-id-file")
+        o.snapshotPath = value("--snapshot")
+        return o
+    }
+}
 
 @main
 struct MoatApp: App {
     @AppStorage("appearance") private var appearance: Appearance = .system
     @StateObject private var model: AppModel
     @StateObject private var installer = ExtensionManager()
+    @StateObject private var onboarding = OnboardingState()
+    private let launch: LaunchOptions
 
     init() {
-        let demo = CommandLine.arguments.contains("--demo")
+        let launch = LaunchOptions.parse(CommandLine.arguments)
+        self.launch = launch
         let service = Bundle.main.object(forInfoDictionaryKey: "MoatMachServiceName") as? String ?? ""
-        let client: ControlClient = demo ? DemoControlClient() : XPCControlClient(machServiceName: service)
-        _model = StateObject(wrappedValue: AppModel(client: client, isDemo: demo))
+        let client: ControlClient = launch.demo ? DemoControlClient(isolated: launch.isolated) : XPCControlClient(machServiceName: service)
+        _model = StateObject(wrappedValue: AppModel(client: client, isDemo: launch.demo, screen: launch.screen))
     }
 
     var body: some Scene {
-        WindowGroup("Moat") {
-            RootView(model: model)
-                .frame(minWidth: 1040, minHeight: 700)
-                .preferredColorScheme(appearance.colorScheme)
-                .task {
-                    // Poll the extension's typed status surface. The UI shows only what it reports.
-                    while !Task.isCancelled {
-                        await model.refresh()
-                        try? await Task.sleep(nanoseconds: 3_000_000_000)
-                    }
-                }
-                .sheet(isPresented: $installer.showSetup) {
-                    SetupView(installer: installer)
-                        .preferredColorScheme(appearance.colorScheme)
-                }
-                .onAppear { installer.checkFilterConfiguration(isDemo: model.isDemo) }
+        Window("Moat", id: "main") {
+            MainWindow(model: model, installer: installer, onboarding: onboarding, launch: launch)
+                .preferredColorScheme(launch.appearance ?? appearance.colorScheme)
         }
-        .windowStyle(.hiddenTitleBar)
+        .defaultSize(width: 1180, height: 780)
+        .windowToolbarStyle(.unified)
         .commands {
             CommandGroup(after: .appInfo) {
-                Button("Set Up Filter…") { installer.showSetup = true }
+                Button("Set Up Moat…") { NotificationCenter.default.post(name: .moatShowOnboarding, object: nil) }
                 Button("Refresh") { Task { await model.refresh() } }.keyboardShortcut("r")
             }
         }
+
+        MenuBarExtra {
+            MenuBarRoot(model: model)
+                .preferredColorScheme(launch.appearance ?? appearance.colorScheme)
+        } label: {
+            Label("Moat", systemImage: model.status?.coverage.systemImage ?? "shield.lefthalf.filled")
+        }
+        .menuBarExtraStyle(.window)
 
         Settings {
             Form {
@@ -47,9 +85,140 @@ struct MoatApp: App {
                     ForEach(Appearance.allCases) { Text($0.label).tag($0) }
                 }
                 .pickerStyle(.segmented)
+                Button("Show setup again") { NotificationCenter.default.post(name: .moatShowOnboarding, object: nil) }
             }
             .padding(24)
-            .frame(width: 380)
+            .frame(width: 400)
+        }
+    }
+}
+
+extension Notification.Name {
+    static let moatShowOnboarding = Notification.Name("moat.showOnboarding")
+}
+
+/// Menu bar panel host: opens and focuses the main window on request.
+struct MenuBarRoot: View {
+    @ObservedObject var model: AppModel
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        MenuBarContent(model: model, openMain: {
+            openWindow(id: "main")
+            NSApp.activate(ignoringOtherApps: true)
+        }, quit: { NSApp.terminate(nil) })
+    }
+}
+
+struct MainWindow: View {
+    @ObservedObject var model: AppModel
+    @ObservedObject var installer: ExtensionManager
+    @ObservedObject var onboarding: OnboardingState
+    let launch: LaunchOptions
+    @AppStorage("onboardingComplete") private var onboardingComplete = false
+    @State private var showOnboarding = false
+    @State private var onboardingStart: OnboardingStep = .welcome
+
+    var body: some View {
+        surface
+            .task {
+                // Poll the extension's typed status surface. The UI shows only what it reports.
+                while !Task.isCancelled {
+                    await model.refresh()
+                    try? await Task.sleep(nanoseconds: 3_000_000_000)
+                }
+            }
+            .sheet(isPresented: $showOnboarding) {
+                OnboardingView(state: onboarding, step: onboardingStart) {
+                    onboardingComplete = true
+                    showOnboarding = false
+                }
+            }
+            .onAppear(perform: appear)
+            .onReceive(installer.objectWillChange.receive(on: RunLoop.main)) { _ in syncOnboarding() }
+            .onReceive(NotificationCenter.default.publisher(for: .moatShowOnboarding)) { _ in
+                onboardingStart = .welcome
+                showOnboarding = true
+            }
+    }
+
+    @ViewBuilder private var surface: some View {
+        switch launch.special {
+        case .some("menubar"):
+            // The menu bar panel, hosted in a window so it can be captured (screenshots only).
+            MenuBarContent(model: model, openMain: {}, quit: {})
+                .frame(width: 348)
+                .fixedSize()
+        case .some("onboarding"):
+            OnboardingView(state: onboarding, step: launch.onboardingStep) {}
+        default:
+            RootView(model: model)
+                .frame(minWidth: 980, minHeight: 640)
+        }
+    }
+
+    private func appear() {
+        onboarding.activate = { installer.activate() }
+        onboarding.enableFilter = { installer.enableFilter() }
+        onboarding.recheckTrust = { onboarding.loadTrust() }
+        onboarding.revealTrustFolder = {
+            let url = URL(fileURLWithPath: TrustConfig.defaultPath).deletingLastPathComponent()
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+        }
+        if launch.demo {
+            onboarding.extensionState = "Demo: macOS approval is not requested in demo mode"
+            onboarding.filterState = "Demo: the content filter is not configured in demo mode"
+            onboarding.trustProblems = ["Demo: no trusted-keys file is read in demo mode"]
+        } else {
+            installer.checkFilterConfiguration(isDemo: false)
+            onboarding.loadTrust()
+            syncOnboarding()
+        }
+        if !onboardingComplete, !launch.screenshotMode, launch.special == nil {
+            onboardingStart = .welcome
+            showOnboarding = true
+        }
+        if launch.screenshotMode { ScreenshotReporter.report(launch) }
+    }
+
+    private func syncOnboarding() {
+        guard !launch.demo else { return }
+        onboarding.extensionState = installer.extensionState
+        onboarding.extensionActive = installer.extensionActive
+        onboarding.filterState = installer.filterState
+        onboarding.filterEnabled = installer.filterEnabled
+        onboarding.busy = installer.busy
+        if installer.showSetup, onboardingComplete, !showOnboarding {
+            // The filter is missing or off after setup: reopen setup at the approval step.
+            installer.showSetup = false
+            onboardingStart = .approve
+            showOnboarding = true
+        }
+    }
+}
+
+/// Screenshot runs: size the window, then report its window number (for `screencapture -l`) and, as a fallback,
+/// write an AppKit snapshot of the window contents.
+enum ScreenshotReporter {
+    static func report(_ o: LaunchOptions) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+            guard let w = NSApp.windows.first(where: { $0.isVisible && $0.canBecomeMain }) ?? NSApp.windows.first(where: { $0.isVisible }) else { return }
+            if o.special == nil {
+                w.setContentSize(NSSize(width: 1280, height: 820))
+            }
+            w.center()
+            w.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                if let path = o.snapshotPath, let view = w.contentView?.superview ?? w.contentView,
+                   let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
+                    view.cacheDisplay(in: view.bounds, to: rep)
+                    try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
+                }
+                if let path = o.windowIDFile {
+                    try? "\(w.windowNumber)".write(toFile: path, atomically: true, encoding: .utf8)
+                }
+            }
         }
     }
 }

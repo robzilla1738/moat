@@ -12,9 +12,10 @@ extension EnvironmentValues {
     }
 }
 
-/// Card surface with a hairline border and soft shadow, like `.card` on the web.
+/// Content surface. Content leads, so cards are quiet opaque surfaces, never glass.
 struct Card<Content: View>: View {
     @Environment(\.palette) private var p
+    @Environment(\.colorSchemeContrast) private var contrast
     var padding: CGFloat = 18
     @ViewBuilder var content: Content
 
@@ -22,9 +23,10 @@ struct Card<Content: View>: View {
         VStack(alignment: .leading, spacing: 12) { content }
             .padding(padding)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(p.surface))
-            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(p.border, lineWidth: 1))
-            .shadow(color: Color.black.opacity(0.18), radius: 14, x: 0, y: 8)
+            .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(p.surface))
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .strokeBorder(contrast == .increased ? p.text.opacity(0.4) : p.border, lineWidth: 1))
     }
 }
 
@@ -35,13 +37,13 @@ struct SectionTitle: View {
 
     var body: some View {
         HStack {
-            Text(text.uppercased())
-                .font(.system(size: 11, weight: .semibold))
-                .tracking(0.8)
-                .foregroundColor(p.muted)
+            Text(text)
+                .font(.headline)
+                .foregroundStyle(p.text)
+                .accessibilityAddTraits(.isHeader)
             Spacer()
             if let trailing {
-                Text(trailing).font(.system(size: 12)).foregroundColor(p.muted)
+                Text(trailing).font(.subheadline).foregroundStyle(p.muted)
             }
         }
     }
@@ -72,14 +74,15 @@ struct Pill: View {
     var body: some View {
         let c = tone.color(p)
         HStack(spacing: 5) {
-            if dot { Circle().fill(c).frame(width: 6, height: 6) }
-            Text(text).font(.system(size: 11.5, weight: .semibold))
+            if dot { Circle().fill(c).frame(width: 6, height: 6).accessibilityHidden(true) }
+            Text(text).font(.caption.weight(.semibold))
         }
-        .foregroundColor(c)
+        .foregroundStyle(c)
         .padding(.horizontal, 8)
         .padding(.vertical, 3)
-        .background(Capsule().fill(c.opacity(0.12)))
-        .overlay(Capsule().strokeBorder(c.opacity(0.22), lineWidth: 1))
+        .background(Capsule().fill(c.opacity(0.13)))
+        .overlay(Capsule().strokeBorder(c.opacity(0.28), lineWidth: 1))
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -92,23 +95,25 @@ struct Stat: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(label.uppercased()).font(.system(size: 10.5, weight: .semibold)).tracking(0.7).foregroundColor(p.muted)
+            Text(label).font(.subheadline.weight(.medium)).foregroundStyle(p.muted)
             Text(value)
-                .font(.system(size: 28, weight: .semibold, design: .rounded))
+                .font(.system(.largeTitle, design: .rounded).weight(.semibold))
                 .monospacedDigit()
-                .foregroundColor(tone.map { $0.color(p) } ?? p.text)
-            if let sub { Text(sub).font(.system(size: 12)).foregroundColor(p.muted) }
+                .foregroundStyle(tone.map { $0.color(p) } ?? p.text)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+            if let sub { Text(sub).font(.caption).foregroundStyle(p.muted).lineLimit(2) }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(14)
-        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(p.surface2))
-        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(p.border, lineWidth: 1))
+        .padding(16)
+        .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(p.surface))
+        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(p.border, lineWidth: 1))
+        .accessibilityElement(children: .combine)
     }
 }
 
-/// A plain, fully SwiftUI-drawn button (renders identically in ImageRenderer screenshots).
+/// A control button: `.glassProminent` (primary/danger) or `.glass` (secondary) on macOS 26, bordered styles before.
 struct MoatButton: View {
-    @Environment(\.palette) private var p
     enum Kind { case primary, secondary, danger }
     let title: String
     var systemImage: String?
@@ -118,49 +123,24 @@ struct MoatButton: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 6) {
-                if let systemImage { Image(systemName: systemImage).font(.system(size: 12, weight: .semibold)) }
-                Text(title).font(.system(size: 13, weight: .semibold))
+            if let systemImage {
+                Label(title, systemImage: systemImage)
+            } else {
+                Text(title)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 8)
-            .foregroundColor(fg)
-            .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(bg))
-            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(border, lineWidth: 1))
-            .opacity(disabled ? 0.45 : 1)
         }
-        .buttonStyle(.plain)
+        .moatButtonStyle(prominent: kind != .secondary, destructive: kind == .danger)
+        .controlSize(.large)
         .disabled(disabled)
-    }
-
-    private var fg: Color {
-        switch kind {
-        case .primary: return .white
-        case .secondary: return p.text
-        case .danger: return p.red
-        }
-    }
-
-    private var bg: Color {
-        switch kind {
-        case .primary: return p.accent
-        case .secondary: return p.surface3
-        case .danger: return p.red.opacity(0.1)
-        }
-    }
-
-    private var border: Color {
-        switch kind {
-        case .primary: return p.accent
-        case .secondary: return p.borderStrong
-        case .danger: return p.red.opacity(0.3)
-        }
     }
 }
 
-/// Segmented control drawn in SwiftUI.
+/// Segmented filter on a glass capsule. The selection highlight is an opaque tinted capsule that slides between
+/// options (matched geometry), so glass is never stacked on glass. Reduce Motion: no slide.
 struct Segmented<T: Hashable>: View {
     @Environment(\.palette) private var p
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Namespace private var ns
     let options: [(T, String)]
     @Binding var selection: T
 
@@ -169,19 +149,29 @@ struct Segmented<T: Hashable>: View {
             ForEach(Array(options.enumerated()), id: \.offset) { item in
                 let opt = item.element
                 let on = opt.0 == selection
-                Button { selection = opt.0 } label: {
+                Button {
+                    withAnimation(reduceMotion ? nil : .snappy(duration: 0.28)) { selection = opt.0 }
+                } label: {
                     Text(opt.1)
-                        .font(.system(size: 12.5, weight: on ? .semibold : .medium))
-                        .foregroundColor(on ? p.text : p.muted)
-                        .padding(.horizontal, 12)
+                        .font(.callout.weight(on ? .semibold : .regular))
+                        .foregroundStyle(on ? p.text : p.text2)
+                        .padding(.horizontal, 14)
                         .padding(.vertical, 6)
-                        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(on ? p.surface : Color.clear))
+                        .background {
+                            if on {
+                                Capsule().fill(p.accent.opacity(0.18))
+                                    .overlay(Capsule().strokeBorder(p.accent.opacity(0.35), lineWidth: 1))
+                                    .matchedGeometryEffect(id: "selection", in: ns)
+                            }
+                        }
+                        .contentShape(Capsule())
                 }
                 .buttonStyle(.plain)
+                .accessibilityAddTraits(on ? .isSelected : [])
             }
         }
-        .padding(3)
-        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(p.surface3))
+        .padding(4)
+        .moatGlass(in: Capsule())
     }
 }
 
@@ -194,6 +184,11 @@ extension Support {
         case .unsupported: return .neutral
         }
     }
+}
+
+public extension CoverageLevel {
+    /// SF Symbol for this coverage level (menu bar icon, toolbar badge).
+    var systemImage: String { symbol }
 }
 
 extension CoverageLevel {

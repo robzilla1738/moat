@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 /// Owner-configured verifying keys for signed snapshots.
@@ -41,6 +42,25 @@ public struct TrustConfig: Equatable, Sendable {
             return (TrustConfig(keys: []), ["no trusted keys file at \(path); every snapshot will be rejected"])
         }
         return parse(text)
+    }
+
+    /// The signer key id moat-core uses: the first 16 hex characters of sha256 over the raw 32-byte public key.
+    public static func keyID(hex: String) -> String? {
+        guard isHexKey(hex) else { return nil }
+        var bytes = [UInt8]()
+        var i = hex.startIndex
+        while i < hex.endIndex {
+            let j = hex.index(i, offsetBy: 2)
+            guard let b = UInt8(hex[i ..< j], radix: 16) else { return nil }
+            bytes.append(b)
+            i = j
+        }
+        return SHA256.hash(data: Data(bytes)).map { String(format: "%02x", $0) }.joined().prefix(16).description
+    }
+
+    /// Key ids of the trusted (not revoked) keys, for display. Reading never changes trust.
+    public var activeKeyIDs: [String] {
+        keys.compactMap { Self.keyID(hex: $0) }.filter { !revokedKeyIDs.contains($0) }
     }
 
     static func isHexKey(_ s: String) -> Bool {
