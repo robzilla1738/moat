@@ -79,13 +79,15 @@ test("allow once: exact plan, phone approval with a delegated key, pending until
   await card.getByRole("button", { name: "Allow once for this task" }).click();
   // the plan is rendered from the controller's canonical record
   await card.getByText("Not approved yet").waitFor();
-  await card.getByText("20261027-aaaa").waitFor();
-  await card.getByText("TCP 443").first().waitFor();
+  // the task id and port are part of the visible plan, not hidden under Technical details
+  const plan = card.locator(".plan");
+  await plan.getByText("20261027-aaaa").waitFor();
+  await plan.getByText("TCP 443").first().waitFor();
   await card.getByText(/trying again doesn.t extend it/).waitFor();
   await shot(page, "live-allow-once-review");
   // an owner bearer token alone is not enough for this signer
   await card.getByRole("button", { name: "Approve exactly this" }).click();
-  await card.getByText(/only accepts phone approvals from a delegated key/).waitFor();
+  await card.getByText(/only accepts approvals from a phone or browser with its own approval key/).waitFor();
   assert.equal(((await h.owner("GET", "/v1/grants")).json as unknown as unknown[]).length, 0, "nothing was granted");
   // set up this browser as a delegated approver: its own key, an owner-signed delegation made off the page
   await page.goto(`${h.url}/#/devices`);
