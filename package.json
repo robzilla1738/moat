@@ -1,0 +1,11 @@
+{
+  "name": "moat",
+  "private": true,
+  "license": "Apache-2.0",
+  "workspaces": ["controller", "web"],
+  "engines": { "node": ">=22.18" },
+  "scripts": {
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm test --workspaces --if-present"
+  }
+}

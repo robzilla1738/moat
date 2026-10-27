@@ -246,6 +246,11 @@ impl Spool {
         }
     }
 
+    /// Record a clean shutdown without consuming the spool (signal handlers).
+    pub fn mark_clean(&self) {
+        let _ = File::create(self.cfg.dir.join(CLEAN_MARKER));
+    }
+
     pub fn close(mut self) {
         self.current = None;
         let _ = File::create(self.cfg.dir.join(CLEAN_MARKER));

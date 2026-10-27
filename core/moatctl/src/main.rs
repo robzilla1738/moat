@@ -133,6 +133,8 @@ enum Cmd {
         #[arg(long)]
         flow: PathBuf,
     },
+    /// Print the validated policy as normalized JSON (for tools that must not re-implement TOML parsing).
+    Normalize { policy: PathBuf },
     /// Run the implementation-independent conformance cases in a directory.
     Conformance {
         #[arg(default_value = "conformance")]
@@ -450,6 +452,15 @@ fn run(cmd: Cmd, o: &mut Out) -> Result<(), String> {
                     println!("  This profile observes; the flow was permitted, not enforced.");
                 }
             }
+            Ok(())
+        }
+        Cmd::Normalize { policy } => {
+            let p = load_policy(&policy)?;
+            if let Err(errs) = p.validate() {
+                o.code = 2;
+                return Err(errs.iter().map(|e| e.to_string()).collect::<Vec<_>>().join("; "));
+            }
+            println!("{}", serde_json::to_string(&p).unwrap());
             Ok(())
         }
         Cmd::Conformance { dir } => conformance(&dir, o),

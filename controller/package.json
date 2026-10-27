@@ -1,0 +1,19 @@
+{
+  "name": "@moat/controller",
+  "version": "0.1.0",
+  "description": "Moat controller: enrollment, policy service with a separate signer, grants, flow store, attention, notifications, harness launch API, DNS-only integrations, Digital Kingdom feed",
+  "license": "Apache-2.0",
+  "type": "module",
+  "private": true,
+  "engines": { "node": ">=22.18" },
+  "bin": { "moat-controller": "src/main.ts" },
+  "scripts": {
+    "start": "node src/main.ts serve",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test --test-concurrency=1 test/*.test.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.6.0"
+  }
+}

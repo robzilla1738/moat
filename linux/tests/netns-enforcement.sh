@@ -76,7 +76,8 @@ for _ in $(seq 50); do grep -q ready "$WORK/server.out" 2>/dev/null && break; sl
 "$BIN/moatctl" sign "$WORK/snap1.json" --key "$WORK/signer.key" -o "$WORK/signed1.json"
 
 start_daemon() {
-  A "$BIN/moatd" --state "$S" --socket "$SOCK" run --device-id lab --tick-secs 1 > "$WORK/moatd.log" 2>&1 &
+  # Not via the A() function: a backgrounded function is a subshell, and killing it would leave moatd running.
+  nsenter --net=/run/netns/moat-a "$BIN/moatd" --state "$S" --socket "$SOCK" run --device-id lab --tick-secs 1 >> "$WORK/moatd.log" 2>&1 &
   DAEMON_PID=$!
   for _ in $(seq 50); do [[ -S "$SOCK" ]] && break; sleep 0.1; done
 }
@@ -143,6 +144,7 @@ expect "clear-isolation reopens ordinary traffic" 0 "$(plain tcp4_8080)"
 
 # --- restart: controller-free operation -------------------------------------------------------------------------
 kill "$DAEMON_PID"; wait "$DAEMON_PID" 2>/dev/null || true
+if pgrep -f "moatd --state $S" >/dev/null; then bad "daemon stopped before restart"; pkill -f "moatd --state $S"; sleep 0.5; fi
 start_daemon
 wait_for '.revision == 2 and .enforcement_active' && ok "restart restores last valid policy offline" || bad "restart restore"
 expect "lab-deny still blocked after restart" blocked "$(launch lab-deny tcp4_8080)"
@@ -153,6 +155,8 @@ echo "$SP" | jq -s -e 'map(.event.type) | (index("session_started") != null) and
   && ok "spool has sessions, receipts, refusals and restart markers" || bad "spool contents"
 echo "$SP" | jq -s -e '[.[].seq] as $s | ($s == ($s | sort)) and ($s | length) == ($s | unique | length)' >/dev/null \
   && ok "spool sequence monotonic and unique" || bad "spool sequence"
+echo "$SP" | jq -s -e '[.[] | select(.event.type == "restart")] | last | .event.clean_shutdown == true' >/dev/null \
+  && ok "SIGTERM recorded as a clean shutdown" || bad "clean shutdown marker"
 
 echo "----"
 echo "netns enforcement: $PASS passed, $FAIL failed"

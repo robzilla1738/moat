@@ -19,6 +19,24 @@ use crate::nft::NftBackend;
 
 pub fn serve<B: NftBackend + Send + 'static>(ep: Endpoint<B>, socket: PathBuf, tick: Duration) -> std::io::Result<()> {
     let ep = Arc::new(Mutex::new(ep));
+    // SIGTERM/SIGINT: record a clean shutdown in the spool, then exit. Enforcement state stays in the kernel; the
+    // next start re-verifies and reconciles it.
+    {
+        use nix::sys::signal::{SigSet, Signal};
+        let mut set = SigSet::empty();
+        set.add(Signal::SIGTERM);
+        set.add(Signal::SIGINT);
+        set.thread_block().map_err(std::io::Error::from)?;
+        let ep = ep.clone();
+        std::thread::spawn(move || {
+            if set.wait().is_ok() {
+                if let Ok(e) = ep.lock() {
+                    e.spool.mark_clean();
+                }
+                std::process::exit(0);
+            }
+        });
+    }
     if let Some(d) = socket.parent() {
         fs::create_dir_all(d)?;
     }

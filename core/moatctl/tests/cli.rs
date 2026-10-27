@@ -177,3 +177,12 @@ fn conformance_command_passes() {
     assert!(o.status.success(), "{}", s(&o));
     assert!(s(&o).contains("0 failed"));
 }
+
+#[test]
+fn normalize_prints_policy_json() {
+    let o = run(&["normalize", home().to_str().unwrap()]);
+    assert!(o.status.success(), "{}", s(&o));
+    let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+    assert_eq!(v["schema"], "moat.policy.v1");
+    assert!(v["rules"].as_array().unwrap().len() >= 5);
+}
