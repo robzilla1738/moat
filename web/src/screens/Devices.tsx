@@ -28,6 +28,7 @@ export function Devices({ go }: { go: (to: string) => void }) {
             </span>
             <span className="device-row-side">
               <CoverageBadge c={fresh(d).coverage} />
+              {d.sync && d.sync.state !== "current" && <Badge tone={d.sync.state === "pending" || d.sync.state === "not_released" ? "neutral" : "amber"}>{d.sync.state.replace("_", " ")}</Badge>}
               <span className="muted small">{d.revision ? `rev ${d.revision}` : "no policy"} · {ago(d.lastSeen)}</span>
             </span>
           </Card>
@@ -57,6 +58,12 @@ export function DeviceDetail({ id, go }: { id: string; go: (to: string) => void 
           {f.stale && <Badge tone="amber">stale</Badge>}
           {d.revision && <Badge tone="blue">rev {d.revision} {d.revisionState}</Badge>}
           {d.awaitingRetarget && <Badge tone="amber">no snapshot for this device</Badge>}
+          {d.sync && d.sync.state !== "current" && (
+            <Badge tone={d.sync.state === "pending" || d.sync.state === "not_released" ? "neutral" : "amber"}>
+              {d.sync.state.replace("_", " ")}
+              {d.sync.desired ? ` · wants rev ${d.sync.desired}` : ""}
+            </Badge>
+          )}
           <span className="muted small">seen {ago(d.lastSeen)}</span>
         </div>
       </div>

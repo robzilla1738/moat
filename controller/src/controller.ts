@@ -8,6 +8,7 @@ import { isIP } from "node:net";
 import { audit, CONTROL_MIGRATIONS, HttpError, openDb, tx, type DB } from "./db.ts";
 import { canonicalJson, generateKeyPair, id, keyIdOf, keyPairFromSeed, publicFromHex, requestString, responseString, sha256hex, signB64, token, verifyB64, type KeyPair } from "./crypto.ts";
 import { FlowStore, type FlowRecord } from "./flows.ts";
+import { desiredSnapshot, holdReason, recordLocalChange } from "./fleet.ts";
 import { Notifier, type FetchLike, type Urgency } from "./notify.ts";
 import type { Moatctl } from "./moatctl.ts";
 import { contextDigest, contractTime, grantDigest, policyDigest, type ApprovalContext, type Delegation, type GrantApproval, type GrantV1, type OwnerAuthorization, type SignResult } from "./signer.ts";
@@ -184,17 +185,20 @@ export class Controller {
 
   // ------------------------------------------------------------------ device sync
   /** One sync round: receipts and events in; newer signed snapshot and typed actions out. */
-  sync(d: DeviceRow, b: { last_applied?: number | null; capabilities?: unknown; status?: unknown; receipts?: { revision: number; state: string; detail?: string }[]; events?: SpoolRecord[] }) {
+  sync(d: DeviceRow, b: { last_applied?: number | null; capabilities?: unknown; status?: unknown; receipts?: { revision: number; state: string; detail?: string }[]; events?: SpoolRecord[]; spool_low_seq?: number | null; local_change?: { revision?: unknown; digest?: unknown; broadening?: unknown; authorized_by?: unknown } | null }) {
     const at = this.iso();
     this.db.prepare("UPDATE devices SET last_seen_at = ?, capabilities = COALESCE(?, capabilities), status = COALESCE(?, status), last_revision = COALESCE(?, last_revision) WHERE id = ?")
       .run(at, b.capabilities ? JSON.stringify(b.capabilities) : null, b.status ? JSON.stringify(b.status) : null, b.last_applied ?? null, d.id);
     for (const r of b.receipts ?? []) {
       if (["received", "applied", "rejected"].includes(r.state) && Number.isInteger(r.revision)) this.recordRevisionState(d.id, r.revision, r.state, r.detail ?? null);
     }
-    const ingest = this.ingestEvents(d, b.events ?? []);
-    // only the current revision's snapshot for this platform; never an older revision's when the current one has none
-    const cur = this.currentRevision();
-    const latest = cur ? (this.db.prepare("SELECT revision, signed FROM snapshots WHERE revision = ? AND platform = ?").get(cur.revision, platformAdapter(d.platform)) as { revision: number; signed: string } | undefined) : undefined;
+    const ingest = this.ingestEvents(d, b.events ?? [], Number.isInteger(b.spool_low_seq) ? Number(b.spool_low_seq) : null);
+    if (b.local_change) recordLocalChange(this, d.id, b.local_change);
+    // Desired state for this device: the newest revision released to it (staged rollouts), never one it already has,
+    // and nothing while an offline local change waits for the owner (no last-writer-wins in either direction).
+    const want = desiredSnapshot(this, d.id, platformAdapter(d.platform));
+    const cur = want && want.signed === null ? want : null;
+    const latest = want && want.signed !== null ? { revision: want.revision, signed: want.signed } : undefined;
     let snapshot: unknown = null;
     let snapshotPending: string | null = null;
     if (cur && !latest && (b.last_applied ?? 0) < cur.revision) {
@@ -214,7 +218,9 @@ export class Controller {
     }
     const actions = this.db.prepare("SELECT id, kind, args FROM device_actions WHERE device_id = ? AND done_at IS NULL ORDER BY created_at").all(d.id) as { id: string; kind: string; args: string }[];
     for (const a of actions) this.db.prepare("UPDATE device_actions SET delivered_at = COALESCE(delivered_at, ?) WHERE id = ?").run(at, a.id);
-    return { snapshot, ...(snapshotPending ? { snapshot_pending: snapshotPending } : {}), actions: actions.map((a) => ({ id: a.id, kind: a.kind, args: JSON.parse(a.args) })), acked_seq: ingest.maxSeq, gaps: ingest.gaps };
+    // acked_seq is the contiguous high-water: the endpoint may drop everything at or below it and must keep (and
+    // resend) anything above it. pending_ranges are holes the controller is still waiting for.
+    return { snapshot, ...(snapshotPending ? { snapshot_pending: snapshotPending } : {}), actions: actions.map((a) => ({ id: a.id, kind: a.kind, args: JSON.parse(a.args) })), acked_seq: ingest.acked, pending_ranges: ingest.pending, gaps: ingest.gaps, held: holdReason(this, d.id) };
   }
 
   recordRevisionState(deviceId: string, revision: number, state: string, detail: string | null) {
@@ -223,8 +229,9 @@ export class Controller {
 
   /** Spool records from an endpoint. Origin is the endpoint (enforcer + launcher); it may report decisions,
    * counters, receipts, sessions and coverage. It may not report another device's events. */
-  ingestEvents(d: DeviceRow, events: SpoolRecord[]) {
+  ingestEvents(d: DeviceRow, events: SpoolRecord[], spoolLowSeq: number | null = null) {
     const flowRecs: FlowRecord[] = [];
+    const eventLost: [number, number][] = [];
     let maxSeq = 0;
     for (const r of events.slice(0, 5000)) {
       if (!Number.isInteger(r.seq) || r.seq < 1) continue;
@@ -320,6 +327,7 @@ export class Controller {
           flowRecs.push({ seq: r.seq, at: r.at, kind: "proxy_limit", session_id: String(e.session_id), detail: `${e.resource}=${e.limit}` });
           break;
         case "gap":
+          if (Number.isInteger(Number(e.from)) && Number.isInteger(Number(e.to))) eventLost.push([Number(e.from), Number(e.to)]);
           this.raise({ kind: "telemetry_gap", device: d.id, destination: "-", reason: `events ${e.from}–${e.to} lost on the device (${e.reason})`, urgency: "medium", ref: `seq:${r.seq}`, at: r.at });
           flowRecs.push({ seq: r.seq, at: r.at, kind: "gap" });
           break;
@@ -327,9 +335,18 @@ export class Controller {
           flowRecs.push({ seq: r.seq, at: r.at, kind: e.type.slice(0, 40) });
       }
     }
-    const res = this.flows.insertBatch(d.id, flowRecs);
-    for (const [from, to] of res.gaps) this.raise({ kind: "telemetry_gap", device: d.id, destination: "-", reason: `controller never received events ${from}–${to}`, urgency: "medium", ref: `gap:${from}-${to}`, at: this.iso() });
-    return { maxSeq, gaps: res.gaps };
+    // Holes below the endpoint's lowest retained record can never be resent: they are lost, and say so.
+    const lowLost: [number, number][] = [];
+    if (spoolLowSeq !== null && spoolLowSeq > 1) {
+      const acked = this.flows.ackState(d.id).acked;
+      if (spoolLowSeq - 1 > acked) lowLost.push([acked + 1, spoolLowSeq - 1]);
+    }
+    const res = this.flows.insertBatch(d.id, flowRecs, [...eventLost, ...lowLost]);
+    for (const [from, to] of res.gaps) {
+      if (eventLost.some(([a, b]) => from >= a && to <= b)) continue; // the endpoint's own gap event already raised it
+      this.raise({ kind: "telemetry_gap", device: d.id, destination: "-", reason: `controller never received events ${from}–${to}, and the device no longer has them`, urgency: "medium", ref: `gap:${from}-${to}`, at: this.iso() });
+    }
+    return { maxSeq, gaps: res.gaps, acked: res.acked, pending: res.pending };
   }
 
   // ------------------------------------------------------------------ attention queue

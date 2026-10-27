@@ -61,6 +61,10 @@ export const CONTROL_MIGRATIONS: string[] = [
    INSERT INTO device_revisions_v3 SELECT * FROM device_revisions;
    DROP TABLE device_revisions;
    ALTER TABLE device_revisions_v3 RENAME TO device_revisions;`,
+  // 6 (W13): staged rollouts (a revision reaches a device only once its stage is open) and offline local changes
+  // reported by endpoints (they hold distribution to that device until the owner reconciles; no last-writer-wins).
+  `CREATE TABLE rollouts (revision INTEGER PRIMARY KEY, stages TEXT NOT NULL, opened INTEGER NOT NULL DEFAULT 1, created_by TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+   CREATE TABLE local_changes (device_id TEXT NOT NULL, revision INTEGER NOT NULL, digest TEXT NOT NULL, broadening INTEGER NOT NULL, authorized_by TEXT, reported_at TEXT NOT NULL, resolved_at TEXT, resolution TEXT, resolved_by TEXT, PRIMARY KEY (device_id, revision, digest));`,
 ];
 
 export function openDb(path: string, migrations: string[]): DB {

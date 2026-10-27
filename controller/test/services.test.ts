@@ -23,7 +23,12 @@ test("flow store: batched inserts, duplicates ignored, gaps found, rollups, rete
   assert.deepEqual([r1.inserted, r1.duplicates], [3, 0]);
   const r2 = fs.insertBatch("omarchy", [rec(3, "2026-10-26T10:10:00Z"), rec(7, "2026-10-26T11:00:00Z")]);
   assert.deepEqual([r2.inserted, r2.duplicates], [1, 1]);
-  assert.deepEqual(r2.gaps, [[4, 6]]);
+  assert.deepEqual(r2.gaps, [], "a hole is pending (the endpoint resends), not a gap");
+  assert.deepEqual(r2.pending, [[4, 6]]);
+  assert.equal(r2.acked, 3, "acknowledged only up to the contiguous high-water");
+  const r3 = fs.insertBatch("omarchy", [], [[4, 6]]);
+  assert.deepEqual(r3.gaps, [[4, 6]], "declared lost by the endpoint");
+  assert.equal(r3.acked, 7);
   const roll = fs.rollups({ sinceHour: "2026-10-26T00:00:00Z" }) as { hour: string; flows: number }[];
   assert.equal(roll.find((x) => x.hour === "2026-10-26T10:00:00Z")!.flows, 2);
   const ret = fs.retain(new Date("2026-10-26T12:00:00Z"));

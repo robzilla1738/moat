@@ -145,8 +145,11 @@ test("incidents group repeats, ignore duplicate records, reopen after acknowledg
   inc = f.c.incidents().find((i) => i.kind === "blocked_connection")!;
   assert.equal(inc.state, "open");
   assert.equal(inc.new_since_ack, 1);
+  assert.equal(f.c.incidents().find((i) => i.kind === "telemetry_gap"), undefined, "a hole is pending while the endpoint can still resend it");
+  const held = f.c.sync(d as never, { events: [], spool_low_seq: 7 });
+  assert.equal(held.acked_seq, 7, "the endpoint no longer has 3..6: declared lost, acknowledgement moves on");
   const gap = f.c.incidents().find((i) => i.kind === "telemetry_gap");
-  assert.ok(gap, "seq 3..6 never arrived");
+  assert.ok(gap, "seq 3..6 never arrived and cannot be resent");
   assert.match(String(gap!.reason), /3–6/);
   f.c.sync(d as never, { events: [{ seq: 8, at, event: { type: "gap", from: 100, to: 120, reason: "spool disk quota reached" } }, { seq: 9, at, event: { type: "coverage_changed", level: "degraded", detail: "nft rejected" } }] });
   assert.ok(f.c.incidents().some((i) => i.kind === "coverage_lost" && i.urgency === "high"));

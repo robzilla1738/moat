@@ -68,6 +68,8 @@ test("what changed: observed differences are separated from candidates, each can
   // Failing interval: new signer identity, example.org denied at revision 2, and a lost event range.
   nextSeq(3); // the endpoint lost three events
   f.c.sync(d, { events: [flow(f, { host: "example.org", verdict: "deny", rule: "safety-example", revision: 2, minutesAgo: 5 }), flow(f, { signer: "TEAM9", host: "cdn.example.org", minutesAgo: 4, revision: 2 })] });
+  const lastSeq = nextSeq(0);
+  f.c.sync(d, { events: [], spool_low_seq: lastSeq - 1 }); // the endpoint no longer has the three lost events
   const t = (m: number) => new Date(f.clock.t - m * 60_000).toISOString();
   const r = whatChanged(f.c, { device: "mbp", working: `${t(180)}/${t(60)}`, failing: `${t(30)}/${t(0)}` });
   const kinds = r.observed.map((o) => o.kind);
@@ -86,6 +88,7 @@ test("diagnostics: versions, policy generation, evidence age, downgraded capabil
   const d = enroll(f);
   await bootstrap(f);
   f.c.sync(d, { last_applied: 1, receipts: [{ revision: 1, state: "applied" }], events: [flow(f, {}), { seq: nextSeq(5), at: new Date(f.clock.t).toISOString(), event: { type: "coverage_changed", level: "enforced" } }] });
+  f.c.sync(d, { events: [], spool_low_seq: nextSeq(0) }); // the endpoint dropped the skipped range
   f.clock.t += 15 * 60_000;
   const g = diagnostics(f.c, "0.1.0");
   const dev = g.devices.find((x) => x.id === "mbp")!;

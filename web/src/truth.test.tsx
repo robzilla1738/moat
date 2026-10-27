@@ -170,6 +170,7 @@ describe("demo and live are separate", () => {
       "/v1/sessions": [],
       "/v1/grants": [],
       "/v1/apps": [],
+      "/v1/reconciliation": [],
     };
     const api: Api = { get: async (p) => (p.startsWith("/v1/rollups") ? [] : replies[p]) as never, post: async () => ({}) as never };
     const s = await loadLive(api, () => new Date(T0));

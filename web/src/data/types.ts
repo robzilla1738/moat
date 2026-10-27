@@ -21,6 +21,8 @@ export interface Device {
   /** The current revision's snapshot for this platform was compiled for devices enrolled before this one (issue #26). */
   awaitingRetarget?: boolean;
   isController?: boolean;
+  /** W13 desired vs current, from the controller's receipts (live only). */
+  sync?: { desired: number | null; state: "current" | "pending" | "stale" | "rejected" | "held" | "not_released" | "ahead"; detail: string | null };
   blockedToday: number;
   flowsToday: number;
 }
@@ -217,7 +219,7 @@ export interface WhatChangedView {
 export interface DiagnosticsView {
   generated_at: string;
   controller: { version: string; control_schema: number; flow_schema: number; policy_revision: number | null; publications: Record<string, number> };
-  devices: { id: string; name: string; platform: string; versions: { os: unknown; endpoint: unknown }; policy: { applied: number | null; latest_state: { revision: number; state: string; at: string } | null; trial: { revision: number; detail: string | null } | null }; health: { reported_coverage: string | null; effective_coverage: string; stale: boolean; note: string | null; evidence_age_s: number | null }; capabilities: { supported: string[]; downgraded: { key: string; support: string; note: string | null }[] }; spool: { acknowledged_seq: number; gaps: [number, number][] } }[];
+  devices: { id: string; name: string; platform: string; versions: { os: unknown; endpoint: unknown }; policy: { applied: number | null; latest_state: { revision: number; state: string; at: string } | null; trial: { revision: number; detail: string | null } | null }; health: { reported_coverage: string | null; effective_coverage: string; stale: boolean; note: string | null; evidence_age_s: number | null }; capabilities: { supported: string[]; downgraded: { key: string; support: string; note: string | null }[] }; spool: { acknowledged_seq: number; highest_seq?: number; gaps: [number, number][] } }[];
   storage: { flow_db_bytes: number; retention: { raw_before: string | null; rollup_before: string | null; trimmed_for_quota: number } };
   compatibility_tests: { run: unknown[]; note: string };
   limits: string[];
