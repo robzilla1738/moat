@@ -36,6 +36,10 @@ runner, starts it with `systemctl`, and checks with a real non-root user that th
 the real `/tmp`, while egress, cgroup-escape and broader-nested-launch probes still fail
 (`linux/tests/installed-unit.sh`). That is an Ubuntu runner, not the Arch package on Omarchy.
 
+`CAP_SYS_PTRACE` is an open decision for Robert: it widens what a compromised `moatd` can do. The alternative is for
+`moat-launch` to pass its own mount namespace descriptor over the control socket (`SCM_RIGHTS`), validated as a mount
+namespace owned by the initial user namespace; see [the decision page](../decisions/W11-cap-sys-ptrace.md).
+
 ## Policy delivery
 
 `moatd` only installs **signed** snapshots from a trusted signer key (`/var/lib/moat/trusted/*.pub`). Delivery is a

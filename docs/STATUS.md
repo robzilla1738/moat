@@ -48,7 +48,7 @@ real-workflow evidence, if a claim cites a defect that does not exist, or if thi
 | `linux.spool.gaps` | implemented_unproven | component | unit | pass, rust 40493342610 @ d5270bd | No W01 event envelope yet. |
 | `linux.ordinary-apps.inventory` | unsupported_rejected | none | unit | not_run | Not implemented; W09/W10. |
 | `linux.ordinary-apps.app-rules` | unsupported_rejected | semantic | unit | pass (rejection), rust 40493342610 | nftables cannot match executables; rejected at compile. |
-| `linux.packaging.systemd` | unknown_degraded | none | omarchy-installed | not_run | `D-SYSTEMD-WORKSPACE`. |
+| `linux.packaging.systemd` | implemented_unproven | native_ci | ci-ubuntu-installed-unit | pass, linux-endpoint 40540159764 @ a63827b | Packaged unit under systemd on Ubuntu: project and /tmp writable, containment probes fail; **not Omarchy**. Keeps `CAP_SYS_PTRACE` ([decision](decisions/W11-cap-sys-ptrace.md)). |
 | `macos.filter.app-rules` | implemented_unproven | component | ci-macos-26 | pass, macos 40493342625 @ d5270bd | Never run signed; `D-MAC-CACHE-TRUST` (Lane B). |
 | `fleet.web.live-actions` | unknown_degraded | component | ci-node-22 | **fail** (review of d5270bd) | `D-WEB-DEMO-SUCCESS`, `D-INCIDENT-ROUTING` (Lane B, W08). |
 | `vpn.coexistence` | unknown_degraded | none | omarchy-installed | not_run | No VPN claim. |
@@ -72,7 +72,7 @@ above is updated with the run that proves it.
 | `D-PROXY-DNS-BEFORE-AUTH` | A denied hostname can be resolved before authorization. | W05 | **closed** (W05, netns run 40537109945) |
 | `D-PROXY-STREAM-LIFETIME` | No stream registry; admission vs stream expiry undefined. | W05 | **closed** (W05, netns run 40537109945) |
 | `D-ACTIVATION-JOURNAL` | Apply/rollback state not journaled or fault-tested. | W06 | **closed** (W06, netns run 40539984069) |
-| `D-SYSTEMD-WORKSPACE` | Packaged systemd restrictions break launched coding workloads. | W11 | open |
+| `D-SYSTEMD-WORKSPACE` | Packaged systemd restrictions break launched coding workloads. | W11 | **closed** (W11, installed-unit job in linux-endpoint 40540159764) |
 | `D-MAC-CACHE-TRUST` | Mac cache, trust reload, first canary, stale status. | W06–W08 (Lane B) | open |
 | `D-WEB-DEMO-SUCCESS` | Live web actions reuse demo success behavior. | W08 (Lane B) | open |
 | `D-INCIDENT-ROUTING` | A notification reference can open the wrong incident. | W08/W13 (Lane B) | open |
@@ -91,7 +91,7 @@ above is updated with the run that proves it.
 | W08 truthful UI | Lane B | see Lane B |
 | W09 ordinary-app Linux experiment | Lane A | not started |
 | W10 ordinary-app Linux inventory | Lane A | not started |
-| W11 installed-platform proofs | Lane A (Linux) / Robert | not started |
+| W11 installed-platform proofs | Lane A (Linux) / Robert | Linux: packaged unit proven under systemd on an Ubuntu runner (installed-unit.sh); Omarchy run and the `CAP_SYS_PTRACE` decision need Robert. Mac: Lane B |
 
 ## Needs Robert
 
@@ -99,10 +99,12 @@ above is updated with the run that proves it.
    and a real `moat-launch --profile coding-session -- claude`; results become `omarchy-installed` evidence.
 2. **Apple:** Developer Program, Developer ID certificates, NE provisioning profiles, notarytool profile
    (Lane B owns the release path).
-3. **Decisions:** grant lifetime defaults and recovery semantics (W01 uses conservative defaults until decided);
+3. **`CAP_SYS_PTRACE` in moatd.service:** keep it, or schedule passing the caller's mount namespace over the
+   control socket so it can be dropped ([decision page](decisions/W11-cap-sys-ptrace.md)).
+4. **Decisions:** grant lifetime defaults and recovery semantics (W01 uses conservative defaults until decided);
    whether to request the Endpoint Security entitlement.
-4. **VPN matrix and adversarial harness** on real devices; results are recorded here with dates and versions.
-5. **GitHub Pages:** Settings → Pages → Source: GitHub Actions, if the public demo is wanted.
+5. **VPN matrix and adversarial harness** on real devices; results are recorded here with dates and versions.
+6. **GitHub Pages:** Settings → Pages → Source: GitHub Actions, if the public demo is wanted.
 
 Excluded from this phase by the roadmap: Windows, a custom DNS server, a native iOS firewall, universal TLS
 inspection, automatic trust promotion, a hosted service.
