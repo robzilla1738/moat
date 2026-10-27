@@ -8,7 +8,7 @@ policy, coverage and recovery, and talks to the extension only through a small t
 > Every capability is advertised as `untested` or `unsupported` until the device proofs in
 > [STATUS.md](../STATUS.md) pass.
 
-![Overview](../screenshots/macos-overview-dark.png)
+![Overview](../screenshots/macos-apps-dark.png)
 
 ## Layout
 
