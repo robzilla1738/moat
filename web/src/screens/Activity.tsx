@@ -23,8 +23,62 @@ export function allowOnceUnavailable(i: Incident): string | null {
   return null;
 }
 
+/** The exact permission, rendered from the controller's canonical plan (not from explanatory text). */
+function PlanReview({ i, a }: { i: Incident; a: ActionState }) {
+  const { approvePlan, cancelPlan, issuer, canAct } = useStore();
+  const data = useData();
+  const p = a.plan!.plan;
+  const dev = data.devices.find((d) => d.id === p.scope.device_id);
+  const delegated = !!issuer && p.issuer.role === "delegated" && p.issuer.key_id === issuer.keyId;
+  return (
+    <div className="plan" aria-label="Exact permission to approve">
+      <dl className="facts plan-facts">
+        <div>
+          <dt>Device</dt>
+          <dd>
+            <Ident value={dev?.name ?? p.scope.device_id} /> <span className="muted small">(<Ident value={p.scope.device_id} mono />)</span>
+          </dd>
+        </div>
+        <div>
+          <dt>{p.scope.kind === "task" ? "Session" : "App"}</dt>
+          <dd>{p.scope.kind === "task" ? <Ident value={p.scope.task_id} mono /> : <Ident value={p.scope.executable.path} mono />}</dd>
+        </div>
+        <div>
+          <dt>Destination</dt>
+          <dd>
+            <Ident value={p.destination.kind === "address" ? p.destination.address : p.destination.hostname} kind="host" mono /> · {p.transport.toUpperCase()} {p.port}
+          </dd>
+        </div>
+        <div>
+          <dt>New connections until</dt>
+          <dd>
+            {new Date(p.admission_until).toLocaleString()} <span className="muted small">({until(p.admission_until)}; retries keep this deadline)</span>
+          </dd>
+        </div>
+        <div>
+          <dt>Open connections</dt>
+          <dd>{p.stream_policy === "admission_only" ? "Not cut at the deadline (admission only)" : p.stream_policy}</dd>
+        </div>
+      </dl>
+      <div className="small muted">
+        {delegated ? <>Signed on this device with its delegated approval key <Ident value={issuer!.keyId} mono />. The signer checks the delegation and this exact plan.</> : "This browser has no delegated approval key for this device; the signer decides whether an owner session may approve."}
+      </div>
+      <div className="decision-actions">
+        <button type="button" className="btn btn-primary" disabled={!canAct.ok} onClick={() => approvePlan(i)}>
+          <Icon name="check" size={16} /> Approve exactly this
+        </button>
+        <button type="button" className="btn btn-quiet" onClick={() => cancelPlan(i)}>
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function phaseBadge(a: ActionState) {
   const map: Record<ActionState["phase"], [string, string]> = {
+    planning: ["blue", "preparing"],
+    review: ["amber", "review: not approved yet"],
     sending: ["blue", "sending"],
     pending: ["amber", "pending: no endpoint receipt yet"],
     active: ["green", "active on the endpoint"],
@@ -45,7 +99,7 @@ export function DecisionCard({ incident: i, go, detailed = false }: { incident: 
   const device = data.devices.find((d) => d.id === i.deviceId);
   const action = actions[i.id];
   const unavailable = allowOnceUnavailable(i);
-  const busy = action?.phase === "sending" || action?.phase === "pending";
+  const busy = action?.phase === "sending" || action?.phase === "pending" || action?.phase === "planning";
   const settled = action && !["failed", "rejected"].includes(action.phase);
   return (
     <Card className={`decision ${action ? "decision-acted" : ""}`}>
@@ -75,7 +129,7 @@ export function DecisionCard({ incident: i, go, detailed = false }: { incident: 
       {action && (
         <div className="decision-progress" aria-live="polite">
           <div className="decision-phase">{phaseBadge(action)}</div>
-          <Steps action={action} />
+          {action.phase === "review" && action.plan ? <PlanReview i={i} a={action} /> : <Steps action={action} />}
           {action.error && <div className="small bad">{action.error}</div>}
           {action.kind === "allow_once" && action.expiresAt && action.phase === "active" && <div className="small muted">Expires at its original deadline · {until(action.expiresAt)}. Retries never extend it.</div>}
         </div>

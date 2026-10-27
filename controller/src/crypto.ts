@@ -94,3 +94,25 @@ export function responseString(status: number, ts: string, nonce: string, body: 
 export function ownerAuthorizationString(subject: string, digest: string): string {
   return `moat.owner_authorization.v1\n${subject}\n${digest}`;
 }
+
+/** Canonical JSON for digests: object keys sorted, no insignificant whitespace, no undefined values. */
+export function canonicalJson(v: unknown): string {
+  if (v === null || typeof v !== "object") return JSON.stringify(v);
+  if (Array.isArray(v)) return `[${v.map((x) => (x === undefined ? "null" : canonicalJson(x))).join(",")}]`;
+  const o = v as Record<string, unknown>;
+  return `{${Object.keys(o)
+    .filter((k) => o[k] !== undefined)
+    .sort()
+    .map((k) => `${JSON.stringify(k)}:${canonicalJson(o[k])}`)
+    .join(",")}}`;
+}
+
+/** What a delegated issuer (e.g. a phone) signs: the digest of the exact grant plan it was shown. */
+export function grantApprovalString(planDigest: string): string {
+  return `moat-grant-approval-v1\n${planDigest}\n`;
+}
+
+/** What the owner key signs to delegate a bounded approval scope to another key. */
+export function delegationString(body: unknown): string {
+  return `moat-delegation-v1\n${canonicalJson(body)}\n`;
+}

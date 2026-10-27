@@ -65,13 +65,37 @@ test("signed out: the live UI asks for a sign-in and never shows sample data", a
   await page.close();
 });
 
-test("allow once: pending until the endpoint's receipt, then active; authorizer and revision come from the controller", async () => {
+test("allow once: exact plan, phone approval with a delegated key, pending until the endpoint's receipt, then active", async () => {
   const page = await signedIn(h.ownerToken);
-  const card = page.locator(".decision").filter({ hasText: "203.0.113.50" }).first();
+  let card = page.locator(".decision").filter({ hasText: "203.0.113.50" }).first();
   await card.getByRole("button", { name: "Allow once for this session" }).click();
+  // the plan is rendered from the controller's canonical record
+  await card.getByText("review: not approved yet").waitFor();
+  await card.getByText("20261027-aaaa").waitFor();
+  await card.getByText("TCP 443").first().waitFor();
+  await card.getByText("retries keep this deadline").waitFor();
+  await shot(page, "live-allow-once-review");
+  // an owner bearer token alone is not enough for this signer
+  await card.getByRole("button", { name: "Approve exactly this" }).click();
+  await card.getByText(/only accepts phone approvals from a delegated key/).waitFor();
+  assert.equal(((await h.owner("GET", "/v1/grants")).json as unknown as unknown[]).length, 0, "nothing was granted");
+  // set up this browser as a delegated approver: its own key, an owner-signed delegation made off the page
+  await page.goto(`${h.url}/#/devices`);
+  await page.getByRole("button", { name: "Create an approval key for this device" }).click();
+  const cmd = await page.locator(".approvals pre.code").textContent();
+  const pub = /delegate-issuer <owner\.key> ([0-9a-f]{64})/.exec(cmd ?? "")![1]!;
+  await page.getByLabel("Paste the printed delegation").fill(h.delegate(pub, ["omarchy"]));
+  await page.getByRole("button", { name: "Use this delegation" }).click();
+  await page.locator(".approvals").getByText("delegated", { exact: true }).waitFor();
+  await shot(page, "live-phone-approvals");
+  await page.goto(`${h.url}/#/`);
+  card = page.locator(".decision").filter({ hasText: "203.0.113.50" }).first();
+  await card.getByRole("button", { name: "Allow once for this session" }).click();
+  await card.getByText(/Signed on this device with its delegated approval key/).waitFor();
+  await card.getByRole("button", { name: "Approve exactly this" }).click();
   await card.getByText("pending: no endpoint receipt yet").waitFor();
   await card.getByText("Signed as revision 2").waitFor();
-  await card.getByText("authorized by the bounded temporary-grant path").waitFor();
+  await card.getByText("authorized by a delegated approval key").waitFor();
   assert.equal(await card.getByText("active on the endpoint").count(), 0, "a signed revision is not an applied one");
   await shot(page, "live-allow-once-pending");
   // the endpoint syncs: delivery, then still not applied
@@ -84,8 +108,10 @@ test("allow once: pending until the endpoint's receipt, then active; authorizer 
   await card.getByText("active on the endpoint").waitFor({ timeout: 10_000 });
   await card.getByText("endpoint receipt for revision 2").waitFor();
   await shot(page, "live-allow-once-active");
-  const grants = (await h.owner("GET", "/v1/grants")).json as unknown as { state: string }[];
+  const grants = (await h.owner("GET", "/v1/grants")).json as unknown as { state: string; device_id: string; authorized_by: string }[];
   assert.equal(grants[0]!.state, "active");
+  assert.equal(grants[0]!.device_id, "omarchy");
+  assert.equal(grants[0]!.authorized_by, "delegated_issuer");
   await page.close();
 });
 
@@ -97,6 +123,7 @@ test("a stale view is refused, not applied: precondition on incident and policy 
   // policy moves behind the page's back (another owner action)
   const inc = ((await h.owner("GET", "/v1/incidents")).json as unknown as { id: string; destination: string; revision: number }[]).find((i) => i.destination === "203.0.113.50")!;
   await h.c.revokeGrant(h.c.authenticate(h.ownerToken)!, (h.c.grants()[0] as { id: string }).id);
+  // (the page still shows policy revision 2)
   void inc;
   await card.getByRole("button", { name: "Allow once for this session" }).click();
   await card.getByText(/Refused as stale/).first().waitFor();

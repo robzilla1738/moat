@@ -7,7 +7,7 @@ import { ago, until } from "../format";
 
 const STATES: RevisionState[] = ["approved", "distributed", "received", "applied", "verified"];
 
-const AUTH: Record<string, [string, string]> = { owner_key: ["blue", "owner key"], narrowing: ["neutral", "narrowing"], temporary_grant_overlay: ["green", "grant overlay"] };
+const AUTH: Record<string, [string, string]> = { owner_key: ["blue", "owner key"], narrowing: ["neutral", "narrowing"], temporary_grant_overlay: ["green", "grant overlay"], delegated_issuer: ["green", "delegated approval"] };
 
 /** A prepared rollback: a new proposal with an older revision's rules. Broadening needs an owner-key signature made off this page. */
 function ProposalPanel({ p, onDone }: { p: WireProposal; onDone: () => void }) {

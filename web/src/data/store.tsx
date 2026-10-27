@@ -9,7 +9,8 @@
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { demo as demoSnapshot } from "./demo";
-import type { ActionState, Device, Incident, Session, Snapshot } from "./types";
+import type { ActionState, Device, GrantPlanView, Incident, Session, Snapshot } from "./types";
+import { contractDigest, delegationProblem, loadIssuer, newIssuer, saveIssuer, signApproval, type IssuerState } from "./issuer";
 import { deviceFreshness, type Freshness } from "./freshness";
 import { ApiError, loadLive, makeApi, mapIncident, TOKEN_KEY, type Api, type WireGrantStatus, type WireIncident, type WireProposal } from "./api";
 
@@ -33,7 +34,15 @@ export interface Store {
   signOut: () => void;
   enterDemo: () => void;
   refresh: () => Promise<void>;
+  /** Step 1: ask the controller for the exact plan; the card shows it for review. */
   allowOnce: (i: Incident) => void;
+  /** Step 2: approve the reviewed plan (signed by this browser's delegated key when it has one). */
+  approvePlan: (i: Incident) => void;
+  cancelPlan: (i: Incident) => void;
+  issuer: IssuerState | null;
+  createIssuer: () => void;
+  registerDelegation: (json: string) => Promise<string | null>;
+  forgetIssuer: () => void;
   keepBlocked: (i: Incident) => void;
   acknowledge: (i: Incident) => void;
   rollback: (revision: number) => Promise<WireProposal | null>;
@@ -49,7 +58,7 @@ const Ctx = createContext<Store | null>(null);
 
 const step = (label: string, state: ActionState["steps"][number]["state"], detail?: string, at?: string) => ({ label, state, detail, at });
 
-const AUTH_LABEL: Record<string, string> = { owner_key: "your owner key", narrowing: "narrowing (no owner key needed)", temporary_grant_overlay: "the bounded temporary-grant path" };
+const AUTH_LABEL: Record<string, string> = { owner_key: "your owner key", narrowing: "narrowing (no owner key needed)", temporary_grant_overlay: "the bounded temporary-grant path", delegated_issuer: "a delegated approval key" };
 
 /** Build the visible steps of an allow-once from the controller's grant status. Nothing is "done" without evidence. */
 export function grantSteps(st: WireGrantStatus, deviceName: (id: string) => string): ActionState {
@@ -178,28 +187,110 @@ export function StoreProvider({ children, options = {} }: { children: ReactNode;
     [api, deviceName, setAction],
   );
 
+  const [issuer, setIssuer] = useState<IssuerState | null>(() => loadIssuer());
+  const opIds = useRef<Map<string, string>>(new Map());
+
   const allowOnce = useCallback(
     (i: Incident) => {
       if (mode === "demo") {
-        setAction(i.id, { kind: "allow_once", phase: "simulated", steps: [step("Demo only: nothing was sent", "done", "In live mode this asks the controller for a grant bound to this incident revision, session and policy revision, then waits for the endpoint's receipt.")] });
+        setAction(i.id, { kind: "allow_once", phase: "simulated", steps: [step("Demo only: nothing was sent", "done", "In live mode this asks the controller for the exact plan (device, session, destination, port, deadline), you approve that plan, and the card waits for the endpoint's receipt.")] });
         setToast("Demo: nothing was sent to a device.");
         return;
       }
       if (!api || !canAct.ok) return;
       const policy = dataRef.current?.policyRevision;
-      setAction(i.id, { kind: "allow_once", phase: "sending", steps: [step("Requested by you", "active", "waiting for the controller")] });
+      // the approver is fixed in the plan: this browser's delegated key when it covers the device, else the owner path
+      const approver = issuer?.delegation && !delegationProblem(issuer, issuer.delegation) && issuer.delegation.scope.devices.includes(i.deviceId) ? issuer.keyId : null;
+      // one operation id per click (and approver): a retried request returns the same plan and the same deadline
+      const opKey = `${i.id}|${approver ?? "owner"}`;
+      const op = opIds.current.get(opKey) ?? `ui-${i.id.slice(-12)}-${Math.random().toString(36).slice(2, 12)}`.replace(/[^A-Za-z0-9:._-]/g, "x");
+      opIds.current.set(opKey, op);
+      setAction(i.id, { kind: "allow_once", phase: "planning", steps: [step("Preparing the exact permission", "active", "waiting for the controller")] });
       api
-        .post<{ grant_id: string; revision: number; authorized_by: string; expires_at: string }>("/v1/actions/allow-once", { incident_id: i.id, incident_revision: i.revision, policy_revision: policy })
-        .then((r) => {
-          setAction(i.id, { kind: "allow_once", phase: "pending", grantId: r.grant_id, revision: r.revision, authorizedBy: r.authorized_by, expiresAt: r.expires_at, steps: [step("Requested by you", "done"), step(`Signed as revision ${r.revision}`, "done", `authorized by ${AUTH_LABEL[r.authorized_by] ?? r.authorized_by}`), step("Delivered and applied", "active", "waiting for endpoint evidence")] });
-          watchGrant(i.id, r.grant_id);
-        })
+        .post<GrantPlanView>("/v1/actions/allow-once/plan", { incident_id: i.id, incident_revision: i.revision, policy_revision: policy, operation_id: op, ...(approver ? { issuer_key_id: approver } : {}) })
+        .then((p) => setAction(i.id, { kind: "allow_once", phase: "review", plan: p, steps: [step("Review the exact permission", "active", "nothing is allowed until you approve it")] }))
         .catch((e) => {
-          setAction(i.id, { kind: "allow_once", phase: e instanceof ApiError && !e.offline ? "rejected" : "failed", error: describe(e), steps: [step("Requested by you", "failed", describe(e))] });
+          opIds.current.delete(opKey);
+          setAction(i.id, { kind: "allow_once", phase: e instanceof ApiError && !e.offline ? "rejected" : "failed", error: describe(e), steps: [step("Prepare", "failed", describe(e))] });
           if (e instanceof ApiError && e.status === 409) void refresh();
         });
     },
-    [mode, api, canAct.ok, setAction, watchGrant, refresh],
+    [mode, api, canAct.ok, setAction, refresh, issuer],
+  );
+
+  const clearOps = (incidentId: string) => {
+    for (const k of [...opIds.current.keys()]) if (k.startsWith(`${incidentId}|`)) opIds.current.delete(k);
+  };
+
+  const approvePlan = useCallback(
+    (i: Incident) => {
+      const cur = actions[i.id];
+      if (!api || !canAct.ok || !cur?.plan) return;
+      const plan = cur.plan;
+      const usable = !!issuer?.delegation && !delegationProblem(issuer, issuer.delegation) && issuer.delegation.scope.devices.includes(plan.plan.scope.device_id) && plan.plan.issuer.key_id === issuer.keyId;
+      // sign only what is on screen: the digest is recomputed here from the rendered plan, never taken on trust
+      if (usable && contractDigest(plan.plan) !== plan.digest) {
+        setAction(i.id, { kind: "allow_once", phase: "rejected", plan, error: "Refused: the controller's digest does not match the plan shown. Nothing was signed.", steps: [step("Approve", "failed", "plan digest mismatch")] });
+        return;
+      }
+      const body: Record<string, unknown> = { plan_id: plan.plan_id };
+      if (usable) Object.assign(body, { issuer_key_id: issuer!.keyId, issuer_signature: signApproval(issuer!, plan.digest) });
+      setAction(i.id, { ...cur, phase: "sending", steps: [step(usable ? "Approved and signed on this device" : "Approved", "done", usable ? `delegated key ${issuer!.keyId}` : "no delegated key on this browser: the signer decides whether an owner session may approve"), step("Signing", "active", "waiting for the controller and signer")] });
+      api
+        .post<{ grant_id: string; revision: number; authorized_by: string; expires_at: string }>("/v1/actions/allow-once", body)
+        .then((r) => {
+          clearOps(i.id);
+          setAction(i.id, { kind: "allow_once", phase: "pending", plan, grantId: r.grant_id, revision: r.revision, authorizedBy: r.authorized_by, expiresAt: r.expires_at, steps: [step("Requested by you", "done"), step(`Signed as revision ${r.revision}`, "done", `authorized by ${AUTH_LABEL[r.authorized_by] ?? r.authorized_by}`), step("Delivered and applied", "active", "waiting for endpoint evidence")] });
+          watchGrant(i.id, r.grant_id);
+        })
+        .catch((e) => {
+          const needIssuer = e instanceof ApiError && /delegated issuer/.test(e.message);
+          setAction(i.id, { kind: "allow_once", phase: e instanceof ApiError && !e.offline ? "rejected" : "failed", plan, error: needIssuer ? "Refused: this controller's signer only accepts phone approvals from a delegated key. Set up approvals on this device (Devices → Phone approvals). Nothing changed." : describe(e), steps: [step("Approve", "failed", needIssuer ? "needs a delegated approval key" : describe(e))] });
+          if (e instanceof ApiError && e.status === 409) {
+            clearOps(i.id);
+            void refresh();
+          }
+        });
+    },
+    [actions, api, canAct.ok, issuer, setAction, watchGrant, refresh],
+  );
+
+  const cancelPlan = useCallback((i: Incident) => setAction(i.id, null), [setAction]);
+
+  const createIssuer = useCallback(() => {
+    const st = newIssuer();
+    saveIssuer(st);
+    setIssuer(st);
+  }, []);
+  const forgetIssuer = useCallback(() => {
+    saveIssuer(null);
+    setIssuer(null);
+  }, []);
+  const registerDelegation = useCallback(
+    async (json: string): Promise<string | null> => {
+      if (!issuer) return "Create this device's approval key first.";
+      let d: unknown;
+      try {
+        d = JSON.parse(json);
+      } catch {
+        return "That is not JSON. Paste the full output of delegate-issuer.";
+      }
+      const bad = delegationProblem(issuer, d);
+      if (bad) return bad;
+      if (mode === "live") {
+        if (!api) return "Sign in first.";
+        try {
+          await api.post("/v1/issuers", { delegation: d });
+        } catch (e) {
+          return describe(e).replace(/ Nothing changed\.$/, "");
+        }
+      }
+      const st = { ...issuer, delegation: d as IssuerState["delegation"] };
+      saveIssuer(st);
+      setIssuer(st);
+      return null;
+    },
+    [issuer, mode, api],
   );
 
   const incidentMutation = useCallback(
@@ -343,6 +434,12 @@ export function StoreProvider({ children, options = {} }: { children: ReactNode;
     enterDemo,
     refresh,
     allowOnce,
+    approvePlan,
+    cancelPlan,
+    issuer,
+    createIssuer,
+    registerDelegation,
+    forgetIssuer,
     keepBlocked: (i) => incidentMutation(i, "keep_blocked"),
     acknowledge: (i) => incidentMutation(i, "acknowledge"),
     rollback,

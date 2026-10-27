@@ -31,7 +31,9 @@ export class Moatctl {
   async validate(policy: string): Promise<{ ok: boolean; errors: string[]; adapters: unknown[] }> {
     const r = await this.run(["--json", "validate", "@p.toml"], { "p.toml": policy });
     const j = parse(r);
-    return { ok: r.code === 0 && j.ok !== false, errors: (j.errors as string[] | undefined) ?? (j.error ? [String(j.error)] : []), adapters: (j.adapters as unknown[] | undefined) ?? [] };
+    const adapters = (j.adapters as { adapter?: string; compiles?: boolean; errors?: string[] }[] | undefined) ?? [];
+    const adapterErrors = adapters.filter((a) => a.compiles === false).flatMap((a) => (a.errors ?? ["does not compile"]).map((e) => `${a.adapter}: ${e}`));
+    return { ok: r.code === 0 && j.ok !== false, errors: (j.errors as string[] | undefined) ?? (j.error ? [String(j.error)] : adapterErrors), adapters };
   }
 
   async diff(oldPolicy: string, newPolicy: string): Promise<{ broadening: boolean; diff: Record<string, unknown> }> {
@@ -41,10 +43,16 @@ export class Moatctl {
     return { broadening: j.broadening === true, diff: (j.diff as Record<string, unknown>) ?? {} };
   }
 
-  async compile(policy: string, adapter: "linux" | "macos" | "dns", revision: number, issuedAt: Date, rollbackOf?: number | null): Promise<{ ok: true; snapshot: string } | { ok: false; error: string }> {
+  /** Compile base + `moat.grant.v1` overlays (`--grants`, W03): the core renders each grant's exact rule. */
+  async compile(policy: string, adapter: "linux" | "macos" | "dns", revision: number, issuedAt: Date, rollbackOf?: number | null, grants: unknown[] = []): Promise<{ ok: true; snapshot: string } | { ok: false; error: string }> {
     const args = ["compile", "@p.toml", "--adapter", adapter, "--revision", String(revision), "--issued-at", issuedAt.toISOString()];
     if (rollbackOf) args.push("--rollback-of", String(rollbackOf));
-    const r = await this.run(args, { "p.toml": policy });
+    const files: Record<string, string> = { "p.toml": policy };
+    if (grants.length) {
+      args.push("--grants", "@grants.json");
+      files["grants.json"] = JSON.stringify(grants);
+    }
+    const r = await this.run(args, files);
     if (r.code !== 0) return { ok: false, error: (r.stderr || r.stdout).trim() };
     return { ok: true, snapshot: r.stdout.trim() };
   }

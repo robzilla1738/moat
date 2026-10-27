@@ -125,9 +125,11 @@
       "evidence_level": "semantic",
       "disposition": "implemented_unproven",
       "tests": [
+        "controller/test/grants.test.ts",
         "core/moat-core/src/grants.rs::tests",
+        "core/moat-core/tests/contracts.rs",
         "core/moatctl/tests/cli.rs::compile_with_grants_keeps_device_scope_and_binds_the_overlay",
-        "core/moat-core/tests/contracts.rs"
+        "web/src/issuer.test.ts"
       ],
       "environment": "unit",
       "last_result": {
@@ -136,11 +138,8 @@
         "commit": "w03-grant-scope",
         "date": "2026-10-27"
       },
-      "limits": "Core only: device, process-instance and task scope survive grant -> rule -> snapshot JSON -> evaluation; process scope needs process_enforcement, which no backend has, so process grants are omitted with a report. The controller still uses its own grantToml until Lane B adopts moatctl compile --grants.",
-      "open_defects": [
-        "D-GRANT-SCOPE-LOSS",
-        "D-GRANT-IDEMPOTENCY"
-      ]
+      "limits": "Core keeps device, process-instance and task scope through grant -> rule -> snapshot JSON -> evaluation. The controller plans grants as moat.grant.v1 objects, the signer compiles them with moatctl compile --grants and decides from diff.changes[] and per-grant approvals; process scope needs process_enforcement, which no backend has, so process grants are refused by the controller and signer. Ordinary-app grants on Linux are omitted by the compiler and reported as not_enforceable. Unit/integration evidence only; no installed endpoint has exercised a grant yet.",
+      "open_defects": []
     },
     {
       "id": "linux.session.direct-egress",
@@ -433,15 +432,26 @@
     },
     {
       "id": "D-GRANT-SCOPE-LOSS",
-      "summary": "Generated grants lose device and process-generation scope. Core path fixed (moat.grant.v1 -> grant_rule keeps device/process/task scope; moatctl compile --grants); the controller's grantToml still renders grants itself and must switch to it (Lane B).",
+      "summary": "Generated grants lose device and process-generation scope. Core renders moat.grant.v1 -> exact rule (W03 core); the controller no longer renders grants (grantToml and reserved device groups removed) and publishes with moatctl compile --grants.",
       "package": "W03",
-      "status": "open"
+      "status": "closed",
+      "closed_by": "W03 controller/signer (controller/src/controller.ts planGrant/publish, signer.ts sign, moatctl.ts compile --grants)",
+      "regression_tests": [
+        "controller/test/grants.test.ts: two devices with the same executable never share a single-device exception",
+        "controller/test/grants.test.ts: grants are moat.grant.v1 objects compiled by `moatctl compile --grants`; a base change supersedes them",
+        "controller/test/grants.test.ts: the signer enforces the delegation's own limits independently of the controller"
+      ]
     },
     {
       "id": "D-GRANT-IDEMPOTENCY",
-      "summary": "A retried grant request mints a fresh expiry. Core reference GrantLedger keeps the original grant and expiry per idempotency key; the controller must adopt it (Lane B).",
+      "summary": "A retried grant request mints a fresh expiry. The controller follows GrantLedger semantics: same idempotency key + same request returns the original plan/grant and admission_until; same key + different request is refused (409).",
       "package": "W03",
-      "status": "open"
+      "status": "closed",
+      "closed_by": "W03 controller/signer (grant_plans.request_digest; signer journal by publication id)",
+      "regression_tests": [
+        "controller/test/grants.test.ts: duplicate and lost requests keep the original deadline; a retry never mints a fresh lease",
+        "controller/test/grants.test.ts: a crash after signing (lost reply) recovers the same revision instead of a conflicting one"
+      ]
     },
     {
       "id": "D-LAUNCH-AUTHORITY",

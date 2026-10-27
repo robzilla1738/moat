@@ -2300,3 +2300,12 @@ body {
 .bad {
   color: var(--red);
 }
+.plan {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 6px;
+}
+.plan-facts dd {
+  overflow-wrap: anywhere;
+}

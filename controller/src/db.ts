@@ -44,6 +44,18 @@ export const CONTROL_MIGRATIONS: string[] = [
    ALTER TABLE device_revisions_v2 RENAME TO device_revisions;`,
   // 3: the authorizer of each revision is recorded from the signer's answer (never assumed by a consumer).
   `ALTER TABLE policy_revisions ADD COLUMN authorized_by TEXT;`,
+  // 4: exact grants (W03): plans with idempotency keys, delegated issuers, and a publication journal.
+  `ALTER TABLE grants ADD COLUMN boot_id TEXT;
+   ALTER TABLE grants ADD COLUMN plan_id TEXT;
+   ALTER TABLE grants ADD COLUMN plan_digest TEXT;
+   ALTER TABLE grants ADD COLUMN issuer_key_id TEXT;
+   ALTER TABLE grants ADD COLUMN authorized_by TEXT;
+   ALTER TABLE grants ADD COLUMN committed INTEGER NOT NULL DEFAULT 1;
+   ALTER TABLE grants ADD COLUMN grant_json TEXT;
+   ALTER TABLE grants ADD COLUMN ended_reason TEXT;
+   CREATE TABLE grant_plans (id TEXT PRIMARY KEY, idempotency_key TEXT NOT NULL UNIQUE, plan TEXT NOT NULL, digest TEXT NOT NULL, policy_revision INTEGER NOT NULL, created_by TEXT NOT NULL, created_at TEXT NOT NULL, expires_at TEXT NOT NULL, grant_id TEXT, request_digest TEXT);
+   CREATE TABLE issuers (key_id TEXT PRIMARY KEY, label TEXT NOT NULL, delegation TEXT NOT NULL, registered_by TEXT NOT NULL, created_at TEXT NOT NULL, revoked_at TEXT);
+   CREATE TABLE publications (id TEXT PRIMARY KEY, revision INTEGER NOT NULL, subject TEXT NOT NULL, status TEXT NOT NULL CHECK (status IN ('signing','committed','refused','uncertain','abandoned','conflict')), intent TEXT NOT NULL, error TEXT, created_at TEXT NOT NULL, finished_at TEXT);`,
 ];
 
 export function openDb(path: string, migrations: string[]): DB {

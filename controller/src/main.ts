@@ -5,13 +5,15 @@
  *   init <dir>                      create controller key, owner token, and print next steps
  *   owner-keygen <file>             generate an owner key (keep it on the owner's device, never in agent workspaces)
  *   owner-authorize <file> <subject> <digest>   sign a broadening authorization for a proposal
+ *   delegate-issuer <owner-file> <issuer-public-hex> --devices a,b [--max-ttl 3600] [--days 30] [--kinds allow_once] [--label phone]
+ *                                   delegate a bounded approval scope (e.g. phone allow-once) to another key
  *   signer-serve                    run the signer as a separate service (MOAT_SIGNER_KEY, MOAT_OWNER_KEYS, MOAT_SIGNER_SOCKET)
  *   serve                           run the controller (MOAT_DATA, MOAT_SIGNER_SOCKET, MOAT_LISTEN, MOAT_WEB_DIR)
  *   agent-enroll / agent-sync       reference endpoint sync agent for moatd
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { generateKeyPair, keyPairFromSeed, ownerAuthorizationString, signB64 } from "./crypto.ts";
+import { delegationString, generateKeyPair, keyIdOf, keyPairFromSeed, ownerAuthorizationString, signB64 } from "./crypto.ts";
 import { Controller } from "./controller.ts";
 import { Moatctl } from "./moatctl.ts";
 import { Signer } from "./signer.ts";
@@ -41,6 +43,19 @@ async function main() {
       console.log(JSON.stringify({ key_id: kp.keyId, signature: signB64(kp.privateKey, ownerAuthorizationString(args[1]!, args[2]!)) }));
       return;
     }
+    case "delegate-issuer": {
+      const kp = keyPairFromSeed(readFileSync(args[0]!, "utf8"));
+      const pub = String(args[1] ?? "");
+      const opt = (name: string, dflt: string) => {
+        const i = args.indexOf(`--${name}`);
+        return i > 0 ? String(args[i + 1]) : dflt;
+      };
+      const devices = opt("devices", "").split(",").filter(Boolean);
+      if (!devices.length) throw new Error("--devices is required: a delegation names the exact devices it covers");
+      const body = { schema: "moat.delegation.v1", issuer_key_id: keyIdOf(pub), issuer_public_hex: pub, label: opt("label", "phone"), scope: { kinds: opt("kinds", "allow_once").split(","), devices, max_ttl_seconds: Math.min(86400, Number(opt("max-ttl", "3600"))) }, not_after: new Date(Date.now() + Number(opt("days", "30")) * 86400_000).toISOString(), owner_key_id: kp.keyId };
+      console.log(JSON.stringify({ ...body, signature: signB64(kp.privateKey, delegationString(body)) }));
+      return;
+    }
     case "init": {
       const dir = args[0] ?? env.MOAT_DATA ?? "./moat-data";
       mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -54,9 +69,9 @@ async function main() {
     case "signer-serve": {
       const seed = readFileSync(env.MOAT_SIGNER_KEY ?? "/var/lib/moat-signer/signer.key", "utf8");
       const owners = (env.MOAT_OWNER_KEYS ?? "").split(",").filter(Boolean).map((f) => readFileSync(f, "utf8").trim());
-      const signer = new Signer({ seedHex: seed, ownerPublicKeysHex: owners, moatctl: new Moatctl(), statePath: env.MOAT_SIGNER_STATE ?? "/var/lib/moat-signer/state.json" });
+      const signer = new Signer({ seedHex: seed, ownerPublicKeysHex: owners, moatctl: new Moatctl(), statePath: env.MOAT_SIGNER_STATE ?? "/var/lib/moat-signer/state.json", controllerAttestedGrants: env.MOAT_SIGNER_CONTROLLER_GRANTS === "1" });
       serveSigner(signer, env.MOAT_SIGNER_SOCKET ?? "/run/moat-signer/signer.sock");
-      console.log(`signer ${signer.keyId} serving on ${env.MOAT_SIGNER_SOCKET ?? "/run/moat-signer/signer.sock"} with ${owners.length} owner key(s)`);
+      console.log(`signer ${signer.keyId} serving on ${env.MOAT_SIGNER_SOCKET ?? "/run/moat-signer/signer.sock"} with ${owners.length} owner key(s); temporary grants need ${signer.controllerAttestedGrants ? "a delegated issuer or an authenticated owner session (MOAT_SIGNER_CONTROLLER_GRANTS=1)" : "a delegated issuer's signature"}`);
       return;
     }
     case "serve":
@@ -64,6 +79,7 @@ async function main() {
       const dir = env.MOAT_DATA ?? "./moat-data";
       const signer = await signerClient(env.MOAT_SIGNER_SOCKET ?? "/run/moat-signer/signer.sock");
       const c = new Controller({ dataDir: dir, controllerSeedHex: readFileSync(join(dir, "controller.key"), "utf8"), signer, moatctl: new Moatctl(), publicUrl: env.MOAT_PUBLIC_URL ?? null, fetch: (u, i) => fetch(u, i) });
+      for (const r of await c.recoverPublications()) console.log(`publication ${r.id}: ${r.outcome}`);
       if (cmd === "token") {
         const role = (args[0] ?? "owner") as "owner";
         console.log(c.createToken(args[1] ?? role, role).token);

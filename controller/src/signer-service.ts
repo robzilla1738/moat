@@ -1,7 +1,8 @@
 /**
  * `moat-signer serve`: the signer as its own process and OS identity, reachable only over a Unix socket whose
- * permissions admit the controller's group. The controller holds no signing key. The socket accepts one typed
- * operation (`sign`) and returns signed snapshots or a refusal; there is no remote shell and no key export.
+ * permissions admit the controller's group. The controller holds no signing key. The socket accepts two typed
+ * operations (`sign`, and a read of its own journal by publication id for lost-reply recovery) and returns signed
+ * snapshots or a refusal; there is no remote shell and no key export.
  */
 import { createServer, request, type Server } from "node:http";
 import { chmodSync, existsSync, unlinkSync } from "node:fs";
@@ -16,6 +17,8 @@ export function serveSigner(signer: Signer, socketPath: string): Server {
     for await (const c of req) chunks.push(c as Buffer);
     const send = (status: number, v: unknown) => (res.writeHead(status, { "content-type": "application/json" }), res.end(JSON.stringify(v)));
     if (req.method === "GET" && req.url === "/identity") return send(200, { key_id: signer.keyId, public_hex: signer.publicHex, last_revision: signer.lastRevision });
+    const pub = req.method === "GET" ? /^\/publications\/([A-Za-z0-9_-]{1,64})$/.exec(req.url ?? "") : null;
+    if (pub) return send(200, { result: await signer.publication(pub[1]!) });
     if (req.method !== "POST" || req.url !== "/sign") return send(404, { error: "not found" });
     try {
       const b = JSON.parse(Buffer.concat(chunks).toString("utf8")) as SignRequest & { issuedAt: string };
@@ -50,6 +53,11 @@ export async function signerClient(socketPath: string): Promise<SignerLike> {
       const out = await call(socketPath, "POST", "/sign", { ...r, issuedAt: r.issuedAt.toISOString() });
       if (out.status !== 200) throw new SignerError(out.status, String(out.json.error ?? "signer refused"));
       return out.json as unknown as SignResult;
+    },
+    async publication(pid) {
+      const out = await call(socketPath, "GET", `/publications/${encodeURIComponent(pid)}`);
+      if (out.status !== 200) throw new SignerError(out.status, String(out.json.error ?? "signer journal unavailable"));
+      return (out.json.result as SignResult | null) ?? null;
     },
   };
 }
