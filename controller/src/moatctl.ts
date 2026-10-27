@@ -57,6 +57,20 @@ export class Moatctl {
     return { ok: true, snapshot: r.stdout.trim() };
   }
 
+  /** Canonical normalized policy JSON (the core's view: sets resolved, defaults filled). */
+  async normalize(policy: string): Promise<Record<string, unknown>> {
+    const r = await this.run(["--json", "normalize", "@p.toml"], { "p.toml": policy });
+    if (r.code !== 0) throw new Error(`moatctl normalize failed: ${r.stderr || r.stdout}`);
+    return parse(r);
+  }
+
+  /** Deterministic explanation of one flow attempt against a policy (winning rule, overridden rules, notes). */
+  async explain(policy: string, attempt: unknown): Promise<Record<string, unknown>> {
+    const r = await this.run(["--json", "explain", "--flow", "@f.json", "@p.toml"], { "p.toml": policy, "f.json": JSON.stringify(attempt) });
+    if (r.code !== 0) throw new Error(`moatctl explain failed: ${r.stderr || r.stdout}`);
+    return parse(r);
+  }
+
   async simulate(current: string, proposed: string, observationsJsonl: string, unacknowledged: string[]): Promise<Record<string, unknown>> {
     const args = ["--json", "simulate", "@cur.toml", "@new.toml", "--observations", "@obs.jsonl", ...unacknowledged.flatMap((d) => ["--unacknowledged", d])];
     const r = await this.run(args, { "cur.toml": current, "new.toml": proposed, "obs.jsonl": observationsJsonl });

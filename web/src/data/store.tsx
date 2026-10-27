@@ -50,6 +50,8 @@ export interface Store {
   closeSession: (s: Session) => void;
   resolveRef: (ref: string) => Promise<{ incidentId: string } | { error: string }>;
   incidentById: (id: string) => Incident | undefined;
+  /** Live read of a controller view (W12 detail screens). Rejects in demo mode: sample data is never fetched as live. */
+  fetchLive: <T>(path: string) => Promise<T>;
   toast: string | null;
   dismissToast: () => void;
 }
@@ -447,6 +449,7 @@ export function StoreProvider({ children, options = {} }: { children: ReactNode;
     closeSession,
     resolveRef,
     incidentById,
+    fetchLive: <T,>(path: string) => (mode === "live" && api ? api.get<T>(path) : Promise.reject(new Error("Sign in to a controller: sample data has no live view."))),
     toast,
     dismissToast: () => setToast(null),
   };

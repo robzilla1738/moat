@@ -194,12 +194,18 @@ export function Empty({ title, icon = "check", children }: { title: string; icon
   );
 }
 
-export function SubNav({ active }: { active: "devices" | "apps" | "coverage" }) {
+export function SubNav({ active }: { active: "devices" | "coverage" | "diagnostics" | "changed" }) {
+  const items = [
+    ["devices", "Devices"],
+    ["coverage", "Coverage & recovery"],
+    ["diagnostics", "Diagnostics"],
+    ["changed", "What changed?"],
+  ] as const;
   return (
-    <nav className="subnav" aria-label="Fleet">
-      {(["devices", "apps", "coverage"] as const).map((k) => (
+    <nav className="subnav" aria-label="Coverage and recovery">
+      {items.map(([k, label]) => (
         <a key={k} href={`#/${k}`} className={active === k ? "active" : ""}>
-          {k === "devices" ? "Devices" : k === "apps" ? "Apps" : "Coverage"}
+          {label}
         </a>
       ))}
     </nav>

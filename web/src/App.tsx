@@ -9,7 +9,7 @@ import { Activity, IncidentDetail } from "./screens/Activity";
 import { SessionDetail, Sessions } from "./screens/Sessions";
 import { Rules } from "./screens/Rules";
 import { DeviceDetail, Devices } from "./screens/Devices";
-import { Apps } from "./screens/Apps";
+import { AppDetail, AppsHome, Diagnostics, WhatChanged } from "./screens/Standalone";
 import { CoverageScreen } from "./screens/Coverage";
 
 export function useRoute(): [string[], (to: string) => void] {
@@ -27,14 +27,15 @@ export function useRoute(): [string[], (to: string) => void] {
 }
 
 const NAV: { key: string; label: string; icon: IconName; mobile: boolean }[] = [
-  { key: "", label: "Home", icon: "home", mobile: true },
+  { key: "", label: "Apps", icon: "apps", mobile: true },
   { key: "activity", label: "Activity", icon: "activity", mobile: true },
-  { key: "sessions", label: "Sessions", icon: "sessions", mobile: true },
+  { key: "sessions", label: "Tasks", icon: "sessions", mobile: true },
   { key: "rules", label: "Rules", icon: "rules", mobile: true },
   { key: "devices", label: "Devices", icon: "devices", mobile: true },
-  { key: "apps", label: "Apps", icon: "apps", mobile: false },
-  { key: "coverage", label: "Coverage", icon: "coverage", mobile: false },
+  { key: "coverage", label: "Coverage & recovery", icon: "coverage", mobile: false },
 ];
+/** A one-computer user does not land in fleet administration: "Devices" reads "This computer". */
+const navLabel = (key: string, label: string, deviceCount: number) => (key === "devices" && deviceCount === 1 ? "This computer" : label);
 
 function useTheme(): [string, () => void] {
   const [theme, setTheme] = useState(() => (typeof window === "undefined" ? "dark" : localStorage.getItem("moat.theme") ?? (window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark")));
@@ -178,13 +179,22 @@ function Shell() {
       screen = parts[1] ? <DeviceDetail id={decodeURIComponent(parts[1])} go={go} /> : <Devices go={go} />;
       break;
     case "apps":
-      screen = <Apps go={go} />;
+      screen = parts[1] ? <AppDetail id={decodeURIComponent(parts[1])} go={go} /> : <AppsHome go={go} />;
+      break;
+    case "changed":
+      screen = <WhatChanged go={go} />;
+      break;
+    case "diagnostics":
+      screen = <Diagnostics />;
+      break;
+    case "overview":
+      screen = <Home go={go} />;
       break;
     case "coverage":
       screen = <CoverageScreen go={go} />;
       break;
     default:
-      screen = <Home go={go} />;
+      screen = <AppsHome go={go} />;
   }
 
   return (
@@ -196,9 +206,9 @@ function Shell() {
         </a>
         <nav className="side-nav">
           {NAV.map((n) => (
-            <a key={n.key} href={`#/${n.key}`} className={`side-link ${section === n.key || (section === "r" && n.key === "activity") ? "active" : ""}`}>
+            <a key={n.key} href={`#/${n.key}`} className={`side-link ${section === n.key || (section === "apps" && n.key === "") || (section === "r" && n.key === "activity") || (n.key === "coverage" && (section === "diagnostics" || section === "changed")) ? "active" : ""}`}>
               <Icon name={n.icon} />
-              <span>{n.label}</span>
+              <span>{navLabel(n.key, n.label, data.devices.length)}</span>
               {n.key === "activity" && open > 0 && <span className="count">{open}</span>}
             </a>
           ))}
@@ -238,12 +248,12 @@ function Shell() {
       </div>
       <nav className="tabbar" aria-label="Primary">
         {NAV.filter((n) => n.mobile).map((n) => (
-          <a key={n.key} href={`#/${n.key}`} className={`tab ${section === n.key || (n.key === "devices" && (section === "apps" || section === "coverage")) || (n.key === "activity" && section === "r") ? "active" : ""}`}>
+          <a key={n.key} href={`#/${n.key}`} className={`tab ${section === n.key || (n.key === "" && section === "apps") || (n.key === "devices" && (section === "coverage" || section === "diagnostics" || section === "changed" || section === "overview")) || (n.key === "activity" && section === "r") ? "active" : ""}`}>
             <span className="tab-icon">
               <Icon name={n.icon} size={21} />
               {n.key === "activity" && open > 0 && <span className="tab-badge">{open}</span>}
             </span>
-            <span>{n.label}</span>
+            <span>{navLabel(n.key, n.label, data.devices.length)}</span>
           </a>
         ))}
       </nav>

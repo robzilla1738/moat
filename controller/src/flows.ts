@@ -21,6 +21,12 @@ export const FLOW_MIGRATIONS = [
    CREATE TABLE device_seq (device_id TEXT PRIMARY KEY, max_seq INTEGER NOT NULL, gaps TEXT NOT NULL DEFAULT '[]');
    CREATE TABLE retention (id INTEGER PRIMARY KEY CHECK (id = 1), raw_before TEXT, rollup_before TEXT, trimmed_for_quota INTEGER NOT NULL DEFAULT 0, ran_at TEXT);
    INSERT INTO retention (id) VALUES (1);`,
+  // 2 (W12): exact executable and signer identity per flow (an app family name alone is never identity), and a
+  // short typed detail for non-flow evidence (coverage level, recovery phase) so "What changed?" can compare intervals.
+  `ALTER TABLE flows ADD COLUMN exe TEXT;
+   ALTER TABLE flows ADD COLUMN signer TEXT;
+   ALTER TABLE flows ADD COLUMN detail TEXT;
+   CREATE INDEX flows_exe_at ON flows (exe, at);`,
 ];
 
 export interface FlowRecord {
@@ -44,6 +50,12 @@ export interface FlowRecord {
   measurement_source?: string | null;
   /** The endpoint's flow attempt (moat-core FlowAttempt JSON), kept for replay in policy simulation. */
   attempt?: string | null;
+  /** Executable path as the endpoint observed it (null: identity unknown). */
+  exe?: string | null;
+  /** Code-signing identity (team/signing id) when the platform reports one. */
+  signer?: string | null;
+  /** Typed detail for non-flow evidence (e.g. coverage level). */
+  detail?: string | null;
 }
 
 export interface RetentionPolicy { rawDays: number; rollupDays: number; maxBytes: number }
@@ -61,7 +73,7 @@ export class FlowStore {
   insertBatch(deviceId: string, records: FlowRecord[]): { inserted: number; duplicates: number; gaps: [number, number][] } {
     return tx(this.db, () => {
       const ins = this.db.prepare(
-        "INSERT OR IGNORE INTO flows (device_id, seq, at, kind, app, session_id, process_instance, destination, port, transport, verdict, observed, rule, policy_revision, packets, bytes_out, bytes_in, counter_scope, measurement_source, attempt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT OR IGNORE INTO flows (device_id, seq, at, kind, app, session_id, process_instance, destination, port, transport, verdict, observed, rule, policy_revision, packets, bytes_out, bytes_in, counter_scope, measurement_source, attempt, exe, signer, detail) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       );
       const roll = this.db.prepare(
         "INSERT INTO rollups (hour, device_id, app, destination, verdict, rule, flows, packets, bytes) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?) ON CONFLICT (hour, device_id, app, destination, verdict, rule) DO UPDATE SET flows = flows + 1, packets = packets + excluded.packets, bytes = bytes + excluded.bytes",
@@ -73,7 +85,7 @@ export class FlowStore {
       for (const r of [...records].sort((a, b) => a.seq - b.seq)) {
         if (r.seq > max + 1 && max > 0) gaps.push([max + 1, r.seq - 1]);
         if (r.seq > max) max = r.seq;
-        const res = ins.run(deviceId, r.seq, r.at, r.kind, r.app ?? null, r.session_id ?? null, r.process_instance ?? null, r.destination ?? null, r.port ?? null, r.transport ?? null, r.verdict ?? null, r.observed ? 1 : 0, r.rule ?? null, r.policy_revision ?? null, r.packets ?? null, r.bytes_out ?? null, r.bytes_in ?? null, r.counter_scope ?? null, r.measurement_source ?? null, r.attempt ?? null);
+        const res = ins.run(deviceId, r.seq, r.at, r.kind, r.app ?? null, r.session_id ?? null, r.process_instance ?? null, r.destination ?? null, r.port ?? null, r.transport ?? null, r.verdict ?? null, r.observed ? 1 : 0, r.rule ?? null, r.policy_revision ?? null, r.packets ?? null, r.bytes_out ?? null, r.bytes_in ?? null, r.counter_scope ?? null, r.measurement_source ?? null, r.attempt ?? null, r.exe ?? null, r.signer ?? null, r.detail ?? null);
         if (res.changes) {
           inserted++;
           roll.run(r.at.slice(0, 13) + ":00:00Z", deviceId, r.app ?? r.session_id ?? "", r.destination ?? "", r.verdict ?? (r.observed ? "observed" : ""), r.rule ?? "", r.packets ?? 0, (r.bytes_out ?? 0) + (r.bytes_in ?? 0));
