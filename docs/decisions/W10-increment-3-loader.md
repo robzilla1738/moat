@@ -1,7 +1,8 @@
 # W10 increment 3 decision: BPF loader for a cgroup/connect hook keyed on executable file identity (2026-10-27)
 
 **Status:** loader chosen (aya for userspace, the program in C built by clang); **hook not built, enforcement stays
-unavailable.** `linux.ordinary-apps.app-rules` remains `unsupported_rejected`.
+unavailable.** `linux.ordinary-apps.app-rules` remains `unsupported_rejected`. The BPF program's licence is open
+([#53](https://github.com/robzilla1738/moat/issues/53)).
 **Follows:** [W10-enforcement.md](W10-enforcement.md), which names the cgroup/connect hook as the only candidate that
 decides in the kernel, keys on an identity the app cannot forge, and could be proven in CI netns.
 

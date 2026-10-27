@@ -4,7 +4,7 @@ The web UI has two explicit modes. Neither borrows from the other.
 
 | Mode | How you get it | What it shows | What its buttons do |
 |---|---|---|---|
-| Demo | the static demo build (GitHub Pages) or **Explore sample data** on the sign-in screen | fixed sample data, labeled "Sample data" on every screen | nothing is sent; each action says "demo: simulated" |
+| Demo | the static demo build (for GitHub Pages once Pages is enabled, [#1](https://github.com/robzilla1738/moat/issues/1); also the web tarball of each release) or **Explore sample data** on the sign-in screen | fixed sample data, labeled "Sample data" on every screen | nothing is sent; each action says "demo: simulated" |
 | Live | sign in with a controller token | only what the controller API returned | authenticated requests with version preconditions; states come from endpoint receipts |
 
 A live page that cannot load shows the failure. It never shows sample data. A live page that loaded once and then
@@ -43,7 +43,14 @@ coverage it last claimed. A skewed browser clock cannot make old evidence look c
 
 `#/r/<ref>` resolves the opaque reference through `GET /v1/r/:ref`. The reference is bound to one incident id when
 the notification is queued. New, reordered or resolved incidents never retarget it; a deleted incident or unknown
-reference opens "Notification not found" and nothing else.
+reference opens "Notification not found" and nothing else. Tests: `controller/test/controller.test.ts` ("W08: a
+notification reference opens exactly its incident…") and the live e2e; `D-INCIDENT-ROUTING` closed (controller
+40577605234, web 40577605299).
+
+Floods (#60): an unchanged incident notifies once; when one subject raises many incidents, three are notified
+individually and the rest collapse into one summary per 10-minute window. The summary's reference opens the incident
+that tripped the threshold; every incident stays listed. A dedicated grouped-incidents view is not built yet
+(`controller/test/notification-floods.test.ts`).
 
 ## Untrusted display data
 
@@ -62,3 +69,9 @@ punycode names are flagged, and absurd lengths are shortened with a note.
 * `web/src/truth.test.tsx` (vitest): hostile markup, look-alike identifiers, freshness, evidence-only action states, demo/live separation.
 * `web/e2e/live.e2e.ts` (Chromium via Playwright, CI job `live-e2e`): the production build against a real controller,
   signer, Rust `moatctl` and device-signed sync. Screenshots: `docs/screenshots/live-*.png`.
+* Ledger: `fleet.web.live-actions`, `implemented_unproven`, component evidence (web 40577605299); `D-WEB-DEMO-SUCCESS`
+  closed. No phone and no real endpoint have been used.
+
+Later surfaces follow the same rules: the Apps-first standalone views (W12), reconciliation and recovery states from
+W05/W06 events (#36), learning review (W14, [learning.md](learning.md)) and DNS-only devices (W16,
+[integrations.md](integrations.md)).

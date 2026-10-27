@@ -1,7 +1,10 @@
 # VPN coexistence test matrix
 
-**Status: nothing in this matrix has been run on Robert's devices.** Moat makes **no VPN compatibility claim** until
-a row passes on real hardware with the exact versions recorded. Desktop enforcement is local (a content filter on
+**Status: nothing in this matrix has been run on Robert's devices** ([#8](https://github.com/robzilla1738/moat/issues/8)).
+The claim ledger records `vpn.coexistence` as `unknown_degraded`, evidence `none`, result `not_run`
+([STATUS](STATUS.md)), and the Compatibility rows of the [adversarial matrix](adversarial-matrix.md) are all
+device-only. Moat makes **no VPN compatibility claim** until a row passes on real hardware with the exact versions
+recorded. Desktop enforcement is local (a content filter on
 macOS, nftables on Linux) and does not add a full-tunnel VPN, but that architectural choice does not prove
 coexistence.
 
@@ -34,7 +37,8 @@ Legend: ☐ not run · ✅ pass · ❌ fail (link the issue) · ➖ not applicab
 | M8 | Split DNS / MagicDNS resolution while filtering | ☐ | ☐ | ☐ | Hostname evidence source recorded as `flow_api`. |
 | M9 | Sleep / wake, network change (Wi-Fi ↔ Ethernet) | ☐ | ☐ | ☐ | Filter keeps running; no coverage claim without a fresh status. |
 | M10 | IPv6 and UDP/QUIC through each VPN | ☐ | ☐ | ☐ | QUIC flows decided; denies hold. |
-| M11 | Emergency isolation keeps chosen recovery path (e.g. SSH over tailnet) | ☐ | ➖ | ☐ | Only if the owner kept that path. |
+| M11 | Emergency isolation keeps chosen recovery path (e.g. SSH over tailnet) | ☐ | ➖ | ☐ | Only if the owner kept that path. Isolation claims *new* outbound connections only. |
+| M12 | Trust reload and canary rollback while a VPN reconnects | ☐ | ☐ | ☐ | W07 behavior (generation-bound cache, `reloadTrust`) is unit-tested only; no claim under a VPN. |
 
 ### Linux / Omarchy (`moatd`)
 
@@ -44,18 +48,21 @@ Legend: ☐ not run · ✅ pass · ❌ fail (link the issue) · ➖ not applicab
 | L2 | Tailnet SSH to named management peers allowed by a narrow rule | ☐ | ➖ | ☐ | |
 | L3 | `tailscaled`'s own nftables/iptables rules and Moat's table coexist after restart of either | ☐ | ☐ | ☐ | Moat restores its table if removed and records it. |
 | L4 | Exit node routes | ☐ | ➖ | ☐ | Scope classification of 100.64.0.0/10 stays `tailnet`. |
-| L5 | Reboot ordering (moatd before/after VPN) | ☐ | ☐ | ☐ | Last valid policy enforced from boot. |
+| L5 | Reboot ordering (moatd before/after VPN) | ☐ | ☐ | ☐ | Last valid policy enforced from boot; activation journal reconciles first (W06). |
+| L6 | Session egress proxy resolving tailnet names (MagicDNS) and public names through the VPN's DNS | ☐ | ☐ | ☐ | The proxy resolves names itself after authorization (W05); check which resolver it uses and that tailnet scope rules still apply to resolved 100.x addresses. |
+| L7 | Open proxied stream across a VPN reconnect, then a narrowing revision | ☐ | ☐ | ☐ | W05 stream termination is measured only in CI netns; record the stopping delay here. |
 
 ### Phones and TV (DNS-only)
 
 | # | Scenario | Result | Notes |
 | --- | --- | --- | --- |
-| D1 | iPhone with Tailscale using the mini's resolver via tailnet DNS | ☐ | Per-client identity preserved? |
+| D1 | iPhone with Tailscale using the mini's resolver via tailnet DNS | ☐ | Per-client identity preserved? The W16 adapters label clients by the address the resolver reports ([#9](https://github.com/robzilla1738/moat/issues/9)). |
 | D2 | Android TV (confirm TCL model / Android version first) with Tailscale installed | ☐ | Streaming auth, CDN rotation, casting. |
 | D3 | Public secondary resolver configured → bypass documented | ☐ | Expected limitation: DNS-only cannot stop direct-IP or DoH. |
 
 ## Recording a result
 
 Add a row note with versions, date, Moat commit, and a link to the raw evidence (Activity export, `moatd status`,
-`nft list table inet moat`). Then update [STATUS.md](STATUS.md). The UI keeps saying "untested" for VPN coexistence
-until the relevant rows pass.
+`nft list table inet moat`). Then update the `vpn.coexistence` claim in [`claim-ledger.json`](claim-ledger.json) with
+an `omarchy-installed` or `mac-signed-installed` result, and [STATUS.md](STATUS.md). The UI keeps saying "untested"
+for VPN coexistence until the relevant rows pass.

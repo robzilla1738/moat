@@ -81,7 +81,12 @@ one, the `layer` of each reject, and freshness expectations for receipts. Tests 
 * Rust: `core/moat-core/tests/contracts.rs` (parse, semantic checks, round trip without scope loss, digests, layers).
 * JavaScript (no dependencies): `contracts/test/fixtures.test.mjs` (canonicalization, digests, schema-layer rejects,
   freshness) — run with `node --test contracts/test/fixtures.test.mjs`.
-* Swift / TypeScript application code (Lane B): load the same manifest from `macos/` and `controller/`/`web/` tests.
+* TypeScript (web): `web/src/issuer.test.ts` recomputes the canonical digest of every accepted `moat.grant.v1` fixture,
+  the value a phone approver signs.
+* Swift: no consumer. The Mac never decodes `moat.*` contract objects natively; snapshots and grants go through
+  moat-core over FFI. If Swift ever decodes grants or receipts itself, add a fixture consumer first.
+* Controller: compiles grants with the Rust `moatctl compile --grants`; `controller/test/grants.test.ts` checks that
+  `moatctl contract` accepts a controller-planned grant and agrees on its digest.
 
 Regenerate with `cd contracts && python3 tools/gen_schemas.py && python3 tools/gen_fixtures.py` only when the contract changes; then
 `MOAT_UPDATE_FIXTURES=1 cargo test -p moat-core --test contracts` records new digests. Never edit a digest by hand.

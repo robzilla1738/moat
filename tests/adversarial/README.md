@@ -5,8 +5,12 @@ machine. It refuses to run in CI (`CI` set) or without `MOAT_DEVICE_PROOF=1`, be
 GitHub macOS runner are not evidence about Robert's devices.
 
 Nothing here sends real data: the payload is a random canary token. Nothing promotes trust or edits policy. Results
-are written to a JSON file for **human review**; a passing run does not by itself change any claim. Copy the outcome
-into [docs/STATUS.md](../../docs/STATUS.md) and the [compatibility suite](../../docs/compatibility-suite.md) by hand.
+are written to a JSON file for **human review**; a passing run does not by itself change any claim. Record the outcome
+by hand in [`docs/claim-ledger.json`](../../docs/claim-ledger.json) (environment `omarchy-installed` or
+`mac-signed-installed`), [docs/STATUS.md](../../docs/STATUS.md), the device rows of the
+[adversarial matrix](../../docs/adversarial-matrix.md) and the [compatibility suite](../../docs/compatibility-suite.md).
+No run has been recorded yet ([#11](https://github.com/robzilla1738/moat/issues/11)). The CI-side equivalents of
+these cases are mapped in the adversarial matrix.
 
 ## Setup
 

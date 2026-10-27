@@ -1,6 +1,6 @@
 # Naming: the "Moat" collision (MASTER_ROADMAP §17.5)
 
-**Status:** open; working name kept while engineering continues. Decision belongs to Robert.
+**Status:** open; working name kept while engineering continues. Decision belongs to Robert ([#52](https://github.com/robzilla1738/moat/issues/52)).
 **This page is a factual note, not a legal opinion.** It records what other projects publicly use the name, where
 Moat's own names could clash in practice (package managers, executables, paths), and the options. No contact with
 any other maintainer has been made. Checked 2026-10-27; re-check before any public installation path is announced.
