@@ -82,6 +82,9 @@ enum Cmd {
         /// Override the issue time (RFC 3339), for reproducible builds.
         #[arg(long)]
         issued_at: Option<DateTime<Utc>>,
+        /// JSON array of `moat.grant.v1` objects to overlay (each keeps its exact device/process/task scope).
+        #[arg(long)]
+        grants: Option<PathBuf>,
         #[arg(short, long)]
         out: Option<PathBuf>,
     },
@@ -300,12 +303,27 @@ fn run(cmd: Cmd, o: &mut Out) -> Result<(), String> {
             }
             Ok(())
         }
-        Cmd::Compile { policy, adapter, revision, rollback_of, valid_hours, issued_at, out } => {
+        Cmd::Compile { policy, adapter, revision, rollback_of, valid_hours, issued_at, grants, out } => {
             let p = load_policy(&policy)?;
             let issued = issued_at.unwrap_or_else(Utc::now);
             let opts =
                 CompileOptions { revision, rollback_of, issued_at: issued, not_after: valid_hours.map(|h| issued + Duration::hours(h)) };
-            match compile(&p, &adapter.adv(), &opts) {
+            let gs: Vec<moat_core::contracts::Grant> = match &grants {
+                None => vec![],
+                Some(path) => {
+                    let text = fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
+                    let arr: Vec<Value> = serde_json::from_str(&text).map_err(|e| format!("grants must be a JSON array: {e}"))?;
+                    let mut out = Vec::new();
+                    for (i, v) in arr.into_iter().enumerate() {
+                        out.push(moat_core::contracts::from_value(v).map_err(|e| {
+                            o.code = 2;
+                            format!("grants[{i}]: {}", e.iter().map(|x| x.to_string()).collect::<Vec<_>>().join("; "))
+                        })?);
+                    }
+                    out
+                }
+            };
+            match moat_core::compile::compile_with_grants(&p, &gs, &adapter.adv(), &opts) {
                 Ok(s) => write_out(&out, &serde_json::to_string_pretty(&s).unwrap()),
                 Err(e) => {
                     o.code = 2;

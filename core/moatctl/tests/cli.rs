@@ -192,3 +192,32 @@ fn normalize_prints_policy_json() {
     assert_eq!(v["schema"], "moat.policy.v1");
     assert!(v["rules"].as_array().unwrap().len() >= 5);
 }
+
+#[test]
+fn compile_with_grants_keeps_device_scope_and_binds_the_overlay() {
+    let d = tempfile::tempdir().unwrap();
+    let policy = moat_core::Policy::parse(&fs::read_to_string(home()).unwrap()).unwrap();
+    let mut g: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(repo().join("contracts/fixtures/valid/grant-task.json")).unwrap()).unwrap();
+    g["base_policy_digest"] = serde_json::Value::String(format!("sha256:{}", moat_core::compile::policy_digest(&policy)));
+    let gp = d.path().join("grants.json");
+    fs::write(&gp, serde_json::to_string(&vec![g]).unwrap()).unwrap();
+    let hp = home();
+    let args = ["compile", hp.to_str().unwrap(), "--adapter", "linux", "--revision", "3", "--issued-at", "2026-10-27T15:01:00Z"];
+    let plain = run(&args);
+    assert!(plain.status.success(), "{}", s(&plain));
+    let o = bin().args(args).args(["--grants", gp.to_str().unwrap()]).output().unwrap();
+    assert!(o.status.success(), "{}", s(&o));
+    let snap: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+    let rule = snap["policy"]["rules"].as_array().unwrap().iter().find(|r| r["id"] == "grant-01j0").expect("grant rule present").clone();
+    assert_eq!(rule["selector"]["devices"], serde_json::json!(["arch-desk"]));
+    assert_eq!(rule["selector"]["session"]["session_ids"], serde_json::json!(["20261027150000-a1b2c3d4e5f6"]));
+    let plain: serde_json::Value = serde_json::from_slice(&plain.stdout).unwrap();
+    assert_ne!(snap["report"]["effective_digest"], plain["report"]["effective_digest"], "overlay is in the effective digest");
+    // a grant missing its device scope is refused, not compiled wider
+    let mut bad: serde_json::Value = serde_json::from_str(&fs::read_to_string(&gp).unwrap()).unwrap();
+    bad[0]["scope"].as_object_mut().unwrap().remove("device_id");
+    fs::write(&gp, bad.to_string()).unwrap();
+    let o = bin().args(args).args(["--grants", gp.to_str().unwrap()]).output().unwrap();
+    assert_eq!(o.status.code(), Some(2), "{}", s(&o));
+}

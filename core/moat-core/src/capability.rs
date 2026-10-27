@@ -40,10 +40,13 @@ pub enum Capability {
     /// Enforce hostname rules for TCP inside protected sessions through a local policy proxy that reads the TLS SNI,
     /// an HTTP CONNECT target or a plain-HTTP Host header. No TLS interception; UDP has no hostname evidence.
     SessionHostnameProxy,
+    /// Enforce rules scoped to one process instance (pid + start generation within a boot). Distinct from
+    /// `ProcessIdentity`, which is attribution only.
+    ProcessEnforcement,
 }
 
 impl Capability {
-    pub const ALL: [Capability; 13] = [
+    pub const ALL: [Capability; 14] = [
         Capability::ProcessIdentity,
         Capability::AncestorAttribution,
         Capability::AppEnforcement,
@@ -57,6 +60,7 @@ impl Capability {
         Capability::Ipv6Enforcement,
         Capability::UdpEnforcement,
         Capability::SessionHostnameProxy,
+        Capability::ProcessEnforcement,
     ];
 
     pub fn label(&self) -> &'static str {
@@ -74,6 +78,7 @@ impl Capability {
             Capability::Ipv6Enforcement => "IPv6 enforcement",
             Capability::UdpEnforcement => "UDP/QUIC enforcement",
             Capability::SessionHostnameProxy => "session hostname proxy (SNI/CONNECT, TCP only)",
+            Capability::ProcessEnforcement => "process-instance enforcement",
         }
     }
 }
@@ -160,6 +165,10 @@ impl CapabilityAdvertisement {
         m.insert(TelemetryCompleteness, s(Support::Untested, "sequence numbers and gap markers in the spool"));
         m.insert(Ipv6Enforcement, s(Support::Untested, ""));
         m.insert(UdpEnforcement, s(Support::Untested, "QUIC requires device proof"));
+        m.insert(
+            ProcessEnforcement,
+            s(Support::Unsupported, "process-scoped grants wait for reliable process-generation capture and enforcement (W07)"),
+        );
         CapabilityAdvertisement {
             platform: Platform::Macos,
             adapter: "moat-macos-ne".into(),
@@ -190,6 +199,7 @@ impl CapabilityAdvertisement {
         m.insert(TelemetryCompleteness, s(Support::Supported, "spool sequence numbers, restart and gap markers"));
         m.insert(Ipv6Enforcement, s(Support::Supported, "inet family table"));
         m.insert(UdpEnforcement, s(Support::Supported, "matches all L4 protocols in the output hook"));
+        m.insert(ProcessEnforcement, s(Support::Unsupported, "nftables cannot match a process instance; use a protected session"));
         m.insert(
             SessionHostnameProxy,
             s(

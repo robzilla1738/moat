@@ -192,9 +192,21 @@ pub struct SessionMatch {
     pub session_ids: Vec<String>,
 }
 
+/// One process instance: boot plus pid plus start generation (never a pid alone).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[serde(deny_unknown_fields)]
+pub struct ProcessMatch {
+    pub boot_id: String,
+    pub pid: u32,
+    pub start_generation: u64,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
 #[serde(deny_unknown_fields)]
 pub struct Selector {
+    /// Exact device ids. A grant for one device names it here, so the same executable elsewhere never matches.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub devices: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub device_groups: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -207,19 +219,25 @@ pub struct Selector {
     pub ancestors: Vec<AppMatcher>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session: Option<SessionMatch>,
+    /// Exact process instances (device given by `devices`). Needs process-instance enforcement; a restarted process
+    /// (new start generation) or a new boot never matches.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub processes: Vec<ProcessMatch>,
 }
 
 impl Selector {
     pub fn is_everything(&self) -> bool {
-        self.device_groups.is_empty()
+        self.devices.is_empty()
+            && self.processes.is_empty()
+            && self.device_groups.is_empty()
             && self.users.is_empty()
             && self.apps.is_empty()
             && self.ancestors.is_empty()
             && self.session.is_none()
     }
-    /// "Narrow" = scoped to an app or a session.
+    /// "Narrow" = scoped to an app, a session or a process instance.
     pub fn is_narrow(&self) -> bool {
-        !self.apps.is_empty() || self.session.is_some()
+        !self.apps.is_empty() || self.session.is_some() || !self.processes.is_empty()
     }
 }
 
@@ -472,6 +490,19 @@ impl Policy {
     }
 
     fn validate_selector(&self, s: &Selector, path: &str, errors: &mut Vec<PolicyError>) {
+        for d in &s.devices {
+            if !valid_id(d) {
+                errors.push(err(format!("{path}.devices"), format!("invalid device id {d:?}")));
+            }
+        }
+        if !s.processes.is_empty() && s.devices.len() != 1 {
+            errors.push(err(format!("{path}.processes"), "process instances belong to exactly one device; name it in devices"));
+        }
+        for p in &s.processes {
+            if !valid_id(&p.boot_id) {
+                errors.push(err(format!("{path}.processes"), "invalid boot id"));
+            }
+        }
         for g in &s.device_groups {
             if !self.device_groups.contains_key(g) {
                 errors.push(err(format!("{path}.device_groups"), format!("unknown device group {g:?}")));
@@ -539,6 +570,9 @@ impl Policy {
         }
         if !r.selector.users.is_empty() {
             caps.insert(Capability::UserEnforcement);
+        }
+        if !r.selector.processes.is_empty() {
+            caps.insert(Capability::ProcessEnforcement);
         }
         let mut uses_hosts = !r.destinations.hosts.is_empty();
         let mut v6 = r.destinations.cidrs.iter().any(|c| matches!(c, IpNet::V6(_)));

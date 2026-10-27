@@ -25,6 +25,7 @@ pub mod diff;
 pub mod enrichment;
 pub mod eval;
 pub mod explain;
+pub mod grants;
 pub mod identity;
 pub mod net;
 pub mod policy;

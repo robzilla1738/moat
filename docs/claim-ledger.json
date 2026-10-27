@@ -114,26 +114,28 @@
         "commit": "d5270bd",
         "date": "2026-10-27"
       },
-      "limits": "Policy digest is serde_json of the source policy, not a specified canonical form, and excludes the grant overlay identity (W01/W03).",
-      "open_defects": [
-        "D-DIGEST-CANONICAL"
-      ]
+      "limits": "policy_digest is canonical JSON; report.effective_digest binds base + overlays + compiler. Signatures cover the exact payload bytes.",
+      "open_defects": []
     },
     {
       "id": "core.grant.scope",
       "capability": "temporary grants keep device, process-generation, session and task scope from approval to endpoint",
       "backend": "controller grantToml + moat-core policy",
-      "evidence_level": "component",
-      "disposition": "unsupported_rejected",
-      "tests": [],
-      "environment": "ci-node-22",
+      "evidence_level": "semantic",
+      "disposition": "implemented_unproven",
+      "tests": [
+        "core/moat-core/src/grants.rs::tests",
+        "core/moatctl/tests/cli.rs::compile_with_grants_keeps_device_scope_and_binds_the_overlay",
+        "core/moat-core/tests/contracts.rs"
+      ],
+      "environment": "unit",
       "last_result": {
-        "result": "fail",
-        "run": "review of d5270bd",
-        "commit": "d5270bd",
+        "result": "pass",
+        "run": "local cargo test, branch w03-grant-scope",
+        "commit": "w03-grant-scope",
         "date": "2026-10-27"
       },
-      "limits": "The policy schema has no device or process-instance selector; grantToml drops device_id and renders process_instance as an executable path, so an app grant applies on every device running that executable and survives process restart.",
+      "limits": "Core only: device, process-instance and task scope survive grant -> rule -> snapshot JSON -> evaluation; process scope needs process_enforcement, which no backend has, so process grants are omitted with a report. The controller still uses its own grantToml until Lane B adopts moatctl compile --grants.",
       "open_defects": [
         "D-GRANT-SCOPE-LOSS",
         "D-GRANT-IDEMPOTENCY"
@@ -424,17 +426,22 @@
       "id": "D-DIGEST-CANONICAL",
       "summary": "Digests use implementation serialization, not a specified canonical form; the effective digest excludes overlays.",
       "package": "W01/W03",
-      "status": "open"
+      "status": "closed",
+      "closed_by": "W03 core (compile::policy_digest canonical JSON; report.effective_digest = base + overlays + compiler)",
+      "regression_tests": [
+        "grants::tests::effective_digest_covers_overlays_and_their_scope",
+        "moatctl cli compile_with_grants_keeps_device_scope_and_binds_the_overlay"
+      ]
     },
     {
       "id": "D-GRANT-SCOPE-LOSS",
-      "summary": "Generated grants lose device and process-generation scope.",
+      "summary": "Generated grants lose device and process-generation scope. Core path fixed (moat.grant.v1 -> grant_rule keeps device/process/task scope; moatctl compile --grants); the controller's grantToml still renders grants itself and must switch to it (Lane B).",
       "package": "W03",
       "status": "open"
     },
     {
       "id": "D-GRANT-IDEMPOTENCY",
-      "summary": "A retried grant request mints a fresh expiry instead of preserving the original.",
+      "summary": "A retried grant request mints a fresh expiry. Core reference GrantLedger keeps the original grant and expiry per idempotency key; the controller must adopt it (Lane B).",
       "package": "W03",
       "status": "open"
     },
