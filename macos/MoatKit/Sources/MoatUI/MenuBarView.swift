@@ -82,7 +82,7 @@ public struct MenuBarContent: View {
                     Image(systemName: "xmark.shield.fill").foregroundStyle(p.red).font(.callout).accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: 1) {
                         Text(r.facts.appLabel).font(.callout.weight(.semibold)).lineLimit(1)
-                        Text("\(r.facts.remoteHost ?? r.facts.remoteIP):\(r.facts.remotePort)")
+                        Text(verbatim: "\(r.facts.remoteHost ?? r.facts.remoteIP):\(r.facts.remotePort)")
                             .font(.system(.caption, design: .monospaced)).foregroundStyle(p.text2).lineLimit(1).truncationMode(.middle)
                     }
                     Spacer(minLength: 4)

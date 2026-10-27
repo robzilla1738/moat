@@ -319,7 +319,7 @@ struct PolicyScreen: View {
     @ViewBuilder private func summaryRows(_ i: PolicySummary) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text("r\(i.revision)").font(.system(.title, design: .rounded).weight(.semibold))
+                Text(verbatim: "r\(i.revision)").font(.system(.title, design: .rounded).weight(.semibold))
                 Text(i.policyName).font(.body.weight(.medium)).foregroundStyle(p.text2)
                 if let rb = i.rollbackOf { Pill(text: "rollback of r\(rb)", tone: .amber) }
             }

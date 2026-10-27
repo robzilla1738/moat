@@ -92,7 +92,7 @@ struct CoverageBadge: View {
                 .moatPulse(status.coverage == .isolated || status.coverage == .degraded, reduceMotion: reduceMotion)
             Text(status.coverage.label).font(.callout.weight(.semibold))
             if let i = status.installed {
-                Text("r\(i.revision)").font(.callout.monospacedDigit()).foregroundStyle(p.muted)
+                Text(verbatim: "r\(i.revision)").font(.callout.monospacedDigit()).foregroundStyle(p.muted)
             }
         }
         .padding(.horizontal, 6)

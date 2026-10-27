@@ -232,6 +232,19 @@ enum ScreenshotReporter {
             }
             if o.special == nil {
                 w.setContentSize(NSSize(width: 1280, height: 820))
+            } else if let content = w.contentView {
+                // Menu bar panel and onboarding are fixed-size surfaces: fit the window to them so the capture is
+                // the surface itself, not a default-sized window with the surface floating in the middle.
+                content.layoutSubtreeIfNeeded()
+                let fit = content.fittingSize
+                if fit.width > 100, fit.height > 100 {
+                    w.setContentSize(NSSize(width: ceil(fit.width), height: ceil(fit.height)))
+                }
+                if o.special == "menubar" {
+                    w.titleVisibility = .hidden
+                    w.titlebarAppearsTransparent = true
+                    for b in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] { w.standardWindowButton(b)?.isHidden = true }
+                }
             }
             w.center()
             w.makeKeyAndOrderFront(nil)
