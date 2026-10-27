@@ -272,6 +272,11 @@ struct PolicyScreen: View {
                             Toggle("10-minute canary (reverts unless you keep it)", isOn: $canary)
                                 .toggleStyle(.checkbox)
                                 .font(.callout)
+                                .disabled(s.installed == nil)
+                            if s.installed == nil {
+                                Text("The first revision cannot be a canary: there is nothing to roll back to. It is applied as is.")
+                                    .font(.callout).foregroundStyle(p.muted).fixedSize(horizontal: false, vertical: true)
+                            }
                         }
                     }
                     Card {
@@ -317,7 +322,7 @@ struct PolicyScreen: View {
         }
         .fileImporter(isPresented: $importing, allowedContentTypes: [.json]) { result in
             if case let .success(url) = result {
-                Task { await model.apply(fileURL: url, canarySeconds: canary ? 600 : 0) }
+                Task { await model.apply(fileURL: url, canarySeconds: canary && model.status?.installed != nil ? 600 : 0) }
             }
         }
     }

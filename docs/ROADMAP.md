@@ -11,7 +11,7 @@ GitHub CI runners or unit tests.
 
 | Gate | Status | What blocks it |
 | --- | --- | --- |
-| G0 truthful experimental build | **Not met.** All Lane A baseline defects are closed with regression tests; three Lane B defects are open in the ledger. | `D-MAC-CACHE-TRUST`, `D-WEB-DEMO-SUCCESS`, `D-INCIDENT-ROUTING` |
+| G0 truthful experimental build | **Met** (2026-10-27). Every baseline defect is closed with a regression test and a cited CI run. | Nothing for G0. Nothing is supported on real devices. |
 | G1 useful local Mac alpha | Not started on a device | Developer ID, NE profiles, notarization ([#2](https://github.com/robzilla1738/moat/issues/2)); a signed install on a clean second Mac ([#7](https://github.com/robzilla1738/moat/issues/7)) |
 | G2 cross-platform local beta | Blocked | G1; Linux ordinary-app enforcement unavailable ([W10 decision](decisions/W10-enforcement.md)); Omarchy proof ([#6](https://github.com/robzilla1738/moat/issues/6)) |
 | G3 private fleet beta | Blocked | Fleet sync, learning and DNS adapters pass in CI only; needs real endpoints, a 24-hour outage test and phone approvals |

@@ -32,7 +32,7 @@ The claim ledger is the source; summarised here by kind.
 | Protected sessions (cgroup v2 + nftables, egress proxy) | implemented_unproven (native CI) | sessions refused at launch (no session enforcement on macOS) |
 | Ordinary-app rules | **unsupported_rejected** (no proven hook; [W10 decision](decisions/W10-enforcement.md)) | implemented_unproven (component CI, never run signed) |
 | Ordinary-app inventory | observe_only, implemented_unproven | via the filter extension, unproven |
-| Activation journal, trial and rollback | implemented_unproven (fault-injected, native CI) | open defect `D-MAC-CACHE-TRUST` |
+| Activation journal, trial and rollback | implemented_unproven (fault-injected, native CI) | implemented_unproven (unit tests in macOS CI: canary rollback, first canary refused, verified restoration; never run signed) |
 | VPN coexistence | not run | not run |
 
 ## Versions and end of support

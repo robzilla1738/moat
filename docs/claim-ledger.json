@@ -334,42 +334,38 @@
       "evidence_level": "component",
       "disposition": "implemented_unproven",
       "tests": [
-        "macos/MoatKit/Tests"
+        "macos/MoatKit/Tests (MoatKitTests incl. W07Tests, W12Tests; MoatUITests incl. StaleTests)"
       ],
       "environment": "ci-macos-26",
       "last_result": {
         "result": "pass",
-        "run": "macos 40493342625",
-        "commit": "d5270bd",
+        "run": "macos 40577981264",
+        "commit": "2ad8be5",
         "date": "2026-10-27"
       },
-      "limits": "Never run as a signed, approved system extension. Owned by Lane B (macos/); listed here so the ledger is complete.",
-      "open_defects": [
-        "D-MAC-CACHE-TRUST"
-      ]
+      "limits": "Never run as a signed, approved system extension (unsigned builds on a CI runner, no activated extension). Generation-bound cache, verified restoration, trust reload, first-canary refusal and stale XPC are unit-tested only. Owned by Lane B (macos/).",
+      "open_defects": []
     },
     {
       "id": "fleet.web.live-actions",
       "capability": "live web actions show endpoint-backed status; notifications open the exact incident",
       "backend": "web + controller",
       "evidence_level": "component",
-      "disposition": "unknown_degraded",
+      "disposition": "implemented_unproven",
       "tests": [
-        "web tests",
-        "controller tests"
+        "web/src/truth.test.tsx",
+        "web/e2e/live.e2e.ts",
+        "controller/test/controller.test.ts"
       ],
       "environment": "ci-node-22",
       "last_result": {
-        "result": "fail",
-        "run": "review of d5270bd",
-        "commit": "d5270bd",
+        "result": "pass",
+        "run": "web 40577605299",
+        "commit": "08e315e",
         "date": "2026-10-27"
       },
-      "limits": "Owned by Lane B (W08). Live mode still reuses demo success behavior and incident references can open the wrong incident.",
-      "open_defects": [
-        "D-WEB-DEMO-SUCCESS",
-        "D-INCIDENT-ROUTING"
-      ]
+      "limits": "Live actions are authenticated requests bound to incident and policy revision; pending until an endpoint receipt; notification references open exactly one incident. Chromium against a real controller, signer and moatctl in CI; no phone, no real endpoint.",
+      "open_defects": []
     },
     {
       "id": "fleet.sync.acks-reconcile",
@@ -650,19 +646,54 @@
       "id": "D-MAC-CACHE-TRUST",
       "summary": "Mac cache, trust reload, first canary and stale status gaps.",
       "package": "W06-W08 (Lane B)",
-      "status": "open"
+      "status": "closed",
+      "closed_by": "W07 (#19, 971fb7a: generation-bound evaluator, expiry-aware cache, candidate validation, verified restoration, trust reload, bounded XPC) + first canary refused (#62, 2ad8be5)",
+      "regression_tests": [
+        "MoatKitTests/W07Tests.testConcurrentApplyCannotCacheAnObsoleteAllow",
+        "MoatKitTests/W07Tests.testCacheNeverExtendsATimedPermission",
+        "MoatKitTests/W07Tests.testCacheEntriesBelongToOneGeneration",
+        "MoatKitTests/W07Tests.testFailedCandidateKeepsTheRunningEvaluatorAndState",
+        "MoatKitTests/W07Tests.testAFailedWriteIsNeverReportedAsDurable",
+        "MoatKitTests/W07Tests.testRestorationReverifiesAndRefusesTamperedState",
+        "MoatKitTests/W07Tests.testRestorationWithNothingVerifiableIsAnExplicitFailureNotSilentEnforcement",
+        "MoatKitTests/W07Tests.testTrustChangesReachTheRunningVerifier",
+        "MoatKitTests/W07Tests.testFirstRevisionCannotBeACanaryAndTheRefusalWritesNothing",
+        "MoatKitTests/W07Tests.testPolicyStoreRefusesAFirstCanaryToo",
+        "MoatKitTests/W07Tests.testACanaryOverAPendingCanaryFallsBackToTheConfirmedRevision",
+        "MoatKitTests/ControlTests.testCanaryRollbackThatCannotLoadIsRollbackPendingUntilOwnerRecovery",
+        "MoatUITests/StaleTests.testLostConnectionBecomesUnknownAndRecovers",
+        "macos 40577981264 @ 2ad8be5"
+      ]
     },
     {
       "id": "D-WEB-DEMO-SUCCESS",
       "summary": "Live web actions reuse demo success behavior.",
       "package": "W08 (Lane B)",
-      "status": "open"
+      "status": "closed",
+      "closed_by": "W08 (#14, 8bbaf0f: explicit demo/live separation, live actions are authenticated requests whose state comes from controller and endpoint evidence)",
+      "regression_tests": [
+        "web/src/truth.test.tsx: demo and live are separate (6 cases)",
+        "web/src/truth.test.tsx: action states come from evidence (5 cases)",
+        "web/e2e/live.e2e.ts: signed out: the live UI asks for a sign-in and never shows sample data",
+        "web/e2e/live.e2e.ts: allow once: exact plan, phone approval with a delegated key, pending until the endpoint's receipt, then active",
+        "web/e2e/live.e2e.ts: a stale view is refused, not applied: precondition on incident and policy revision",
+        "web/e2e/live.e2e.ts: controller outage: the page says it is not current and pauses actions; no sample data appears",
+        "web 40577605299 @ 08e315e (job: live UI against the real controller API)"
+      ]
     },
     {
       "id": "D-INCIDENT-ROUTING",
       "summary": "A notification reference can open the wrong incident.",
       "package": "W08/W13 (Lane B)",
-      "status": "open"
+      "status": "closed",
+      "closed_by": "W08 (#14, 8bbaf0f: opaque per-notification references resolved server-side by GET /v1/r/:ref to exactly one incident)",
+      "regression_tests": [
+        "controller/test/controller.test.ts: W08: a notification reference opens exactly its incident; new or reordered incidents never retarget it; a deleted one is not substituted",
+        "web/e2e/live.e2e.ts: a notification reference opens exactly its incident, even after reordering; unknown references open nothing",
+        "web/src/truth.test.tsx: freshness is computed by the consumer (4 cases)",
+        "controller 40577605234 @ 08e315e",
+        "web 40577605299 @ 08e315e"
+      ]
     },
     {
       "id": "D-DEVICE-SCOPE-FLEET",
