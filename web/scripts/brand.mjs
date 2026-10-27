@@ -5,7 +5,8 @@
 //   * macos/Moat/App/Assets.xcassets              AppIcon (every macOS size), MenuBarIcon (template), colour sets
 //   * brand/png/*.png                             the mark and icon as PNGs for docs
 //
-//   CHROMIUM_PATH=/usr/bin/chromium node web/scripts/brand.mjs
+//   CHROMIUM_PATH=/usr/bin/chromium node web/scripts/brand.mjs      everything
+//   node web/scripts/brand.mjs --tokens                              tokens.css and colour sets only (no browser)
 //
 // Rasterising goes through Chromium (the same engine the screenshot checks use), so there is no extra native tool.
 import { mkdir, readFile, writeFile, copyFile, rm } from "node:fs/promises";
@@ -27,6 +28,38 @@ const svg = async (name) => readFile(join(brand, name), "utf8");
     block("[data-theme=\"dark\"]", "dark", tokens.color.dark) +
     `:root {\n  --font-sans: ${tokens.font.sans};\n  --font-mono: ${tokens.font.mono};\n  --radius-card: ${tokens.radius.card}px;\n  --radius-inner: ${tokens.radius.inner}px;\n  --radius-control: ${tokens.radius.control}px;\n  --hit: ${tokens["hit-target"]}px;\n}\n`;
   await writeFile(join(root, "web/src/tokens.css"), css);
+}
+
+const xc = join(root, "macos/Moat/App/Assets.xcassets");
+const xcColors = join(xc, "Colors");
+await mkdir(xc, { recursive: true });
+await writeFile(join(xc, "Contents.json"), JSON.stringify({ info: { author: "xcode", version: 1 } }, null, 2) + "\n");
+await rm(xcColors, { recursive: true, force: true });
+// Semantic colour sets: one per token, with a dark appearance.
+const comp = (hex) => {
+  const n = parseInt(hex.slice(1), 16);
+  return { "color-space": "srgb", components: { red: `0x${((n >> 16) & 255).toString(16).padStart(2, "0").toUpperCase()}`, green: `0x${((n >> 8) & 255).toString(16).padStart(2, "0").toUpperCase()}`, blue: `0x${(n & 255).toString(16).padStart(2, "0").toUpperCase()}`, alpha: "1.000" } };
+};
+const camel = (k) => "Moat" + k.split("-").map((s) => s[0].toUpperCase() + s.slice(1)).join("");
+for (const key of Object.keys(tokens.color.light)) {
+  const dir = join(xcColors, `${camel(key)}.colorset`);
+  await mkdir(dir, { recursive: true });
+  await writeFile(
+    join(dir, "Contents.json"),
+    JSON.stringify({ colors: [{ idiom: "universal", color: comp(tokens.color.light[key]) }, { idiom: "universal", appearances: [{ appearance: "luminosity", value: "dark" }], color: comp(tokens.color.dark[key]) }], info: { author: "xcode", version: 1 } }, null, 2) + "\n",
+  );
+}
+await writeFile(join(xcColors, "Contents.json"), JSON.stringify({ info: { author: "xcode", version: 1 }, properties: { "provides-namespace": false } }, null, 2) + "\n");
+// AccentColor follows the brand accent in both appearances.
+await mkdir(join(xc, "AccentColor.colorset"), { recursive: true });
+await writeFile(
+  join(xc, "AccentColor.colorset", "Contents.json"),
+  JSON.stringify({ colors: [{ idiom: "universal", color: comp(tokens.color.light.accent) }, { idiom: "universal", appearances: [{ appearance: "luminosity", value: "dark" }], color: comp(tokens.color.dark.accent) }], info: { author: "xcode", version: 1 } }, null, 2) + "\n",
+);
+
+if (process.argv.includes("--tokens")) {
+  console.log("tokens written");
+  process.exit(0);
 }
 
 // ------------------------------------------------------------------------------------------------------------- rasters
@@ -55,10 +88,6 @@ await png(icon, 512, join(pub, "icons/icon-512.png"));
 await png(maskable, 512, join(pub, "icons/icon-maskable-512.png"));
 
 // macOS AppIcon: every size the asset catalog asks for
-const xc = join(root, "macos/Moat/App/Assets.xcassets");
-await rm(xc, { recursive: true, force: true });
-await mkdir(xc, { recursive: true });
-await writeFile(join(xc, "Contents.json"), JSON.stringify({ info: { author: "xcode", version: 1 } }, null, 2) + "\n");
 const appicon = join(xc, "AppIcon.appiconset");
 const images = [];
 for (const pt of [16, 32, 128, 256, 512]) {
@@ -78,28 +107,6 @@ await png(mark, 36, join(menubar, "menubar@2x.png"), { tint: "#000" });
 await writeFile(
   join(menubar, "Contents.json"),
   JSON.stringify({ images: [{ filename: "menubar.png", idiom: "mac", scale: "1x" }, { filename: "menubar@2x.png", idiom: "mac", scale: "2x" }], info: { author: "xcode", version: 1 }, properties: { "template-rendering-intent": "template", "preserves-vector-representation": false } }, null, 2) + "\n",
-);
-
-// Semantic colour sets: one per token, with a dark appearance.
-const comp = (hex) => {
-  const n = parseInt(hex.slice(1), 16);
-  return { "color-space": "srgb", components: { red: `0x${((n >> 16) & 255).toString(16).padStart(2, "0").toUpperCase()}`, green: `0x${((n >> 8) & 255).toString(16).padStart(2, "0").toUpperCase()}`, blue: `0x${(n & 255).toString(16).padStart(2, "0").toUpperCase()}`, alpha: "1.000" } };
-};
-const camel = (k) => "Moat" + k.split("-").map((s) => s[0].toUpperCase() + s.slice(1)).join("");
-for (const key of Object.keys(tokens.color.light)) {
-  const dir = join(xc, "Colors", `${camel(key)}.colorset`);
-  await mkdir(dir, { recursive: true });
-  await writeFile(
-    join(dir, "Contents.json"),
-    JSON.stringify({ colors: [{ idiom: "universal", color: comp(tokens.color.light[key]) }, { idiom: "universal", appearances: [{ appearance: "luminosity", value: "dark" }], color: comp(tokens.color.dark[key]) }], info: { author: "xcode", version: 1 } }, null, 2) + "\n",
-  );
-}
-await writeFile(join(xc, "Colors", "Contents.json"), JSON.stringify({ info: { author: "xcode", version: 1 }, properties: { "provides-namespace": false } }, null, 2) + "\n");
-// AccentColor follows the brand accent in both appearances.
-await mkdir(join(xc, "AccentColor.colorset"), { recursive: true });
-await writeFile(
-  join(xc, "AccentColor.colorset", "Contents.json"),
-  JSON.stringify({ colors: [{ idiom: "universal", color: comp(tokens.color.light.accent) }, { idiom: "universal", appearances: [{ appearance: "luminosity", value: "dark" }], color: comp(tokens.color.dark.accent) }], info: { author: "xcode", version: 1 } }, null, 2) + "\n",
 );
 
 // docs PNGs

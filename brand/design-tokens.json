@@ -7,16 +7,53 @@
     "numerals": "tabular-nums for every figure"
   },
   "type": {
-    "display": { "size": 32, "desktop": 38, "weight": 680, "tracking": -0.028 },
-    "title": { "size": 20, "weight": 650, "tracking": -0.018 },
-    "card-title": { "size": 15, "weight": 640, "tracking": -0.01 },
-    "body": { "size": 15, "weight": 450, "line": 1.5 },
-    "label": { "size": 12.5, "weight": 560 },
-    "micro": { "size": 11.5, "weight": 600 },
-    "figure": { "size": 30, "weight": 680, "tracking": -0.03 }
+    "display": {
+      "size": 32,
+      "desktop": 38,
+      "weight": 680,
+      "tracking": -0.028
+    },
+    "title": {
+      "size": 20,
+      "weight": 650,
+      "tracking": -0.018
+    },
+    "card-title": {
+      "size": 15,
+      "weight": 640,
+      "tracking": -0.01
+    },
+    "body": {
+      "size": 15,
+      "weight": 450,
+      "line": 1.5
+    },
+    "label": {
+      "size": 12.5,
+      "weight": 560
+    },
+    "micro": {
+      "size": 11.5,
+      "weight": 600
+    },
+    "figure": {
+      "size": 30,
+      "weight": 680,
+      "tracking": -0.03
+    }
   },
-  "radius": { "card": 14, "inner": 10, "control": 10, "chip": 999 },
-  "space": { "gap": 16, "card-pad": 18, "page-x-phone": 16, "page-x-desktop": 36 },
+  "radius": {
+    "card": 14,
+    "inner": 10,
+    "control": 10,
+    "chip": 999
+  },
+  "space": {
+    "gap": 16,
+    "card-pad": 18,
+    "page-x-phone": 16,
+    "page-x-desktop": 36
+  },
   "hit-target": 44,
   "color": {
     "light": {
@@ -35,11 +72,11 @@
       "chart-1": "#8B8FF7",
       "chart-2": "#5CC8B4",
       "chart-3": "#F5B83D",
-      "teal": "#0F766E",
-      "green": "#15803D",
-      "red": "#C62828",
-      "amber": "#B45309",
-      "violet": "#6D28D9",
+      "teal": "#115E59",
+      "green": "#166534",
+      "red": "#B91C1C",
+      "amber": "#92400E",
+      "violet": "#5B21B6",
       "blue": "#1D4ED8",
       "neutral": "#5D6478"
     },
@@ -70,11 +107,29 @@
   },
   "status": {
     "note": "Status is never colour alone: every tone pairs an icon with a label.",
-    "green": { "icon": "check", "sf": "checkmark.circle.fill" },
-    "blue": { "icon": "shield", "sf": "shield.fill" },
-    "violet": { "icon": "globe", "sf": "globe" },
-    "amber": { "icon": "alert", "sf": "exclamationmark.triangle.fill" },
-    "red": { "icon": "x", "sf": "xmark.octagon.fill" },
-    "neutral": { "icon": "help", "sf": "questionmark.circle" }
+    "green": {
+      "icon": "check",
+      "sf": "checkmark.circle.fill"
+    },
+    "blue": {
+      "icon": "shield",
+      "sf": "shield.fill"
+    },
+    "violet": {
+      "icon": "globe",
+      "sf": "globe"
+    },
+    "amber": {
+      "icon": "alert",
+      "sf": "exclamationmark.triangle.fill"
+    },
+    "red": {
+      "icon": "x",
+      "sf": "xmark.octagon.fill"
+    },
+    "neutral": {
+      "icon": "help",
+      "sf": "questionmark.circle"
+    }
   }
 }

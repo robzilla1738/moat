@@ -3,7 +3,7 @@ import { inspectIdent } from "../data/ident";
 import type { ActionState, ChainNode, Coverage, Device, Support, TimelinePoint } from "../data/types";
 import { COVERAGE, SUPPORT } from "../format";
 
-type IconName = "home" | "activity" | "sessions" | "rules" | "devices" | "apps" | "coverage" | "shield" | "check" | "x" | "chevron" | "laptop" | "server" | "phone" | "tv" | "linux" | "clock" | "bolt" | "globe" | "lock" | "sun" | "moon" | "undo" | "spark" | "alert" | "dot" | "branch";
+type IconName = "home" | "activity" | "sessions" | "rules" | "devices" | "apps" | "coverage" | "shield" | "check" | "x" | "chevron" | "laptop" | "server" | "phone" | "tv" | "linux" | "clock" | "bolt" | "globe" | "lock" | "sun" | "moon" | "undo" | "spark" | "alert" | "dot" | "branch" | "eye" | "help" | "minus" | "wrench" | "info" | "grid" | "trophy";
 
 const paths: Record<IconName, ReactNode> = {
   home: <path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z" />,
@@ -32,22 +32,37 @@ const paths: Record<IconName, ReactNode> = {
   spark: <path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5 18 18M6 18l2.5-2.5M15.5 8.5 18 6" />,
   alert: <><path d="M12 3 2 20h20z" /><path d="M12 10v4M12 17h.01" /></>,
   dot: <circle cx="12" cy="12" r="4" />,
+  eye: <><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z" /><circle cx="12" cy="12" r="3" /></>,
+  help: <><circle cx="12" cy="12" r="9" /><path d="M9.6 9.3a2.5 2.5 0 0 1 4.8 1c0 1.7-2.4 2.2-2.4 3.7M12 17h.01" /></>,
+  minus: <><circle cx="12" cy="12" r="9" /><path d="M8 12h8" /></>,
+  wrench: <path d="M14.7 6.3a4 4 0 0 0-5.4 5.1L3.6 17.1a1.5 1.5 0 0 0 2.1 2.1l5.7-5.7a4 4 0 0 0 5.1-5.4l-2.5 2.5-2.1-.4-.4-2.1z" />,
+  info: <><circle cx="12" cy="12" r="9" /><path d="M12 11v5M12 8h.01" /></>,
+  grid: <><rect x="3" y="3" width="8" height="8" rx="2" /><rect x="13" y="3" width="8" height="5" rx="2" /><rect x="13" y="10" width="8" height="11" rx="2" /><rect x="3" y="13" width="8" height="8" rx="2" /></>,
+  trophy: <><path d="M8 4h8v5a4 4 0 0 1-8 0z" /><path d="M8 6H5a3 3 0 0 0 3 4M16 6h3a3 3 0 0 1-3 4M12 13v4M8.5 20h7" /></>,
   branch: <><circle cx="6" cy="5" r="2" /><circle cx="6" cy="19" r="2" /><circle cx="18" cy="12" r="2" /><path d="M6 7v10M6 12h6a4 4 0 0 0 4-4V7" /></>,
 };
 
 export function Icon({ name, size = 18, className }: { name: IconName; size?: number; className?: string }) {
   return (
-    <svg className={className} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <svg className={className} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={size <= 12 ? 2.2 : 1.7} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
       {paths[name]}
     </svg>
   );
 }
 export type { IconName };
 
-export function Badge({ tone = "neutral", children, dot }: { tone?: string; children: ReactNode; dot?: boolean }) {
+/** The icon a status tone carries when no more specific one is given: status is never colour alone. */
+export const TONE_ICON: Record<string, IconName> = { green: "check", red: "x", amber: "alert", blue: "info", violet: "globe", neutral: "dot" };
+
+/**
+ * A pill chip. Every toned chip leads with an icon so its state reads without colour; neutral chips (counts, ids)
+ * carry text only unless they ask for an icon.
+ */
+export function Badge({ tone = "neutral", children, dot, icon }: { tone?: string; children: ReactNode; dot?: boolean; icon?: IconName }) {
+  const name = icon ?? (tone !== "neutral" || dot ? TONE_ICON[tone] ?? "dot" : undefined);
   return (
     <span className={`badge tone-${tone}`}>
-      {dot && <span className="badge-dot" />}
+      {name && <Icon name={name} size={12} />}
       {children}
     </span>
   );
@@ -55,14 +70,18 @@ export function Badge({ tone = "neutral", children, dot }: { tone?: string; chil
 
 export function CoverageBadge({ c }: { c: Coverage }) {
   return (
-    <Badge tone={COVERAGE[c].tone} dot>
+    <Badge tone={COVERAGE[c].tone} icon={COVERAGE[c].icon}>
       {COVERAGE[c].label}
     </Badge>
   );
 }
 
 export function SupportBadge({ s }: { s: Support }) {
-  return <Badge tone={SUPPORT[s].tone}>{SUPPORT[s].label}</Badge>;
+  return (
+    <Badge tone={SUPPORT[s].tone} icon={SUPPORT[s].icon}>
+      {SUPPORT[s].label}
+    </Badge>
+  );
 }
 
 export function Card({ children, className = "", onClick, as }: { children: ReactNode; className?: string; onClick?: () => void; as?: "button" }) {
