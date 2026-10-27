@@ -253,7 +253,11 @@ sudo moatd recover isolate --keep 100.100.1.2/32  # whole-device isolation excep
 sudo moatd recover clear-isolation
 ```
 
-Isolation lives in its own table. A new policy, a daemon restart or a missing controller heartbeat never reopens it;
+Isolation lives in its own table. "Loopback" there includes connections the kernel redirected to a loopback
+address (the session egress proxy): nftables' output hook reports the original interface for those packets, so
+`oif lo` alone dropped a session's ACKs to its own proxy and the FIN that ends a stream never arrived (issue #31,
+measured in CI with `nft monitor trace`). The table accepts `ip daddr 127.0.0.0/8 ct status dnat` and
+`ip6 daddr ::1 ct status dnat` before its reject; nothing with a loopback destination leaves the host. A new policy, a daemon restart or a missing controller heartbeat never reopens it;
 only `clear-isolation` does. If either Moat table is removed outside Moat, the daemon restores it and records that.
 
 Uninstall: `sudo systemctl disable --now moatd && sudo nft delete table inet moat; sudo nft delete table inet

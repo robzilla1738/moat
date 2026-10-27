@@ -373,12 +373,22 @@ else bad "W05: a stream outlived its task"; fi
 
 # Isolation ends every proxied stream. The isolation table drops non-loopback packets, so the receiver cannot see
 # the close; the client-side EOF (over loopback, from the proxy) is the evidence.
+# `recover isolate` saves the intent, then installs the isolation table; the daemon ends streams on its next tick.
+# Issue #31: when the tick landed after the table was in, the proxy's FIN never reached the client (the client's ACKs
+# to its redirected proxy were dropped). The daemon is paused across the command so the table is always in the kernel
+# before Moat ends the stream: the order that used to fail is now exercised on every run. The delay is measured from
+# the moment the daemon can act again (SIGCONT), with the same 3 s bound.
 stream_bg iso1
 stream_started iso1 && ok "W05: stream admitted before isolation" || bad "W05: iso1 admitted"
-A "$BIN/moatd" --state "$S" recover isolate >/dev/null; T0=$(now)
+kill -STOP "$DAEMON_PID"
+A "$BIN/moatd" --state "$S" recover isolate >/dev/null
+A nft list table inet moat_local_emergency >/dev/null 2>&1 && ok "W05: isolation table is in the kernel before moatd ends the stream" \
+  || bad "W05: isolation table installed by recover isolate"
+sleep 0.5
+kill -CONT "$DAEMON_PID"; T0=$(now)
 E=$(ended_at "$CLIENTLOG" iso1 6)
 if [[ -n "$E" ]]; then
-  D=$(sub "$E" "$T0"); info "isolation: client saw EOF ${D}s after isolate (tick 1 s)"
+  D=$(sub "$E" "$T0"); info "isolation: client saw EOF ${D}s after moatd resumed with the table already in place (tick 1 s)"
   le "$D" 3 && ok "W05: isolation ends open proxied streams (${D}s)" || bad "W05: isolation stop delay ${D}s"
 else bad "W05: stream survived isolation"; fi
 A "$BIN/moatd" --state "$S" recover clear-isolation >/dev/null
