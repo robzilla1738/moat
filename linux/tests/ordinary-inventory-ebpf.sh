@@ -138,6 +138,13 @@ lost2 = sum(x["count"] for x in r2 if x.get("type") == "inventory_loss" and x["s
 check(opens >= 20000, f"kernel counted the flood: ActiveOpens +{opens}")
 check(c2 + lost2 >= opens, f"flood accounted for: {c2} attributed + {lost2} reported lost >= {opens} kernel active opens")
 check(c2 == opens or lost2 > 0, "anything not attributed is reported as loss")
+att = [x.get("attach_ms") for x in r1 + r2 if x.get("type") == "sensor_attached"]
+print(f"INFO  tracer attach time (ms) per run: {att}")
+unp = [x for x in r1 + r2 if x.get("type") == "inventory_loss" and x["scope"] == "ebpf_unparsed"]
+print(f"INFO  unparsed tracer lines reported: {sum(x['count'] for x in unp)} {[x['detail'][:160] for x in unp]}")
+if lost2 == 0:
+    print("INFO  run 2 forced no buffer loss on this runner: the loss-reporting path was not exercised natively here "
+          "(decoder unit tests cover it); the flood accounting check above still holds")
 print(json.dumps({"short_attributed": len(pids & got), "run1_lost": lost1, "flood_opens": opens, "flood_attributed": c2, "flood_lost_reported": lost2}))
 sys.exit(1 if fails else 0)
 PY

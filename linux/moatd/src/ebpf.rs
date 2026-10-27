@@ -97,7 +97,8 @@ impl Decoder {
                 format!("the kernel dropped {n} connect events before the tracer read them (buffer overflow)"),
             ));
         }
-        if line.starts_with("Attaching ") || line.is_empty() {
+        // "Attaching N probes..." (older bpftrace) / "Attached N probe(s)" (0.25): informational, not connect data.
+        if line.starts_with("Attaching ") || line.starts_with("Attached ") || line.is_empty() {
             return None;
         }
         match parse_connect(line) {
@@ -326,6 +327,7 @@ mod tests {
         let none = |_| None;
         let t0 = Instant::now();
         assert!(d.feed("Attaching 2 probes...", t0, &none).is_none());
+        assert!(d.feed("Attached 2 probes", t0, &none).is_none());
         assert!(d.feed("H 1000", t0, &none).is_none());
         assert!(d.attached);
         let lost = d.feed("Lost 1234 events", t0, &none).unwrap();
