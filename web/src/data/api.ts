@@ -52,7 +52,7 @@ export function makeApi(token: string, fetchImpl: typeof fetch = (...a) => fetch
 // ---------------------------------------------------------------- wire types (controller JSON)
 export interface WireOverview { server_time: string; revision: number | null }
 export interface WireMe { id: string; name: string; role: "owner" | "viewer" | "launcher" | "agent" }
-export interface WireDevice { id: string; name: string; platform: string; coverage: string | null; last_seen_at: string | null; last_revision: number | null; telemetry_gaps: [number, number][]; capabilities: { capabilities?: Record<string, { support?: string; note?: string }> } | null; status: { coverage_note?: string; os?: string } | null; revision_states: { revision: number; state: string; at: string; detail: string | null }[] }
+export interface WireDevice { id: string; name: string; platform: string; coverage: string | null; last_seen_at: string | null; last_revision: number | null; telemetry_gaps: [number, number][]; capabilities: { capabilities?: Record<string, { support?: string; note?: string }> } | null; status: { coverage_note?: string; os?: string } | null; revision_states: { revision: number; state: string; at: string; detail: string | null }[]; awaiting_retarget?: boolean }
 export interface WireIncident { id: string; revision: number; kind: Incident["kind"]; urgency: Incident["urgency"]; state: Incident["state"]; device_id: string; session_id: string | null; process_instance: string | null; app: string | null; destination: string; port: number | null; transport: string | null; reason: string; rule: string | null; policy_revision: number | null; occurrences: number; first_at: string; last_at: string; facts: { chain?: string[] | null; transfer?: { bytes_out?: number; bytes_in?: number; source?: string } | null } | null }
 export interface WireRevision { revision: number; created_at: string; approved_by: string; authorized_by: Revision["authorizedBy"]; owner_key_id: string | null; rollback_of: number | null; source_digest: string; message: string | null; grants: string[]; devices: { device_id: string; state: string; at: string; detail: string | null }[]; platforms: { platform: string; report: { omitted?: unknown[]; unavailable_session_profiles?: string[] } | null }[] }
 export interface WireSession { id: string; device_id: string; profile: string; boundary: string; verified: number; state: string; started_at: string; ended_at: string | null; intent: string | null; close_requested_at: string | null }
@@ -83,6 +83,7 @@ export function mapDevice(d: WireDevice): Device {
     revisionState: latest ? (latest.state as RevisionState) : null,
     capabilities: caps,
     telemetryGaps: d.telemetry_gaps,
+    awaitingRetarget: d.awaiting_retarget === true,
     blockedToday: 0,
     flowsToday: 0,
   };

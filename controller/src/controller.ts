@@ -20,7 +20,7 @@ export interface Proposal { id: string; message: string; author: string; status:
 export interface SignerLike {
   keyId: string;
   publicHex: string;
-  sign(req: { publicationId?: string; subject: string; source: string; grants?: GrantV1[]; revision: number; rollbackOf?: number | null; platforms: ("linux" | "macos" | "dns")[]; ownerAuthorization?: OwnerAuthorization | null; ownerSessionAttested?: boolean; grantApprovals?: GrantApproval[]; issuedAt: Date }): Promise<SignResult>;
+  sign(req: { publicationId?: string; subject: string; source: string; grants?: GrantV1[]; revision: number; rollbackOf?: number | null; platforms: ("linux" | "macos" | "dns")[]; targets?: Partial<Record<"linux" | "macos" | "dns", string[]>>; ownerAuthorization?: OwnerAuthorization | null; ownerSessionAttested?: boolean; grantApprovals?: GrantApproval[]; issuedAt: Date }): Promise<SignResult>;
   /** Lost-reply recovery: the result the signer journaled for a publication id, or null if it never signed it. */
   publication?(id: string): Promise<SignResult | null>;
 }
@@ -163,6 +163,7 @@ export class Controller {
   }
 
   devices() {
+    const untargeted = new Set(this.untargetedDevices().map((u) => u.device_id));
     return (this.db.prepare("SELECT * FROM devices WHERE revoked_at IS NULL ORDER BY name").all() as unknown as DeviceRow[]).map((d) => ({
       id: d.id,
       name: d.name,
@@ -176,6 +177,8 @@ export class Controller {
       capabilities: d.capabilities ? JSON.parse(d.capabilities) : null,
       revision_states: this.db.prepare("SELECT revision, state, at, detail FROM device_revisions WHERE device_id = ? ORDER BY revision DESC, at DESC LIMIT 12").all(d.id),
       telemetry_gaps: this.flows.gaps(d.id),
+      // the current revision's snapshot for this platform was compiled for devices enrolled before this one
+      awaiting_retarget: untargeted.has(d.id),
     }));
   }
 
@@ -189,15 +192,29 @@ export class Controller {
       if (["received", "applied", "rejected"].includes(r.state) && Number.isInteger(r.revision)) this.recordRevisionState(d.id, r.revision, r.state, r.detail ?? null);
     }
     const ingest = this.ingestEvents(d, b.events ?? []);
-    const latest = this.db.prepare("SELECT s.revision, s.signed FROM snapshots s WHERE s.platform = ? ORDER BY s.revision DESC LIMIT 1").get(platformAdapter(d.platform)) as { revision: number; signed: string } | undefined;
+    // only the current revision's snapshot for this platform; never an older revision's when the current one has none
+    const cur = this.currentRevision();
+    const latest = cur ? (this.db.prepare("SELECT revision, signed FROM snapshots WHERE revision = ? AND platform = ?").get(cur.revision, platformAdapter(d.platform)) as { revision: number; signed: string } | undefined) : undefined;
     let snapshot: unknown = null;
+    let snapshotPending: string | null = null;
+    if (cur && !latest && (b.last_applied ?? 0) < cur.revision) {
+      snapshotPending = `revision ${cur.revision} has no ${platformAdapter(d.platform)} snapshot (no ${platformAdapter(d.platform)} device was enrolled when it was compiled); this device gets one after the owner retargets (POST /v1/policy/retarget)`;
+      this.recordRevisionState(d.id, cur.revision, "not_targeted", snapshotPending);
+    }
     if (latest && (b.last_applied ?? 0) < latest.revision) {
-      snapshot = JSON.parse(latest.signed);
-      this.recordRevisionState(d.id, latest.revision, "distributed", null);
+      const targets = this.snapshotTargets(latest.signed);
+      if (targets.length && !targets.includes(d.id)) {
+        // compiled for a device list made before this device enrolled: it would (correctly) refuse it
+        snapshotPending = `revision ${latest.revision} was compiled for ${targets.join(", ")}; this device gets a snapshot after the owner retargets (POST /v1/policy/retarget) or the next publication`;
+        this.recordRevisionState(d.id, latest.revision, "not_targeted", snapshotPending);
+      } else {
+        snapshot = JSON.parse(latest.signed);
+        this.recordRevisionState(d.id, latest.revision, "distributed", null);
+      }
     }
     const actions = this.db.prepare("SELECT id, kind, args FROM device_actions WHERE device_id = ? AND done_at IS NULL ORDER BY created_at").all(d.id) as { id: string; kind: string; args: string }[];
     for (const a of actions) this.db.prepare("UPDATE device_actions SET delivered_at = COALESCE(delivered_at, ?) WHERE id = ?").run(at, a.id);
-    return { snapshot, actions: actions.map((a) => ({ id: a.id, kind: a.kind, args: JSON.parse(a.args) })), acked_seq: ingest.maxSeq, gaps: ingest.gaps };
+    return { snapshot, ...(snapshotPending ? { snapshot_pending: snapshotPending } : {}), actions: actions.map((a) => ({ id: a.id, kind: a.kind, args: JSON.parse(a.args) })), acked_seq: ingest.maxSeq, gaps: ingest.gaps };
   }
 
   recordRevisionState(deviceId: string, revision: number, state: string, detail: string | null) {
@@ -356,7 +373,13 @@ export class Controller {
     this.require(actor, "owner", "agent");
     if (source.length > 512 * 1024) throw new HttpError(413, "policy too large");
     const v = await this.moatctl.validate(source);
-    if (!v.ok) throw new HttpError(422, `policy invalid: ${v.errors.join("; ")}`);
+    if (!v.ok) {
+      if (!v.schemaOk) throw new HttpError(422, `policy invalid: ${v.errors.join("; ")}`);
+      // Fleet-wide compilation failed for some adapter. What publishes is one snapshot per platform compiled for that
+      // platform's enrolled devices (issue #26): refuse only if one of those targeted compiles fails.
+      const plan = await this.compilePlan(source, []);
+      if (plan.failed.length || plan.platforms.length === 0) throw new HttpError(422, `policy does not compile for this fleet: ${[...plan.failed, ...plan.skipped.map((x) => `${x.platform}: ${x.reason}`)].join("; ")}`);
+    }
     const cur = this.currentRevision();
     const diff = cur ? await this.moatctl.diff(cur.source, source) : { broadening: true, diff: { broadening: ["first policy"] } };
     let simulation: Record<string, unknown> | null = null;
@@ -402,6 +425,84 @@ export class Controller {
     for (const r of this.db.prepare("SELECT DISTINCT platform FROM devices WHERE revoked_at IS NULL").all() as { platform: string }[]) set.add(platformAdapter(r.platform));
     set.delete("dns");
     return [...set];
+  }
+
+  /** Enrolled, unrevoked devices per compile platform: each platform's snapshot is compiled for exactly these (issue #26). */
+  platformTargets(): Partial<Record<"linux" | "macos" | "dns", string[]>> {
+    const out: Partial<Record<"linux" | "macos" | "dns", string[]>> = {};
+    for (const r of this.db.prepare("SELECT id, platform FROM devices WHERE revoked_at IS NULL ORDER BY id").all() as { id: string; platform: string }[]) {
+      const p = platformAdapter(r.platform);
+      (out[p] ??= []).push(r.id);
+    }
+    return out;
+  }
+
+  /**
+   * Which platform snapshots a publication produces. A platform with enrolled devices is compiled for exactly those
+   * devices and must compile (`failed` otherwise). A platform with no enrolled devices is compiled fleet-wide when
+   * possible; when the fleet-wide compile refuses (e.g. a Mac-scoped app rule on Linux), it is skipped with the
+   * reason: nobody would receive it, and a device of that platform enrolled later waits for a retarget that compiles
+   * for it. Nothing is ever compiled weaker to make it fit.
+   */
+  async compilePlan(source: string, grants: unknown[], checkTargeted = true): Promise<{ platforms: ("linux" | "macos" | "dns")[]; targets: Partial<Record<"linux" | "macos" | "dns", string[]>>; skipped: { platform: string; reason: string }[]; failed: string[] }> {
+    const targets = this.platformTargets();
+    const platforms: ("linux" | "macos" | "dns")[] = [];
+    const skipped: { platform: string; reason: string }[] = [];
+    const failed: string[] = [];
+    for (const p of this.platformsNeeded()) {
+      const devs = targets[p] ?? [];
+      if (devs.length && !checkTargeted) {
+        platforms.push(p); // the signer compiles it and refuses the whole publication if it fails
+        continue;
+      }
+      const c = await this.moatctl.compile(source, p, 1, this.now(), null, grants, devs);
+      if (c.ok) platforms.push(p);
+      else if (devs.length) failed.push(`${p} (devices ${devs.join(", ")}): ${c.error}`);
+      else skipped.push({ platform: p, reason: `no enrolled ${p} devices and the fleet-wide ${p} compile refuses: ${c.error}` });
+    }
+    return { platforms, targets, skipped, failed };
+  }
+
+  /** Device list a stored snapshot was compiled for ([] = fleet-wide). */
+  private snapshotTargets(signed: string): string[] {
+    const s = JSON.parse(signed) as { payload: string };
+    return (JSON.parse(Buffer.from(s.payload, "base64").toString("utf8")) as { devices?: string[] }).devices ?? [];
+  }
+
+  /**
+   * Enrolled devices the current revision has no snapshot for: their platform's snapshot was compiled for a device
+   * list made before they enrolled. They receive nothing (a targeted snapshot would be refused, correctly) until a
+   * retarget publication names them.
+   */
+  untargetedDevices(): { device_id: string; platform: string; revision: number }[] {
+    const cur = this.currentRevision();
+    if (!cur) return [];
+    const out: { device_id: string; platform: string; revision: number }[] = [];
+    for (const d of this.db.prepare("SELECT id, platform FROM devices WHERE revoked_at IS NULL ORDER BY id").all() as { id: string; platform: string }[]) {
+      const row = this.db.prepare("SELECT signed FROM snapshots WHERE revision = ? AND platform = ?").get(cur.revision, platformAdapter(d.platform)) as { signed: string } | undefined;
+      if (!row) {
+        out.push({ device_id: d.id, platform: d.platform, revision: cur.revision });
+        continue;
+      }
+      const t = this.snapshotTargets(row.signed);
+      if (t.length && !t.includes(d.id)) out.push({ device_id: d.id, platform: d.platform, revision: cur.revision });
+    }
+    return out;
+  }
+
+  /**
+   * Re-publish the current base and carried grants for the current device lists, so newly enrolled devices get a
+   * snapshot that names them. The policy is unchanged, so the signer authorizes it as non-broadening; it never
+   * carries a broadening change and never renews a grant (grants keep their own deadlines).
+   */
+  async retarget(actor: Principal) {
+    this.require(actor, "owner");
+    const missing = this.untargetedDevices();
+    const cur = this.currentRevision();
+    if (!cur || missing.length === 0) return { retargeted: false, missing: [] as string[] };
+    const out = await this.publish(actor, cur.source, `retarget:${missing.map((m) => m.device_id).join(",")}`, {});
+    audit(this.db, this.now(), actor.id, "policy.retarget", String(out.revision), { devices: missing.map((m) => m.device_id) });
+    return { retargeted: true, revision: out.revision, missing: missing.map((m) => m.device_id) };
   }
 
   /** The policy a platform's endpoints evaluate for a revision (core-compiled: unsupported rules removed, grants rendered). */
@@ -458,12 +559,15 @@ export class Controller {
       const revision = (this.currentRevision()?.revision ?? 0) + 1;
       const profiles = (normalized.profiles ?? []).map((p) => p.id);
       const pubId = id("pub");
-      const platforms = this.platformsNeeded();
-      const intent = { revision, subject, base, grants: grants.map((g) => g.grant_id), superseded, profiles, proposal_id: opts.proposalId ?? null, rollback_of: opts.rollbackOf ?? null, actor: actor.id, owner_key_id: opts.ownerAuthorization?.key_id ?? null, platforms };
+      const plan = await this.compilePlan(base, grants, false);
+      if (plan.failed.length) throw new HttpError(422, `does not compile for this fleet: ${plan.failed.join("; ")}`);
+      if (plan.platforms.length === 0) throw new HttpError(422, `does not compile for any platform: ${plan.skipped.map((x) => x.reason).join("; ")}`);
+      const { platforms, targets, skipped } = plan;
+      const intent = { revision, subject, base, grants: grants.map((g) => g.grant_id), superseded, profiles, proposal_id: opts.proposalId ?? null, rollback_of: opts.rollbackOf ?? null, actor: actor.id, owner_key_id: opts.ownerAuthorization?.key_id ?? null, platforms, targets, skipped };
       this.db.prepare("INSERT INTO publications (id, revision, subject, status, intent, created_at) VALUES (?, ?, ?, 'signing', ?, ?)").run(pubId, revision, subject, JSON.stringify(intent), this.iso());
       let res: SignResult;
       try {
-        res = await this.signer.sign({ publicationId: pubId, subject, source: base, grants, revision, rollbackOf: opts.rollbackOf ?? null, platforms, ownerAuthorization: opts.ownerAuthorization ?? null, ownerSessionAttested: opts.ownerSessionAttested ?? false, grantApprovals: opts.grantApprovals, issuedAt: this.now() });
+        res = await this.signer.sign({ publicationId: pubId, subject, source: base, grants, revision, rollbackOf: opts.rollbackOf ?? null, platforms, targets, ownerAuthorization: opts.ownerAuthorization ?? null, ownerSessionAttested: opts.ownerSessionAttested ?? false, grantApprovals: opts.grantApprovals, issuedAt: this.now() });
       } catch (e) {
         const st = (e as { status?: number }).status;
         // a refusal is final (nothing was signed); anything else may have been signed: keep it for recovery
@@ -471,7 +575,7 @@ export class Controller {
         throw e;
       }
       this.commitPublication(pubId, intent, res);
-      return { revision, publication_id: pubId, authorized_by: res.authorizedBy, broadening: res.broadening, effective_digest: res.effective_digest ?? null, superseded_grants: superseded, platforms: res.snapshots.map((s) => ({ platform: s.platform, report: s.report })) };
+      return { revision, publication_id: pubId, authorized_by: res.authorizedBy, broadening: res.broadening, effective_digest: res.effective_digest ?? null, superseded_grants: superseded, platforms: res.snapshots.map((s) => ({ platform: s.platform, report: s.report })), skipped_platforms: skipped };
     });
   }
 

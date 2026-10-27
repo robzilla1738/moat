@@ -56,6 +56,11 @@ export const CONTROL_MIGRATIONS: string[] = [
    CREATE TABLE grant_plans (id TEXT PRIMARY KEY, idempotency_key TEXT NOT NULL UNIQUE, plan TEXT NOT NULL, digest TEXT NOT NULL, policy_revision INTEGER NOT NULL, created_by TEXT NOT NULL, created_at TEXT NOT NULL, expires_at TEXT NOT NULL, grant_id TEXT, request_digest TEXT);
    CREATE TABLE issuers (key_id TEXT PRIMARY KEY, label TEXT NOT NULL, delegation TEXT NOT NULL, registered_by TEXT NOT NULL, created_at TEXT NOT NULL, revoked_at TEXT);
    CREATE TABLE publications (id TEXT PRIMARY KEY, revision INTEGER NOT NULL, subject TEXT NOT NULL, status TEXT NOT NULL CHECK (status IN ('signing','committed','refused','uncertain','abandoned','conflict')), intent TEXT NOT NULL, error TEXT, created_at TEXT NOT NULL, finished_at TEXT);`,
+  // 5: device-targeted snapshots (issue #26): a device enrolled after a revision was compiled is 'not_targeted' for it.
+  `CREATE TABLE device_revisions_v3 (device_id TEXT NOT NULL, revision INTEGER NOT NULL, state TEXT NOT NULL CHECK (state IN ('approved','distributed','received','applied','verified','rejected','trial','confirmed','rolled_back','not_targeted')), at TEXT NOT NULL, detail TEXT, PRIMARY KEY (device_id, revision, state));
+   INSERT INTO device_revisions_v3 SELECT * FROM device_revisions;
+   DROP TABLE device_revisions;
+   ALTER TABLE device_revisions_v3 RENAME TO device_revisions;`,
 ];
 
 export function openDb(path: string, migrations: string[]): DB {

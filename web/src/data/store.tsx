@@ -46,6 +46,7 @@ export interface Store {
   keepBlocked: (i: Incident) => void;
   acknowledge: (i: Incident) => void;
   rollback: (revision: number) => Promise<WireProposal | null>;
+  retarget: () => Promise<void>;
   approve: (proposalId: string, authorization: { key_id: string; signature: string } | null) => Promise<void>;
   closeSession: (s: Session) => void;
   resolveRef: (ref: string) => Promise<{ incidentId: string } | { error: string }>;
@@ -322,6 +323,21 @@ export function StoreProvider({ children, options = {} }: { children: ReactNode;
     [mode, api, canAct.ok, setAction, refresh],
   );
 
+  const retarget = useCallback(async () => {
+    if (mode === "demo") {
+      setToast("Demo: retargeting republishes the current policy for every enrolled device; nothing was sent.");
+      return;
+    }
+    if (!api || !canAct.ok) return;
+    try {
+      const r = await api.post<{ retargeted: boolean; revision?: number; missing: string[] }>("/v1/policy/retarget", {});
+      setToast(r.retargeted ? `Revision ${r.revision} compiled for ${r.missing.join(", ")} too; it is delivered when they sync.` : "Every enrolled device already has a snapshot for the current revision.");
+      void refresh();
+    } catch (e) {
+      setToast(describe(e));
+    }
+  }, [mode, api, canAct.ok, refresh]);
+
   const rollback = useCallback(
     async (revision: number): Promise<WireProposal | null> => {
       if (mode === "demo") {
@@ -445,6 +461,7 @@ export function StoreProvider({ children, options = {} }: { children: ReactNode;
     keepBlocked: (i) => incidentMutation(i, "keep_blocked"),
     acknowledge: (i) => incidentMutation(i, "acknowledge"),
     rollback,
+    retarget,
     approve,
     closeSession,
     resolveRef,
