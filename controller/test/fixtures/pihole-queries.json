@@ -1,0 +1,11 @@
+{
+  "_note": "Shaped after Pi-hole FTL v6 GET /api/queries (docs.pi-hole.net/api). Not captured from a live resolver.",
+  "queries": [
+    { "id": 1043, "time": 1793120403.12, "type": "A", "status": "GRAVITY", "dnssec": "UNKNOWN", "domain": "telemetry.tcl.example", "upstream": null, "reply": { "type": "IP", "time": 0.1 }, "client": { "ip": "192.168.1.50", "name": "tcl-tv.lan" }, "list_id": 3, "ede": { "code": -1, "text": null }, "cname": null },
+    { "id": 1042, "time": 1793120402.50, "type": "AAAA", "status": "FORWARDED", "dnssec": "INSECURE", "domain": "youtube.com", "upstream": "1.1.1.1#53", "reply": { "type": "IP", "time": 9.3 }, "client": { "ip": "192.168.1.50", "name": "tcl-tv.lan" }, "list_id": null, "ede": { "code": -1, "text": null }, "cname": null },
+    { "id": 1041, "time": 1793120401.00, "type": "A", "status": "CACHE", "dnssec": "UNKNOWN", "domain": "apple.com", "upstream": null, "reply": { "type": "IP", "time": 0.02 }, "client": { "ip": "192.168.1.60", "name": null }, "list_id": null, "ede": { "code": -1, "text": null }, "cname": null }
+  ],
+  "cursor": 1043,
+  "recordsTotal": 3,
+  "recordsFiltered": 3
+}

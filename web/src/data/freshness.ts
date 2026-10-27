@@ -30,8 +30,13 @@ export interface Freshness {
   note: string | null;
 }
 
-export function deviceFreshness(d: Pick<Device, "coverage" | "lastSeen" | "platform">, snap: Pick<Snapshot, "serverTime" | "fetchedAt">, now = Date.now()): Freshness {
+export function deviceFreshness(d: Pick<Device, "coverage" | "lastSeen" | "platform" | "dns">, snap: Pick<Snapshot, "serverTime" | "fetchedAt">, now = Date.now()): Freshness {
   const ageMs = evidenceAgeMs(d.lastSeen, snap, now);
+  if (d.dns) {
+    // DNS-only: the evidence is the resolver adapter's last good poll. A failing adapter means nothing is current.
+    if (d.dns.resolverHealth !== "ok") return { coverage: "unknown", stale: true, ageMs, note: `Resolver ${d.dns.resolver}: ${d.dns.resolverHealth.replace(/_/g, " ")}. Its last good poll was ${ageMs === null ? "never" : `${Math.round(ageMs / 60_000)} min ago`}; nothing about this client is current.` };
+    if (ageMs === null) return { coverage: "unknown", stale: true, ageMs, note: `Resolver ${d.dns.resolver} has not been polled yet.` };
+  }
   if (ageMs === null) return { coverage: "unknown", stale: true, ageMs, note: "This device has never reported. Moat cannot say what it enforces." };
   if (ageMs > STALE_AFTER_MS) {
     const min = Math.round(ageMs / 60_000);

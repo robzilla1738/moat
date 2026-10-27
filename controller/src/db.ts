@@ -65,6 +65,12 @@ export const CONTROL_MIGRATIONS: string[] = [
   // reported by endpoints (they hold distribution to that device until the owner reconciles; no last-writer-wins).
   `CREATE TABLE rollouts (revision INTEGER PRIMARY KEY, stages TEXT NOT NULL, opened INTEGER NOT NULL DEFAULT 1, created_by TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
    CREATE TABLE local_changes (device_id TEXT NOT NULL, revision INTEGER NOT NULL, digest TEXT NOT NULL, broadening INTEGER NOT NULL, authorized_by TEXT, reported_at TEXT NOT NULL, resolved_at TEXT, resolution TEXT, resolved_by TEXT, PRIMARY KEY (device_id, revision, digest));`,
+  // 7 (W16): DNS adapter versions, checkpoints, health and declared gaps; Pi-hole query ids deduplicate ingest.
+  `CREATE TABLE dns_adapter_state (resolver TEXT PRIMARY KEY, kind TEXT NOT NULL, version TEXT, checkpoint TEXT, health TEXT NOT NULL, last_ok_at TEXT, last_attempt_at TEXT, last_error TEXT, failures INTEGER NOT NULL DEFAULT 0, next_poll_at TEXT, started_at TEXT);
+   CREATE TABLE dns_gaps (id INTEGER PRIMARY KEY AUTOINCREMENT, resolver TEXT NOT NULL, from_at TEXT, to_at TEXT, reason TEXT NOT NULL, detected_at TEXT NOT NULL);
+   ALTER TABLE dns_observations ADD COLUMN source_id TEXT;
+   CREATE UNIQUE INDEX dns_observations_source ON dns_observations (resolver, source_id) WHERE source_id IS NOT NULL;
+   CREATE TABLE dk_feed_state (name TEXT PRIMARY KEY, health TEXT NOT NULL, last_ok_at TEXT, last_attempt_at TEXT, last_error TEXT, failures INTEGER NOT NULL DEFAULT 0, next_attempt_at TEXT, refused INTEGER NOT NULL DEFAULT 0);`,
 ];
 
 export function openDb(path: string, migrations: string[]): DB {

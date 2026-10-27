@@ -1,0 +1,10 @@
+{
+  "_note": "Shaped after AdGuard Home v0.107 GET /control/querylog (openapi.yaml QueryLog / QueryLogItem). Not captured from a live resolver.",
+  "data": [
+    { "answer": [{ "type": "A", "value": "0.0.0.0", "ttl": 10 }], "client": "192.168.1.41", "client_proto": "", "elapsedMs": "0.08", "question": { "class": "IN", "name": "ads.doubleclick.net", "type": "A" }, "reason": "FilteredBlackList", "rules": [{ "filter_list_id": 1, "text": "||doubleclick.net^" }], "status": "NOERROR", "time": "2026-10-27T17:00:03.000000001Z", "upstream": "" },
+    { "answer": [{ "type": "AAAA", "value": "2001:db8::1", "ttl": 300 }], "client": "192.168.1.40", "client_proto": "dot", "elapsedMs": "12.4", "question": { "class": "IN", "name": "plex.tv.", "type": "AAAA" }, "reason": "NotFilteredNotFound", "status": "NOERROR", "time": "2026-10-27T17:00:02.5Z", "upstream": "https://dns10.quad9.net:443/dns-query" },
+    { "client": "192.168.1.41", "question": { "class": "IN", "name": "safesearch.example", "type": "A" }, "reason": "FilteredSafeSearch", "status": "NOERROR", "time": "2026-10-27T17:00:01Z" },
+    { "client": "192.168.1.40", "question": { "class": "IN", "name": "netflix.com", "type": "A" }, "reason": "NotFilteredNotFound", "status": "NOERROR", "time": "2026-10-27T17:00:00Z" }
+  ],
+  "oldest": "2026-10-27T17:00:00Z"
+}

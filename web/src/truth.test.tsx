@@ -171,6 +171,7 @@ describe("demo and live are separate", () => {
       "/v1/grants": [],
       "/v1/apps": [],
       "/v1/reconciliation": [],
+      "/v1/dns/clients": [],
     };
     const api: Api = { get: async (p) => (p.startsWith("/v1/rollups") ? [] : replies[p]) as never, post: async () => ({}) as never };
     const s = await loadLive(api, () => new Date(T0));
@@ -208,5 +209,42 @@ describe("device-targeted snapshots (issue #26)", () => {
     expect(d.awaitingRetarget).toBe(true);
     expect(d.revisionState).toBe("not_targeted");
     expect(mapDevice(base).awaitingRetarget).toBe(false);
+  });
+});
+
+describe("DNS-only devices (W16)", () => {
+  const wire = { id: "pihole:192.168.1.50", name: "192.168.1.50", resolver: "pihole", client: "192.168.1.50", last_query_at: T0, reachable: 1, coverage: "dns-only" as const, claim: "Resolver queries from this client. No app, process, connection or byte count is known; direct-IP and alternative encrypted DNS are not covered.", resolver_kind: "pihole", resolver_health: "ok", resolver_last_ok_at: T0, evidence_age_s: 0, gaps: [{ from_at: T0, to_at: null, reason: "the resolver's query ids went backwards: its database was reset" }] };
+  it("maps a resolver client onto the incident device id, with the resolver's last good poll as evidence", async () => {
+    const { mapDnsClient } = await import("./data/api");
+    const d = mapDnsClient(wire);
+    expect(d.id).toBe("dns:pihole:192.168.1.50");
+    expect(d.coverage).toBe("dns-only");
+    expect(d.lastSeen).toBe(T0);
+    expect(d.capabilities.map((c) => c.key)).toEqual(["dns_evidence"]);
+    expect(d.dns!.gaps[0]!.reason).toMatch(/database was reset/);
+  });
+  it("a failing resolver makes its clients unknown, not dns-only", async () => {
+    const { mapDnsClient } = await import("./data/api");
+    const d = mapDnsClient({ ...wire, resolver_health: "auth_failed" });
+    const f = deviceFreshness(d, { serverTime: T0, fetchedAt: T0 }, Date.parse(T0));
+    expect(f.coverage).toBe("unknown");
+    expect(f.note).toMatch(/auth failed/);
+    expect(deviceFreshness(mapDnsClient(wire), { serverTime: T0, fetchedAt: T0 }, Date.parse(T0)).coverage).toBe("dns-only");
+  });
+  it("the device page shows resolver health, evidence age and gaps, and no flows, processes or bytes", async () => {
+    const { mapDnsClient } = await import("./data/api");
+    const { DeviceDetail } = await import("./screens/Devices");
+    const d = mapDnsClient(wire);
+    const html = renderToStaticMarkup(
+      <StoreProvider options={{ initial: { mode: "live", data: liveSnap({ devices: [d] }), status: "ready" }, api: noApi }}>
+        <DeviceDetail id={d.id} go={() => {}} />
+      </StoreProvider>,
+    );
+    expect(html).toMatch(/Evidence age/);
+    expect(html).toMatch(/Resolver/);
+    expect(html).toMatch(/database was reset/);
+    expect(html).not.toMatch(/Flows today/);
+    expect(html).not.toMatch(/bytes? (out|in)\b/i);
+    expect(html).not.toMatch(/Process instance/);
   });
 });

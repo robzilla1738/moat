@@ -2,6 +2,7 @@ import { SubNav, Badge, Card, CoverageBadge, DeviceIcon, Icon, SectionTitle, Sup
 import { useData, useFreshness, useStore } from "../data/store";
 import { ApprovalsCard } from "./Approvals";
 import { ago, compact, COVERAGE } from "../format";
+import type { Device } from "../data/types";
 
 export function Devices({ go }: { go: (to: string) => void }) {
   const data = useData();
@@ -29,7 +30,7 @@ export function Devices({ go }: { go: (to: string) => void }) {
             <span className="device-row-side">
               <CoverageBadge c={fresh(d).coverage} />
               {d.sync && d.sync.state !== "current" && <Badge tone={d.sync.state === "pending" || d.sync.state === "not_released" ? "neutral" : "amber"}>{d.sync.state.replace("_", " ")}</Badge>}
-              <span className="muted small">{d.revision ? `rev ${d.revision}` : "no policy"} · {ago(d.lastSeen)}</span>
+              <span className="muted small">{d.dns ? `resolver ${d.dns.resolverHealth.replace(/_/g, " ")} · polled ${ago(d.lastSeen)}` : `${d.revision ? `rev ${d.revision}` : "no policy"} · ${ago(d.lastSeen)}`}</span>
             </span>
           </Card>
         ))}
@@ -72,25 +73,29 @@ export function DeviceDetail({ id, go }: { id: string; go: (to: string) => void 
         <p className="claim">{COVERAGE[f.coverage].claim}</p>
         <div className="muted small">{f.note ?? d.coverageNote}</div>
       </Card>
-      <div className="grid-3">
-        <Card>
-          <div className="stat-label">Flows today</div>
-          <div className="stat-value">{compact(d.flowsToday)}</div>
-        </Card>
-        <Card>
-          <div className="stat-label">Blocked today</div>
-          <div className="stat-value bad">{compact(d.blockedToday)}</div>
-        </Card>
-        <Card>
-          <div className="stat-label">Telemetry gaps</div>
-          <div className="stat-value">{d.telemetryGaps.length}</div>
-          {d.telemetryGaps.map(([a, b]) => (
-            <div key={a} className="muted small mono">
-              events {a}–{b}
-            </div>
-          ))}
-        </Card>
-      </div>
+      {d.dns ? (
+        <DnsEvidence d={d} ageMs={f.ageMs} />
+      ) : (
+        <div className="grid-3">
+          <Card>
+            <div className="stat-label">Flows today</div>
+            <div className="stat-value">{compact(d.flowsToday)}</div>
+          </Card>
+          <Card>
+            <div className="stat-label">Blocked today</div>
+            <div className="stat-value bad">{compact(d.blockedToday)}</div>
+          </Card>
+          <Card>
+            <div className="stat-label">Telemetry gaps</div>
+            <div className="stat-value">{d.telemetryGaps.length}</div>
+            {d.telemetryGaps.map(([a, b]) => (
+              <div key={a} className="muted small mono">
+                events {a}–{b}
+              </div>
+            ))}
+          </Card>
+        </div>
+      )}
       <Card>
         <SectionTitle>Capabilities</SectionTitle>
         <ul className="caps">
@@ -114,6 +119,63 @@ sudo moatd recover isolate --keep 100.100.1.2/32`}</pre>
         </Card>
       )}
     </div>
+  );
+}
+
+/**
+ * W16 DNS-only presentation: resolver health and evidence age (the adapter's last good poll), the client's last query
+ * and declared history gaps. No flows, processes or bytes: DNS cannot establish them.
+ */
+function DnsEvidence({ d, ageMs }: { d: Device; ageMs: number | null }) {
+  const dns = d.dns!;
+  return (
+    <>
+      <div className="grid-3">
+        <Card>
+          <div className="stat-label">Resolver</div>
+          <div className={`stat-value ${dns.resolverHealth === "ok" ? "" : "bad"}`}>{dns.resolverHealth.replace(/_/g, " ")}</div>
+          <div className="muted small">{d.model}</div>
+        </Card>
+        <Card>
+          <div className="stat-label">Evidence age</div>
+          <div className="stat-value">{ageMs === null ? "never polled" : ageMs < 60_000 ? "<1 min" : `${Math.round(ageMs / 60_000)} min`}</div>
+          <div className="muted small">since the resolver&apos;s last good poll</div>
+        </Card>
+        <Card>
+          <div className="stat-label">Last query</div>
+          <div className="stat-value">{ago(dns.lastQueryAt)}</div>
+          <div className="muted small">as the resolver reported it</div>
+        </Card>
+      </div>
+      {d.blockedToday > 0 && (
+        <div className="grid-3">
+          <Card>
+            <div className="stat-label">Queries today</div>
+            <div className="stat-value">{compact(d.flowsToday)}</div>
+          </Card>
+          <Card>
+            <div className="stat-label">Blocked by the resolver</div>
+            <div className="stat-value bad">{compact(d.blockedToday)}</div>
+          </Card>
+        </div>
+      )}
+      <Card>
+        <SectionTitle>History gaps</SectionTitle>
+        {dns.gaps.length === 0 ? (
+          <div className="muted small">No dropped resolver history has been detected.</div>
+        ) : (
+          <ul className="caps">
+            {dns.gaps.map((g, i) => (
+              <li key={i}>
+                <span className="cap-label">{g.from ? ago(g.from) : "?"} – {g.to ? ago(g.to) : "now"}</span>
+                <span className="muted small cap-note">{g.reason}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+        <div className="footnote">DNS evidence says which client asked the resolver for which name, and whether it was blocked. It cannot name an app or process, see a connection or count bytes, and direct-IP or other encrypted-DNS traffic is invisible to it.</div>
+      </Card>
+    </>
   );
 }
 
