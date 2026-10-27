@@ -64,6 +64,12 @@ What is **not** promised:
   expiry by the same amount; monotonic-deadline handling across reboot is W06/§7.2 work and not claimed here.
 * **Plain-HTTP keep-alive** is re-evaluated as a stream (by its first `Host`), not per request.
 
+### Measured (CI netns, linux-endpoint run 40537109945, commit 48f8ee5, 1 s tick)
+
+Receiver-side unless noted: expiry 1.15 s after the deadline; denying revision 0.80 s after the apply request; task
+close 0.13 s after the session ended; isolation 0.37 s (client-side EOF); daemon stop 0.11 s after SIGTERM. One run
+on a GitHub runner, not a benchmark; the bound to rely on is the table above.
+
 ## 3. Direct vs proxied agreement
 
 For traffic without hostname evidence the proxy decides on the original address with the same moat-core

@@ -191,20 +191,18 @@
       "disposition": "implemented_unproven",
       "tests": [
         "linux/moatd/src/proxy.rs::tests",
-        "linux/tests/netns-enforcement.sh (proxy checks)"
+        "core/moat-core/tests/hostname_admission.rs",
+        "linux/tests/netns-enforcement.sh (proxy + W05 checks)"
       ],
       "environment": "ci-ubuntu-26.04-x86_64",
       "last_result": {
         "result": "pass",
-        "run": "linux-endpoint 40493342431",
-        "commit": "d5270bd",
+        "run": "linux-endpoint 40537109945",
+        "commit": "48f8ee5",
         "date": "2026-10-27"
       },
-      "limits": "Admission-only: open streams are not cancelled at grant expiry or deny. Name resolution happens before authorization for some paths. Domain fronting through an allowed host remains possible. UDP is IP-only.",
-      "open_defects": [
-        "D-PROXY-DNS-BEFORE-AUTH",
-        "D-PROXY-STREAM-LIFETIME"
-      ]
+      "limits": "Names are authorized before any proxy DNS lookup (lab resolver saw no query for forbidden names). Admitted streams are re-checked on every install and tick and end at expiry (measured 1.15 s after the deadline, 1 s tick), on a denying revision (0.80 s), task close (0.13 s), isolation (0.37 s) and daemon stop (0.11 s); post-decision bytes are bounded by one tick plus socket buffers, not zero. Direct and proxied agree for IPv4/IPv6 at an independent receiver. Not the installed unit; workload-side DNS is governed by profile DNS rules; domain fronting and ECH outer names remain; UDP is IP-only; streams are not adopted across a daemon restart.",
+      "open_defects": []
     },
     {
       "id": "linux.activation.trial-rollback",
@@ -462,13 +460,29 @@
       "id": "D-PROXY-DNS-BEFORE-AUTH",
       "summary": "A denied hostname can be resolved before authorization.",
       "package": "W05",
-      "status": "open"
+      "status": "closed",
+      "closed_by": "W05 (moat-core hostname_admission + proxy authorize-before-resolve)",
+      "regression_tests": [
+        "core/moat-core/tests/hostname_admission.rs",
+        "proxy::tests::a_name_the_policy_refuses_is_never_looked_up",
+        "netns: W05 no DNS query left the host for a forbidden name (CONNECT, SNI, Host)",
+        "linux-endpoint 40537109945"
+      ]
     },
     {
       "id": "D-PROXY-STREAM-LIFETIME",
       "summary": "No stream registry; admission and stream expiry are not distinguished.",
       "package": "W05",
-      "status": "open"
+      "status": "closed",
+      "closed_by": "W05 (proxy stream registry + docs/proxy-stream-contract.md)",
+      "regression_tests": [
+        "proxy::tests::an_admitted_stream_ends_when_its_permission_expires",
+        "proxy::tests::a_policy_change_to_deny_ends_open_streams",
+        "proxy::tests::isolation_ends_open_streams_and_refuses_new_ones",
+        "proxy::tests::closing_a_task_ends_its_streams_only",
+        "netns: W05 stream ended at expiry / deny / task close / isolation / daemon stop",
+        "linux-endpoint 40537109945"
+      ]
     },
     {
       "id": "D-ACTIVATION-JOURNAL",
