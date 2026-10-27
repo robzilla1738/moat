@@ -94,6 +94,12 @@ final class ScreenshotTests: XCTestCase {
         try render(ScreenContent(model: m).padding(28), .light, width: 1040, height: 900, name: "whatChanged-light")
     }
 
+    /// The narrow temporary rule card on its own (window capture: `--screen localrule`).
+    func testLocalRuleSheetRenders() throws {
+        try render(LocalRuleSheet(model: model(.appDetail)), .dark, width: 620, height: 900, name: "localrule-dark")
+        try render(LocalRuleSheet(model: model(.appDetail)), .light, width: 620, height: 900, name: "localrule-light")
+    }
+
     func testSidebarIsAppsFirstAndSaysThisComputer() {
         XCTAssertEqual(Screen.sidebar, [.apps, .activity, .tasks, .rules, .devices, .coverage])
         XCTAssertEqual(Screen.devices.title(deviceCount: 1), "This computer")

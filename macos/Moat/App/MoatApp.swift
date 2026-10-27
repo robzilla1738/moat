@@ -10,7 +10,7 @@ struct LaunchOptions {
     var demo = false
     var isolated = false
     var screen: Screen = .apps
-    /// "menubar" or "onboarding" render that surface in the main window for a screenshot.
+    /// "menubar", "onboarding" or "localrule" render that surface in the main window for a screenshot.
     var special: String?
     var onboardingStep: OnboardingStep = .coverage
     var appearance: ColorScheme?
@@ -191,6 +191,10 @@ struct MainWindow: View {
                 .fixedSize()
         case .some("onboarding"):
             OnboardingView(state: onboarding, step: launch.onboardingStep) {}
+        case .some("localrule"):
+            // The narrow temporary rule card for one app, sized to itself (screenshots only).
+            LocalRuleSheet(model: model)
+                .fixedSize()
         default:
             RootView(model: model)
                 .frame(minWidth: 980, minHeight: 640)

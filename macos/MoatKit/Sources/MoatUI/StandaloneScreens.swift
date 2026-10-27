@@ -372,3 +372,31 @@ struct FleetEventsCard: View {
     }
 }
 
+
+/// The local-rule authoring surface on its own (Apps → app → "Narrow temporary rule"), for the docs screenshot of
+/// the plan the owner authorizes. It shows the first app with a reported identity, exactly as the app detail does.
+public struct LocalRuleSheet: View {
+    @ObservedObject var model: AppModel
+    @Environment(\.colorScheme) private var scheme
+
+    public init(model: AppModel) {
+        self.model = model
+    }
+
+    public var body: some View {
+        let p = Palette.of(scheme)
+        VStack(alignment: .leading, spacing: 14) {
+            if let app = model.apps.first(where: { $0.identityKnown }) {
+                ScreenHeader(eyebrow: app.teamID.map { "Team \($0)" } ?? "Unsigned or ad-hoc", title: app.name, dim: app.executable ?? app.signingID ?? "")
+                RuleAuthoringCard(model: model, app: app)
+            } else {
+                EmptyStateView(symbol: "app.dashed", title: "No app with a reported identity", text: "A rule is authored for an app macOS identified. A name alone is never identity.")
+            }
+        }
+        .padding(24)
+        .frame(width: 620, alignment: .topLeading)
+        .background(p.bg)
+        .environment(\.palette, p)
+        .tint(p.accent)
+    }
+}
