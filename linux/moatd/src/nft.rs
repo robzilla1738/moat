@@ -32,17 +32,29 @@ pub const LOCAL_EMERGENCY_TABLE: &str = "moat_local_emergency";
 #[derive(Clone, Debug)]
 pub struct CgroupLayout {
     pub root_name: String,
+    /// cgroup v2 mount, used to check that a session cgroup exists before a rule names it (nftables resolves the
+    /// path at load time, so naming a missing cgroup would fail the whole transaction).
+    pub mount: std::path::PathBuf,
+    /// False when this host cannot enforce protected sessions: no session chains are rendered (and the launcher
+    /// refuses sessions), so the ruleset never references cgroups that nftables cannot resolve.
+    pub sessions_enabled: bool,
 }
 
 impl Default for CgroupLayout {
     fn default() -> Self {
-        CgroupLayout { root_name: "moat.slice".into() }
+        CgroupLayout { root_name: "moat.slice".into(), mount: "/sys/fs/cgroup".into(), sessions_enabled: true }
     }
 }
 
 impl CgroupLayout {
     pub fn profile_dir(&self, profile: &str) -> String {
         format!("{}/p-{}", self.root_name, sanitize(profile))
+    }
+    pub fn session_dir(&self, profile: &str, session_id: &str) -> String {
+        format!("{}/s-{}", self.profile_dir(profile), sanitize(session_id))
+    }
+    pub fn exists(&self, rel: &str) -> bool {
+        self.mount.join(rel).is_dir()
     }
 }
 
@@ -244,9 +256,26 @@ fn push_rules(
     rules: &[&Rule],
     uid_of: &dyn Fn(&str) -> Option<u32>,
     report: &mut RenderReport,
+    session_scope: Option<(&CgroupLayout, &str)>,
 ) -> Result<(), RenderError> {
     for r in rules {
+        let ids: &[String] = r.selector.session.as_ref().map(|s| s.session_ids.as_slice()).unwrap_or(&[]);
         match rule_lines(policy, r, uid_of) {
+            Ok(lines) if !ids.is_empty() => {
+                // Bound to session instances: match the session's own cgroup. Sessions that no longer exist (or
+                // never existed here) are left out; leaving out an allow is stricter.
+                let Some((layout, profile)) = session_scope else { continue };
+                for id in ids {
+                    let rel = layout.session_dir(profile, id);
+                    if !layout.exists(&rel) {
+                        report.notes.push(format!("{}: session {id} is not running on this device; grant not rendered", r.id));
+                        continue;
+                    }
+                    for l in &lines {
+                        let _ = writeln!(out, "    socket cgroupv2 level 3 \"{rel}\" {l}");
+                    }
+                }
+            }
             Ok(lines) => {
                 for l in lines {
                     let _ = writeln!(out, "    {l}");
@@ -270,22 +299,43 @@ pub fn render(
     layout: &CgroupLayout,
     uid_of: &dyn Fn(&str) -> Option<u32>,
 ) -> Result<(String, RenderReport), RenderError> {
+    render_at(snap, device_id, layout, uid_of, chrono::Utc::now())
+}
+
+/// The earliest future expiry among the snapshot's rules: the endpoint re-renders then, so an expired grant stops
+/// matching even with no controller reachable.
+pub fn next_expiry(snap: &Snapshot, now: chrono::DateTime<chrono::Utc>) -> Option<chrono::DateTime<chrono::Utc>> {
+    snap.policy.rules.iter().filter_map(|r| r.expires_at).filter(|e| *e > now).min()
+}
+
+pub fn render_at(
+    snap: &Snapshot,
+    device_id: &str,
+    layout: &CgroupLayout,
+    uid_of: &dyn Fn(&str) -> Option<u32>,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Result<(String, RenderReport), RenderError> {
     let p = &snap.policy;
     let mut report = RenderReport::default();
-    let device_rules: Vec<&Rule> = p.rules.iter().filter(|r| applies_to_device(p, r, device_id)).collect();
+    let device_rules: Vec<&Rule> =
+        p.rules.iter().filter(|r| applies_to_device(p, r, device_id)).filter(|r| r.expires_at.map(|e| e > now).unwrap_or(true)).collect();
     // Profiles a protected session may name. Unavailable profiles get no chain: the launcher refuses them and any
     // process found under moat.slice without a known profile is rejected.
     let unavailable: BTreeSet<&String> = snap.report.unavailable_session_profiles.iter().collect();
-    let session_profiles: Vec<&moat_core::policy::Profile> = p.profiles.iter().filter(|pr| !unavailable.contains(&pr.id)).collect();
+    let session_profiles: Vec<&moat_core::policy::Profile> =
+        if layout.sessions_enabled { p.profiles.iter().filter(|pr| !unavailable.contains(&pr.id)).collect() } else { Vec::new() };
+    if !layout.sessions_enabled {
+        report.notes.push("protected sessions are not enforceable on this host; no session chains rendered".into());
+    }
 
     let mut chains = String::new();
     for prof in &session_profiles {
         let rules = ordered(device_rules.iter().copied().filter(|r| match &r.selector.session {
-            Some(sm) => sm.any_protected || sm.profiles.contains(&prof.id),
+            Some(sm) => sm.any_protected || sm.profiles.contains(&prof.id) || (sm.profiles.is_empty() && !sm.session_ids.is_empty()),
             None => true,
         }));
         let _ = writeln!(chains, "  chain {} {{", chain_name(&prof.id));
-        push_rules(&mut chains, p, &rules, uid_of, &mut report)?;
+        push_rules(&mut chains, p, &rules, uid_of, &mut report, Some((layout, &prof.id)))?;
         let _ = writeln!(chains, "    {}", default_line(prof.default, &prof.id));
         let _ = writeln!(chains, "  }}");
         report.session_profiles.push(prof.id.clone());
@@ -307,10 +357,12 @@ pub fn render(
         );
     }
     // Anything under moat.slice without a known, available profile: restrictive.
-    let _ = writeln!(out, "    socket cgroupv2 level 1 \"{}\" counter reject {}", layout.root_name, comment("session:unknown-profile"));
+    if layout.sessions_enabled {
+        let _ = writeln!(out, "    socket cgroupv2 level 1 \"{}\" counter reject {}", layout.root_name, comment("session:unknown-profile"));
+    }
     // Ordinary traffic: rules without a session selector, then the fallback profile default.
     let ordinary = ordered(device_rules.iter().copied().filter(|r| r.selector.session.is_none()));
-    push_rules(&mut out, p, &ordinary, uid_of, &mut report)?;
+    push_rules(&mut out, p, &ordinary, uid_of, &mut report, None)?;
     let fb = p.profile(&p.fallback_profile).ok_or_else(|| RenderError(format!("fallback profile {} missing", p.fallback_profile)))?;
     if p.profiles.iter().any(|pr| !pr.applies_to.apps.is_empty() || !pr.applies_to.ancestors.is_empty()) {
         report.notes.push(
@@ -546,6 +598,31 @@ pub(crate) mod tests {
                 assert_eq!(hit, scope == want, "{s}: scope {scope:?} vs classify {want:?}");
             }
         }
+    }
+
+    #[test]
+    fn session_bound_grants_render_only_for_live_sessions_and_expire() {
+        let d = tempfile::tempdir().unwrap();
+        let layout = CgroupLayout { root_name: "moat.slice".into(), mount: d.path().into(), sessions_enabled: true };
+        let mut snap = home_snapshot();
+        snap.policy = Policy::parse(include_str!("../../../conformance/policies/home-with-grant.toml")).unwrap();
+        let before: chrono::DateTime<chrono::Utc> = "2026-10-26T12:30:00Z".parse().unwrap();
+        // session not running here: grant left out with a note
+        let (s, rep) = render_at(&snap, "omarchy", &layout, &uid, before).unwrap();
+        assert!(!s.contains("grant-sess-1-oss"));
+        assert!(rep.notes.iter().any(|n| n.contains("sess-1")));
+        // session running: matched by its own cgroup, ahead of the profile default
+        std::fs::create_dir_all(d.path().join("moat.slice/p-coding-session/s-sess-1")).unwrap();
+        let (s, _) = render_at(&snap, "omarchy", &layout, &uid, before).unwrap();
+        let chain = s.split("chain s_coding_session {").nth(1).unwrap();
+        assert!(chain.contains("socket cgroupv2 level 3 \"moat.slice/p-coding-session/s-sess-1\" ip daddr { 203.0.113.50/32 } meta l4proto tcp th dport { 443 } counter accept"), "{chain}");
+        assert!(chain.find("grant-sess-1-oss").unwrap() < chain.find("default:coding-session").unwrap());
+        // not in other profiles' chains
+        assert!(!s.split("chain s_local_inference {").nth(1).unwrap().split("  }").next().unwrap().contains("grant-sess-1-oss"));
+        assert_eq!(next_expiry(&snap, before), Some("2026-10-26T13:00:00Z".parse().unwrap()));
+        let after: chrono::DateTime<chrono::Utc> = "2026-10-26T13:00:01Z".parse().unwrap();
+        assert!(!render_at(&snap, "omarchy", &layout, &uid, after).unwrap().0.contains("grant-sess-1-oss"));
+        assert_eq!(next_expiry(&snap, after), None);
     }
 
     #[test]

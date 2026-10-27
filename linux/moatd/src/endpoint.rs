@@ -68,6 +68,10 @@ pub struct Endpoint<B: NftBackend> {
     counters: BTreeMap<String, (u64, u64)>,
     /// What is believed to be in the kernel right now: (revision, isolation table present).
     installed: Option<u64>,
+    /// Re-render at this time (earliest rule expiry), even if nothing else changed.
+    rerender_at: Option<DateTime<Utc>>,
+    /// Session ids present when the ruleset was rendered (session-bound grants depend on them).
+    rendered_sessions: Vec<String>,
     isolation_installed: Option<Vec<ipnet::IpNet>>,
     uid_of: fn(&str) -> Option<u32>,
 }
@@ -107,6 +111,8 @@ impl<B: NftBackend> Endpoint<B> {
             last_rejection: None,
             counters: BTreeMap::new(),
             installed: None,
+            rerender_at: None,
+            rendered_sessions: Vec::new(),
             isolation_installed: None,
             uid_of: lookup_uid,
         }
@@ -118,7 +124,11 @@ impl<B: NftBackend> Endpoint<B> {
     }
 
     fn layout(&self) -> CgroupLayout {
-        CgroupLayout { root_name: self.cgroups.root_name.clone() }
+        CgroupLayout {
+            root_name: self.cgroups.root_name.clone(),
+            mount: self.cgroups.mount.clone(),
+            sessions_enabled: self.adv.support(Capability::SessionEnforcement) != Support::Unsupported,
+        }
     }
 
     /// Startup: advertise, reload the last applied snapshot (signature checked; expiry tolerated and reported as
@@ -206,7 +216,9 @@ impl<B: NftBackend> Endpoint<B> {
             return;
         };
         let snap = snap.clone();
-        if self.installed == Some(snap.revision) {
+        let sessions_now: Vec<String> = self.sessions.keys().cloned().collect();
+        let due = self.rerender_at.map(|t| t <= Utc::now()).unwrap_or(false);
+        if self.installed == Some(snap.revision) && !due && sessions_now == self.rendered_sessions {
             if self.backend.list_json(nft::TABLE).is_ok() {
                 return;
             }
@@ -240,6 +252,8 @@ impl<B: NftBackend> Endpoint<B> {
         self.backend.check(&rules).map_err(|e| format!("nft rejected the ruleset: {e}"))?;
         self.backend.apply(&rules).map_err(|e| format!("nft apply failed: {e}"))?;
         self.installed = Some(snap.revision);
+        self.rerender_at = nft::next_expiry(snap, Utc::now());
+        self.rendered_sessions = self.sessions.keys().cloned().collect();
         Ok(rep)
     }
 

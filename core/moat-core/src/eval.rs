@@ -148,7 +148,10 @@ fn selector_matches(ctx: &EvalContext, s: &Selector, f: &FlowAttempt, notes: &mu
     if let Some(sm) = &s.session {
         match &f.session {
             Some(sess) if sess.verified && sess.boundary.is_containment() => {
-                if !(sm.any_protected || sm.profiles.contains(&sess.profile)) {
+                let by_profile =
+                    sm.any_protected || sm.profiles.contains(&sess.profile) || (sm.profiles.is_empty() && !sm.session_ids.is_empty());
+                let by_instance = sm.session_ids.is_empty() || sm.session_ids.contains(&sess.id);
+                if !(by_profile && by_instance) {
                     return false;
                 }
             }

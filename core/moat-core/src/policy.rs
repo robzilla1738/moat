@@ -185,6 +185,11 @@ pub struct SessionMatch {
     pub profiles: Vec<String>,
     #[serde(default)]
     pub any_protected: bool,
+    /// Bind to specific protected-session instances (as issued by the endpoint's launcher). Only for expiring
+    /// temporary grants / owner overrides, e.g. "Allow once for this session". Combined with `profiles`, both must
+    /// match.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub session_ids: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
@@ -441,6 +446,14 @@ impl Policy {
                     errors.push(err(format!("{path}.selector"), "temporary grants must be scoped to an app or session"));
                 }
             }
+            if r.selector.session.as_ref().is_some_and(|sm| !sm.session_ids.is_empty())
+                && (r.action != Action::Allow || r.expires_at.is_none())
+            {
+                errors.push(err(
+                    format!("{path}.selector.session.session_ids"),
+                    "rules bound to session instances must be expiring allows (temporary grants)",
+                ));
+            }
             if r.on_unsupported == OnUnsupported::SkipWithReport && r.action == Action::Deny {
                 errors.push(err(
                     format!("{path}.on_unsupported"),
@@ -475,8 +488,13 @@ impl Policy {
             }
         }
         if let Some(sm) = &s.session {
-            if sm.profiles.is_empty() && !sm.any_protected {
-                errors.push(err(format!("{path}.session"), "name session profiles or set any_protected"));
+            if sm.profiles.is_empty() && !sm.any_protected && sm.session_ids.is_empty() {
+                errors.push(err(format!("{path}.session"), "name session profiles, session ids, or set any_protected"));
+            }
+            for id in &sm.session_ids {
+                if id.is_empty() || id.len() > 64 || !id.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-') {
+                    errors.push(err(format!("{path}.session.session_ids"), format!("invalid session id {id:?}")));
+                }
             }
             for p in &sm.profiles {
                 if self.profile(p).is_none() {

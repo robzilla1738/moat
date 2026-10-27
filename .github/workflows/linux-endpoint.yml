@@ -21,6 +21,9 @@ jobs:
           stat -fc %T /sys/fs/cgroup
           sudo nft --version
           sudo nft list tables || true
+          sudo mkdir -p /sys/fs/cgroup/moat-probe
+          printf 'table inet moat_probe {\n chain c {\n  type filter hook output priority 0; policy accept;\n  socket cgroupv2 level 1 "moat-probe" accept\n }\n}\n' | sudo nft -c -f - && echo "socket cgroupv2: ok" || echo "socket cgroupv2: FAILED"
+          sudo rmdir /sys/fs/cgroup/moat-probe
       - name: Build
         run: |
           cargo build -p moatd -p moatctl

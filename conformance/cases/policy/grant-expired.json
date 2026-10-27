@@ -1,0 +1,35 @@
+{
+  "schema": "moat.conformance.policy_case.v1",
+  "name": "grant-expired",
+  "description": "After expiry the grant no longer applies.",
+  "policy": "../../policies/home-with-grant.toml",
+  "flow": {
+    "id": "c",
+    "device_id": "mbp-m1",
+    "user": "robert",
+    "app": {
+      "family": "curl",
+      "executable": "/usr/bin/curl"
+    },
+    "ancestry_complete": true,
+    "remote_ip": "203.0.113.50",
+    "remote_port": 443,
+    "transport": "tcp",
+    "at": "2026-10-26T13:00:01Z",
+    "hostname": {
+      "name": "oss-cn-beijing.aliyuncs.com",
+      "source": "flow_api",
+      "confidence": "high"
+    },
+    "session": {
+      "id": "sess-1",
+      "profile": "coding-session",
+      "boundary": "linux_cgroup",
+      "verified": true
+    }
+  },
+  "expect": {
+    "verdict": "deny",
+    "winner": "profile:coding-session"
+  }
+}

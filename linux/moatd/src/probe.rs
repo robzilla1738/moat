@@ -16,6 +16,9 @@ pub struct HostFacts {
     /// A `socket cgroupv2` expression passed `nft -c`.
     pub socket_cgroupv2: bool,
     pub cgroup_kill: bool,
+    /// Why the `socket cgroupv2` probe failed, verbatim from nft, if it did.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub probe_error: Option<String>,
 }
 
 pub fn kernel_release() -> String {
@@ -26,26 +29,43 @@ pub fn gather(cgroup_mount: &Path, moat_root: &str, nft: &str) -> HostFacts {
     let ok = |args: &[&str]| Command::new(nft).args(args).output().map(|o| o.status.success()).unwrap_or(false);
     let nft_binary = ok(&["--version"]);
     let netfilter_usable = nft_binary && ok(&["list", "tables"]);
-    let socket_cgroupv2 = netfilter_usable
-        && cgroup_mount.join(moat_root).exists()
-        && {
-            let test = format!(
-            "table inet moat_probe {{ chain c {{ type filter hook output priority 0; socket cgroupv2 level 1 \"{moat_root}\" accept; }} }}\n"
+    let mut probe_error = None;
+    let socket_cgroupv2 = if !netfilter_usable {
+        false
+    } else if !cgroup_mount.join(moat_root).exists() {
+        probe_error = Some(format!("{} does not exist", cgroup_mount.join(moat_root).display()));
+        false
+    } else {
+        let test = format!(
+            "table inet moat_probe {{\n  chain c {{\n    type filter hook output priority 0; policy accept;\n    socket cgroupv2 level 1 \"{moat_root}\" accept\n  }}\n}}\n"
         );
-            let mut c = Command::new(nft);
-            c.args(["-c", "-f", "-"])
-                .stdin(std::process::Stdio::piped())
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null());
-            match c.spawn() {
-                Ok(mut ch) => {
-                    use std::io::Write;
-                    let _ = ch.stdin.take().unwrap().write_all(test.as_bytes());
-                    ch.wait().map(|s| s.success()).unwrap_or(false)
+        let mut c = Command::new(nft);
+        c.args(["-c", "-f", "-"])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::piped());
+        match c.spawn() {
+            Ok(mut ch) => {
+                use std::io::Write;
+                let _ = ch.stdin.take().unwrap().write_all(test.as_bytes());
+                match ch.wait_with_output() {
+                    Ok(o) if o.status.success() => true,
+                    Ok(o) => {
+                        probe_error = Some(String::from_utf8_lossy(&o.stderr).trim().to_string());
+                        false
+                    }
+                    Err(e) => {
+                        probe_error = Some(e.to_string());
+                        false
+                    }
                 }
-                Err(_) => false,
             }
-        };
+            Err(e) => {
+                probe_error = Some(e.to_string());
+                false
+            }
+        }
+    };
     HostFacts {
         kernel: kernel_release(),
         cgroup2: crate::cgroup::is_cgroup2(cgroup_mount),
@@ -53,6 +73,7 @@ pub fn gather(cgroup_mount: &Path, moat_root: &str, nft: &str) -> HostFacts {
         netfilter_usable,
         socket_cgroupv2,
         cgroup_kill: cgroup_mount.join("cgroup.kill").exists() || cgroup_mount.join(moat_root).join("cgroup.kill").exists(),
+        probe_error,
     }
 }
 
@@ -82,7 +103,11 @@ pub fn advertise(facts: &HostFacts) -> CapabilityAdvertisement {
     } else if !facts.cgroup2 {
         downgrade(&mut adv, Capability::SessionEnforcement, "cgroup v2 is not mounted (hybrid/v1 hierarchy)");
     } else if !facts.socket_cgroupv2 {
-        downgrade(&mut adv, Capability::SessionEnforcement, "nftables 'socket cgroupv2' match unavailable (kernel or nft too old)");
+        let why = format!(
+            "nftables 'socket cgroupv2' match unavailable: {}",
+            facts.probe_error.clone().unwrap_or_else(|| "kernel or nft too old".into())
+        );
+        downgrade(&mut adv, Capability::SessionEnforcement, &why);
     }
     adv.advertised_at = Some(chrono::Utc::now());
     adv
@@ -101,6 +126,7 @@ mod tests {
             netfilter_usable: true,
             socket_cgroupv2: true,
             cgroup_kill: true,
+            probe_error: None,
         };
         let a = advertise(&f);
         assert_eq!(a.support(Capability::SessionEnforcement), Support::Supported);
@@ -130,6 +156,7 @@ mod tests {
             netfilter_usable: true,
             socket_cgroupv2: false,
             cgroup_kill: false,
+            probe_error: None,
         };
         let a = advertise(&f);
         assert_eq!(a.support(Capability::SessionEnforcement), Support::Unsupported);
