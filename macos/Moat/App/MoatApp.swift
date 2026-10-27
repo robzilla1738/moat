@@ -68,6 +68,8 @@ struct MoatApp: App {
                 .preferredColorScheme(launch.appearance ?? appearance.colorScheme)
         }
         .defaultSize(width: 1180, height: 780)
+        // Screenshot runs of the menu bar panel and onboarding size the window to the surface itself.
+        .windowResizability(launch.special == nil ? .automatic : .contentSize)
         .windowToolbarStyle(.unified)
         .commands {
             CommandGroup(after: .appInfo) {
