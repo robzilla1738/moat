@@ -46,7 +46,7 @@ real-workflow evidence, if a claim cites a defect that does not exist, or if thi
 | `linux.session.hostname-proxy` | implemented_unproven | native_ci | ci-ubuntu-26.04-x86_64 | pass, linux-endpoint 40537109945 @ 48f8ee5 | Authorize-before-DNS; streams end at expiry (1.15 s), deny (0.80 s), task close, isolation, daemon stop ([contract](proxy-stream-contract.md)); not the installed unit; domain fronting possible; UDP IP-only. |
 | `linux.activation.trial-rollback` | implemented_unproven | native_ci | ci-ubuntu-26.04-x86_64 | pass, linux-endpoint 40539984069 @ d0b7336 | Durable journal, fault injection at every step, real disk-full episode in CI netns ([contract](linux-activation-journal.md)); not the installed unit. |
 | `linux.spool.gaps` | implemented_unproven | component | unit | pass, rust 40493342610 @ d5270bd | No W01 event envelope yet. |
-| `linux.ordinary-apps.inventory` | unsupported_rejected | none | unit | not_run | Not implemented; W09/W10. |
+| `linux.ordinary-apps.inventory` | implemented_unproven | native_ci | ci-ubuntu-26.04-x86_64 | pass, linux-endpoint 40547438730 @ 3a54a66 | **observe_only** (`moatd inventory`, `moatd run --ordinary-inventory-ms`): counted TCP loss, unknown identity with reason, UDP completeness unmeasured, other netns not observed; not Omarchy. |
 | `linux.ordinary-apps.app-rules` | unsupported_rejected | semantic | unit | pass (rejection), rust 40493342610 | nftables cannot match executables; rejected at compile. |
 | `linux.packaging.systemd` | implemented_unproven | native_ci | ci-ubuntu-installed-unit | pass, linux-endpoint 40540159764 @ a63827b | Packaged unit under systemd on Ubuntu: project and /tmp writable, containment probes fail; **not Omarchy**. Keeps `CAP_SYS_PTRACE` ([decision](decisions/W11-cap-sys-ptrace.md)). |
 | `macos.filter.app-rules` | implemented_unproven | component | ci-macos-26 | pass, macos 40493342625 @ d5270bd | Never run signed; `D-MAC-CACHE-TRUST` (Lane B). |
@@ -91,7 +91,7 @@ above is updated with the run that proves it.
 | W07 Mac engine | Lane B | see Lane B |
 | W08 truthful UI | Lane B | see Lane B |
 | W09 ordinary-app Linux experiment | Lane A | done: measured in CI (run 40545113846); decision: native inventory, OpenSnitch not adopted, enforcement deferred ([decision](decisions/W09-linux-ordinary-apps.md)) |
-| W10 ordinary-app Linux inventory | Lane A | not started |
+| W10 ordinary-app Linux inventory | Lane A | increment 1 done in CI netns: observe-only inventory vs an independent receiver; enforcement not started (no hook proven, W09); eBPF increment 2 scheduled |
 | W11 installed-platform proofs | Lane A (Linux) / Robert | Linux: packaged unit proven under systemd on an Ubuntu runner (installed-unit.sh); Omarchy run and the `CAP_SYS_PTRACE` decision need Robert. Mac: Lane B |
 
 ## Needs Robert
