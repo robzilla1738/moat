@@ -19,6 +19,12 @@ default = "deny"
 learning = "restrictive"
 
 [[profiles]]
+id = "lab-hosts"
+description = "Hostname allows enforced by the session egress proxy (TCP: SNI / CONNECT / Host)."
+default = "deny"
+learning = "restrictive"
+
+[[profiles]]
 id = "lab-deny"
 default = "deny"
 learning = "restrictive"
@@ -40,4 +46,13 @@ selector = { session = { profiles = ["lab-allow"] } }
 destinations = { scopes = ["lan"] }
 transport = "tcp"
 ports = ["8000-9999"]
+provenance = { kind = "git", reference = "lab" }
+
+[[rules]]
+id = "lab-hosts-allowed-lab"
+action = "allow"
+selector = { session = { profiles = ["lab-hosts"] } }
+destinations = { hosts = ["allowed.lab"] }
+transport = "tcp"
+ports = [8443, 8081]
 provenance = { kind = "git", reference = "lab" }

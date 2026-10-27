@@ -262,3 +262,25 @@ test("a silent or stale device never keeps its last coverage claim", () => {
   assert.equal(f.c.overview().devices[0]!.effective_coverage, "degraded");
   void kp;
 });
+
+test("trial revisions: start, confirm and rollback are recorded per device; a rollback raises attention", async () => {
+  const f = fixture();
+  const kp = enrollDevice(f);
+  await bootstrap(f);
+  const d = f.c.authenticateDevice("POST", "/v1/device/sync", deviceHeaders(kp, "omarchy", "{}", new Date(f.clock.t).toISOString()), "{}");
+  const at = new Date(f.clock.t).toISOString();
+  f.c.sync(d as never, {
+    events: [
+      { seq: 1, at, event: { type: "policy_trial_started", revision: 3, fallback_revision: 2, deadline: at } },
+      { seq: 2, at, event: { type: "policy_rolled_back", from_revision: 3, to_revision: 2, reason: "trial not confirmed" } },
+      { seq: 3, at, event: { type: "policy_trial_started", revision: 4, fallback_revision: 2, deadline: at } },
+      { seq: 4, at, event: { type: "policy_trial_confirmed", revision: 4, by_uid: 0, how: "moatd recover confirm" } },
+    ],
+  });
+  const states = f.c.db.prepare("SELECT revision, state FROM device_revisions WHERE device_id = 'omarchy' AND revision >= 3 ORDER BY revision, state").all() as { revision: number; state: string }[];
+  assert.deepEqual(states.map((s) => `${s.revision}:${s.state}`), ["3:rolled_back", "3:trial", "4:confirmed", "4:trial"]);
+  const inc = f.c.incidents().find((i) => i.kind === "policy_rolled_back");
+  assert.ok(inc, "rollback raised");
+  assert.equal(inc!.urgency, "high");
+  assert.match(inc!.reason, /rolled back to 2/);
+});

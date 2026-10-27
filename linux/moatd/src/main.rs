@@ -39,9 +39,22 @@ enum Cmd {
         spool_mib: u64,
         #[arg(long, default_value_t = 2)]
         tick_secs: u64,
+        /// Do not run the session egress proxy: hostname rules in protected sessions are then left out (allows,
+        /// stricter) or refused (denies), exactly as on an IP-only host.
+        #[arg(long)]
+        no_egress_proxy: bool,
+        /// Loopback port range for session egress-proxy listeners (keep it outside the ephemeral range).
+        #[arg(long, default_value = "15000-15999")]
+        egress_proxy_ports: String,
     },
     /// Queue a signed snapshot for the daemon (copied into <state>/inbox).
-    Apply { signed: PathBuf },
+    Apply {
+        signed: PathBuf,
+        /// Install on trial: the daemon reverts to the last confirmed revision after this many seconds unless
+        /// `moatd recover confirm` runs first.
+        #[arg(long)]
+        trial_secs: Option<u64>,
+    },
     /// Show daemon status (coverage, revision, sessions).
     Status,
     /// Print this host's capability advertisement (probed, never upgraded).
@@ -77,6 +90,10 @@ enum Recover {
         keep: Vec<IpNet>,
     },
     ClearIsolation,
+    /// Keep the revision that is on trial (ends the countdown).
+    Confirm,
+    /// Revert the revision on trial to the last confirmed one now.
+    Rollback,
 }
 
 fn hostname() -> String {
@@ -104,7 +121,12 @@ fn main() -> ExitCode {
 
 fn run(cli: Cli) -> Result<(), String> {
     match cli.cmd {
-        Cmd::Run { device_id, cgroup_mount, spool_mib, tick_secs } => {
+        Cmd::Run { device_id, cgroup_mount, spool_mib, tick_secs, no_egress_proxy, egress_proxy_ports } => {
+            let ports = egress_proxy_ports
+                .split_once('-')
+                .and_then(|(a, b)| Some((a.parse::<u16>().ok()?, b.parse::<u16>().ok()?)))
+                .filter(|(a, b)| a <= b && *a > 0)
+                .ok_or("--egress-proxy-ports must look like 15000-15999")?;
             require_root()?;
             let device_id = device_id.unwrap_or_else(hostname);
             fs::create_dir_all(&cli.state).map_err(|e| e.to_string())?;
@@ -118,19 +140,36 @@ fn run(cli: Cli) -> Result<(), String> {
             .map_err(|e| e.to_string())?;
             let cg = Cgroups { mount: cgroup_mount.clone(), root_name: "moat.slice".into() };
             let _ = cg.ensure_profiles(&[]);
-            let facts = moatd::probe::gather(&cgroup_mount, "moat.slice", "nft");
+            let mut facts = moatd::probe::gather(&cgroup_mount, "moat.slice", "nft");
+            facts.egress_proxy_disabled = no_egress_proxy;
             let adv = moatd::probe::advertise(&facts);
             let mut ep = Endpoint::new(cli.state.clone(), device_id, NftCli::default(), cg, spool, adv);
+            if !no_egress_proxy {
+                let shared = std::sync::Arc::new(moatd::proxy::Shared::new(Box::new(moatd::proxy::system_resolver)));
+                ep = ep.with_proxy(moatd::proxy::ProxyManager::new(shared, ports));
+            }
             ep.startup();
             eprintln!("moatd: coverage {}", ep.coverage_label());
             moatd::server::serve(ep, cli.socket, Duration::from_secs(tick_secs)).map_err(|e| e.to_string())
         }
-        Cmd::Apply { signed } => {
+        Cmd::Apply { signed, trial_secs } => {
             let inbox = cli.state.join("inbox");
             fs::create_dir_all(&inbox).map_err(|e| e.to_string())?;
-            let name = format!("{}.json", chrono::Utc::now().format("%Y%m%d%H%M%S%f"));
-            fs::copy(&signed, inbox.join(name)).map_err(|e| e.to_string())?;
-            println!("queued {} for moatd", signed.display());
+            let stem = chrono::Utc::now().format("%Y%m%d%H%M%S%f").to_string();
+            // The sidecar is written first so the daemon never sees the snapshot without its trial marker.
+            if let Some(secs) = trial_secs {
+                fs::write(inbox.join(format!("{stem}.trial")), secs.to_string()).map_err(|e| e.to_string())?;
+            }
+            let tmp = inbox.join(format!("{stem}.part"));
+            fs::copy(&signed, &tmp).map_err(|e| e.to_string())?;
+            fs::rename(&tmp, inbox.join(format!("{stem}.json"))).map_err(|e| e.to_string())?;
+            match trial_secs {
+                Some(s) => println!(
+                    "queued {} on a {s}s trial; it reverts to the last confirmed revision unless `moatd recover confirm` runs in time",
+                    signed.display()
+                ),
+                None => println!("queued {} for moatd", signed.display()),
+            }
             Ok(())
         }
         Cmd::Status => {
@@ -181,15 +220,33 @@ fn run(cli: Cli) -> Result<(), String> {
 fn recover(state: &std::path::Path, r: Recover) -> Result<(), String> {
     let mut rec = RecoveryState::load(state);
     if let Recover::Status = r {
-        println!("{}", serde_json::to_string_pretty(&rec).unwrap());
+        let trial = moatd::trial::TrialState::load(state);
+        println!("{}", serde_json::to_string_pretty(&serde_json::json!({"recovery": rec, "trial": trial})).unwrap());
         return Ok(());
     }
     let uid = require_root()?;
+    if matches!(r, Recover::Confirm | Recover::Rollback) {
+        let mut t = moatd::trial::TrialState::load(state).ok_or("no revision is on trial")?;
+        t.changed_by_uid = Some(uid);
+        let confirm = matches!(r, Recover::Confirm);
+        if confirm {
+            t.confirmed = true;
+        } else {
+            t.revert_now = true;
+        }
+        t.save(state).map_err(|e| e.to_string())?;
+        if confirm {
+            println!("Revision {} confirmed; the daemon ends the trial on its next tick.", t.revision);
+        } else {
+            println!("Revision {} will be reverted to {} on the daemon's next tick.", t.revision, t.fallback_revision);
+        }
+        return Ok(());
+    }
     let mut nft = NftCli::default();
     rec.changed_by_uid = Some(uid);
     rec.changed_at = Some(chrono::Utc::now());
     match r {
-        Recover::Status => unreachable!(),
+        Recover::Status | Recover::Confirm | Recover::Rollback => unreachable!(),
         Recover::Disable { reason } => {
             rec.enforcement_disabled = true;
             rec.reason = Some(reason);

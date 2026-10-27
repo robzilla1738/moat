@@ -46,11 +46,17 @@ fn validate_rejects_scripts_and_unknown_fields() {
 }
 
 #[test]
-fn strict_policy_fails_linux_compile() {
+fn strict_policy_fails_ip_only_linux_compile_but_compiles_with_the_session_proxy() {
     let strict = repo().join("conformance/policies/home-strict.toml");
-    let o = run(&["validate", strict.to_str().unwrap(), "--adapter", "linux"]);
+    let o = run(&["validate", strict.to_str().unwrap(), "--adapter", "linux-ip-only"]);
     assert_eq!(o.status.code(), Some(2), "{}", s(&o));
     assert!(s(&o).contains("DOES NOT COMPILE"));
+    let o = run(&["validate", strict.to_str().unwrap(), "--adapter", "linux"]);
+    assert!(o.status.success(), "{}", s(&o));
+    let udp = repo().join("conformance/policies/home-proxy-udp-deny.toml");
+    let o = run(&["validate", udp.to_str().unwrap(), "--adapter", "linux"]);
+    assert_eq!(o.status.code(), Some(2), "{}", s(&o));
+    assert!(s(&o).contains("TCP only"), "{}", s(&o));
 }
 
 #[test]

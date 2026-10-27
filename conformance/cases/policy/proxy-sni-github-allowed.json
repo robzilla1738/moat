@@ -1,0 +1,36 @@
+{
+  "schema": "moat.conformance.policy_case.v1",
+  "name": "proxy-sni-github-allowed",
+  "description": "Session egress proxy read the TLS SNI api.github.com and resolved it to a public address.",
+  "policy": "../../policies/home.toml",
+  "flow": {
+    "id": "c",
+    "device_id": "omarchy",
+    "user": "robert",
+    "app": {
+      "family": "git",
+      "executable": "/usr/bin/git"
+    },
+    "ancestry_complete": true,
+    "remote_ip": "140.82.113.6",
+    "remote_port": 443,
+    "transport": "tcp",
+    "at": "2026-10-26T12:00:00Z",
+    "hostname": {
+      "name": "api.github.com",
+      "source": "sni",
+      "confidence": "medium"
+    },
+    "session": {
+      "id": "sess-1",
+      "profile": "coding-session",
+      "boundary": "linux_cgroup",
+      "verified": true
+    }
+  },
+  "expect": {
+    "verdict": "allow",
+    "winner": "rule:coding-allow-github",
+    "permitted_by_observation": false
+  }
+}

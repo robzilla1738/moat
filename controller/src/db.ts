@@ -37,6 +37,11 @@ export const CONTROL_MIGRATIONS: string[] = [
    CREATE TABLE dns_observations (id INTEGER PRIMARY KEY AUTOINCREMENT, resolver TEXT NOT NULL, client TEXT NOT NULL, name TEXT NOT NULL, qtype TEXT, answer_status TEXT, blocked INTEGER NOT NULL, at TEXT NOT NULL, UNIQUE (resolver, client, name, at));
    CREATE TABLE feed_cursor (name TEXT PRIMARY KEY, last_seq INTEGER NOT NULL);
    CREATE TABLE device_actions (id TEXT PRIMARY KEY, device_id TEXT NOT NULL, kind TEXT NOT NULL, args TEXT NOT NULL, created_at TEXT NOT NULL, delivered_at TEXT, done_at TEXT);`,
+  // 2: timed trial revisions on endpoints (trial → confirmed | rolled_back).
+  `CREATE TABLE device_revisions_v2 (device_id TEXT NOT NULL, revision INTEGER NOT NULL, state TEXT NOT NULL CHECK (state IN ('approved','distributed','received','applied','verified','rejected','trial','confirmed','rolled_back')), at TEXT NOT NULL, detail TEXT, PRIMARY KEY (device_id, revision, state));
+   INSERT INTO device_revisions_v2 SELECT * FROM device_revisions;
+   DROP TABLE device_revisions;
+   ALTER TABLE device_revisions_v2 RENAME TO device_revisions;`,
 ];
 
 export function openDb(path: string, migrations: string[]): DB {

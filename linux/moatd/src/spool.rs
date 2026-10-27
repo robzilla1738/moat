@@ -82,6 +82,40 @@ pub enum Event {
         active: bool,
         by_uid: u32,
     },
+    /// A revision was installed on trial: it reverts to `fallback_revision` at `deadline` unless confirmed.
+    PolicyTrialStarted {
+        revision: u64,
+        fallback_revision: u64,
+        deadline: DateTime<Utc>,
+    },
+    /// The trial revision was confirmed locally (root) and stays in force.
+    PolicyTrialConfirmed {
+        revision: u64,
+        by_uid: Option<u32>,
+        how: String,
+    },
+    /// The trial revision was reverted. `to_revision` is the last confirmed revision, reinstalled from local state;
+    /// the replay high-water mark stays at the trial revision.
+    PolicyRolledBack {
+        from_revision: u64,
+        to_revision: u64,
+        reason: String,
+    },
+    /// A rollback could not reinstall the fallback; the trial revision stays in force and the owner must act.
+    PolicyRollbackFailed {
+        revision: u64,
+        reason: String,
+    },
+    /// One connection decided by the session egress proxy (TCP inside a protected session). `attempt` is a
+    /// moat-core FlowAttempt whose hostname evidence names its source (sni / connect_proxy / http_host); `decision`
+    /// carries verdict, winning rule and profile. No payload is inspected beyond the first TLS record or HTTP header.
+    Flow {
+        attempt: serde_json::Value,
+        decision: serde_json::Value,
+        measurement_source: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        transfer: Option<serde_json::Value>,
+    },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]

@@ -18,9 +18,11 @@ use moat_core::signing::{verify_snapshot, verifying_key_from_hex, SignedSnapshot
 use serde::{Deserialize, Serialize};
 
 use crate::cgroup::{Cgroups, SessionCgroup};
-use crate::nft::{self, CgroupLayout, NftBackend, RenderReport};
+use crate::nft::{self, CgroupLayout, NftBackend, ProxiedSession, ProxyLayout, RenderReport};
+use crate::proxy::{ProxyManager, ProxyPolicy};
 use crate::recovery::RecoveryState;
 use crate::spool::{Event, Spool};
+use crate::trial::{self, TrialState};
 
 pub const CURRENT: &str = "current.signed.json";
 
@@ -49,6 +51,15 @@ pub struct Status {
     pub last_rejection: Option<String>,
     pub skipped_allows: Vec<(String, String)>,
     pub spool_next_seq: u64,
+    /// A revision on trial: reverts to `fallback_revision` at `deadline` unless confirmed.
+    #[serde(default)]
+    pub trial: Option<TrialState>,
+    /// Live sessions whose TCP goes through the session egress proxy, with their loopback listener port.
+    #[serde(default)]
+    pub egress_proxy: BTreeMap<String, u16>,
+    /// Session profiles that are proxied under the installed revision.
+    #[serde(default)]
+    pub proxied_profiles: Vec<String>,
 }
 
 pub struct Endpoint<B: NftBackend> {
@@ -74,6 +85,8 @@ pub struct Endpoint<B: NftBackend> {
     rendered_sessions: Vec<String>,
     isolation_installed: Option<Vec<ipnet::IpNet>>,
     uid_of: fn(&str) -> Option<u32>,
+    trial: Option<TrialState>,
+    pub proxy: Option<ProxyManager>,
 }
 
 pub fn lookup_uid(name: &str) -> Option<u32> {
@@ -115,6 +128,8 @@ impl<B: NftBackend> Endpoint<B> {
             rendered_sessions: Vec::new(),
             isolation_installed: None,
             uid_of: lookup_uid,
+            trial: None,
+            proxy: None,
         }
     }
 
@@ -123,11 +138,78 @@ impl<B: NftBackend> Endpoint<B> {
         self
     }
 
+    /// Run the session egress proxy (only takes effect when the advertisement keeps `session_hostname_proxy`).
+    pub fn with_proxy(mut self, m: ProxyManager) -> Self {
+        self.proxy = Some(m);
+        self
+    }
+
+    fn proxy_enabled(&self) -> bool {
+        self.proxy.is_some()
+            && self.adv.has(Capability::SessionHostnameProxy)
+            && self.adv.support(Capability::SessionEnforcement) != Support::Unsupported
+    }
+
     fn layout(&self) -> CgroupLayout {
-        CgroupLayout {
-            root_name: self.cgroups.root_name.clone(),
-            mount: self.cgroups.mount.clone(),
-            sessions_enabled: self.adv.support(Capability::SessionEnforcement) != Support::Unsupported,
+        let sessions_enabled = self.adv.support(Capability::SessionEnforcement) != Support::Unsupported;
+        let proxy = match (&self.proxy, self.proxy_enabled()) {
+            (Some(m), true) => Some(ProxyLayout {
+                ports: m.ports,
+                sessions: m
+                    .sessions
+                    .iter()
+                    .map(|(id, p)| ProxiedSession { id: id.clone(), profile: p.session.profile.clone(), port: p.port })
+                    .collect(),
+            }),
+            _ => None,
+        };
+        CgroupLayout { root_name: self.cgroups.root_name.clone(), mount: self.cgroups.mount.clone(), sessions_enabled, proxy }
+    }
+
+    /// Session ids the ruleset depends on: registered sessions plus sessions whose proxy is being set up.
+    fn live_ids(&self) -> Vec<String> {
+        let mut v: Vec<String> = self.sessions.keys().cloned().collect();
+        if let Some(m) = &self.proxy {
+            v.extend(m.sessions.keys().cloned());
+        }
+        v.sort();
+        v.dedup();
+        v
+    }
+
+    /// Before a session's workload starts: if its profile is proxied, open its listener and install the redirect,
+    /// so its very first connection already goes through the proxy. Returns the listener port.
+    pub fn prepare_session_proxy(&mut self, id: &str, profile: &str) -> Result<Option<u16>, String> {
+        if !self.proxy_enabled() {
+            return Ok(None);
+        }
+        let proxied = self.current.as_ref().map(|c| c.2.proxied_profiles.iter().any(|p| p == profile)).unwrap_or(false);
+        if !proxied {
+            return Ok(None);
+        }
+        let port = self.proxy.as_mut().unwrap().open(id, profile)?;
+        self.reconcile();
+        if self.installed.is_some() && self.rendered_sessions.iter().any(|s| s == id) {
+            Ok(Some(port))
+        } else {
+            self.close_session_proxy(id);
+            Err(format!(
+                "could not install the egress-proxy redirect for this session: {}",
+                self.last_rejection.clone().unwrap_or_else(|| "ruleset not applied".into())
+            ))
+        }
+    }
+
+    pub fn close_session_proxy(&mut self, id: &str) {
+        if let Some(m) = self.proxy.as_mut() {
+            m.close(id);
+        }
+    }
+
+    fn drain_proxy_events(&mut self) {
+        let evs = self.proxy.as_ref().map(|m| m.shared.drain_events()).unwrap_or_default();
+        for e in evs {
+            self.spool.append(e);
         }
     }
 
@@ -155,6 +237,11 @@ impl<B: NftBackend> Endpoint<B> {
                 Err(e) => self.last_rejection = Some(format!("stored snapshot unreadable: {e}")),
             }
         }
+        // The replay high-water mark survives rollbacks and restarts.
+        if let Some(mark) = trial::load_replay_mark(&self.state_dir) {
+            self.last_applied = Some(self.last_applied.unwrap_or(0).max(mark));
+        }
+        self.trial = TrialState::load(&self.state_dir);
         self.reconcile();
     }
 
@@ -184,6 +271,8 @@ impl<B: NftBackend> Endpoint<B> {
             self.spool.append(Event::LocalIsolation { active: rec.isolation.active, by_uid: rec.changed_by_uid.unwrap_or(0) });
         }
         self.recovery = rec;
+        self.drain_proxy_events();
+        self.tick_trial(Utc::now());
         // Isolation first: it is independent of policy and of the disable switch.
         if self.recovery.isolation.active {
             let want = self.recovery.isolation.keep.clone();
@@ -216,7 +305,7 @@ impl<B: NftBackend> Endpoint<B> {
             return;
         };
         let snap = snap.clone();
-        let sessions_now: Vec<String> = self.sessions.keys().cloned().collect();
+        let sessions_now: Vec<String> = self.live_ids();
         let due = self.rerender_at.map(|t| t <= Utc::now()).unwrap_or(false);
         if self.installed == Some(snap.revision) && !due && sessions_now == self.rendered_sessions {
             if self.backend.list_json(nft::TABLE).is_ok() {
@@ -253,12 +342,52 @@ impl<B: NftBackend> Endpoint<B> {
         self.backend.apply(&rules).map_err(|e| format!("nft apply failed: {e}"))?;
         self.installed = Some(snap.revision);
         self.rerender_at = nft::next_expiry(snap, Utc::now());
-        self.rendered_sessions = self.sessions.keys().cloned().collect();
+        self.rendered_sessions = self.live_ids();
+        if let Some(m) = &self.proxy {
+            m.set_policy(Some(ProxyPolicy { policy: snap.policy.clone(), device_id: self.device_id.clone(), revision: snap.revision }));
+        }
         Ok(rep)
     }
 
     /// Offer a new signed snapshot. Atomic: on any failure the previous revision stays in force.
     pub fn offer(&mut self, signed: SignedSnapshot) -> Result<u64, String> {
+        self.offer_with(signed, None)
+    }
+
+    /// The revision a trial would fall back to: the last confirmed one.
+    fn confirmed_revision(&self) -> Option<u64> {
+        if self.trial.is_some() {
+            Self::read_signed(&self.state_dir.join(trial::LAST_GOOD)).and_then(|s| Self::decode_revision(&s))
+        } else {
+            self.current.as_ref().map(|c| c.1.revision)
+        }
+    }
+
+    fn read_signed(p: &Path) -> Option<SignedSnapshot> {
+        fs::read_to_string(p).ok().and_then(|t| serde_json::from_str(&t).ok())
+    }
+
+    fn decode_revision(s: &SignedSnapshot) -> Option<u64> {
+        use base64::Engine;
+        let bytes = base64::engine::general_purpose::STANDARD.decode(&s.payload).ok()?;
+        let v: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+        v["revision"].as_u64()
+    }
+
+    /// Offer a snapshot, optionally on trial for `trial_secs` seconds (reverts unless confirmed).
+    pub fn offer_with(&mut self, signed: SignedSnapshot, trial_secs: Option<u64>) -> Result<u64, String> {
+        let fallback = self.confirmed_revision();
+        if trial_secs.is_some() && fallback.is_none() {
+            let e = "a trial needs a confirmed revision to fall back to; apply the first revision without --trial-secs".to_string();
+            self.last_rejection = Some(e.clone());
+            self.spool.append(Event::PolicyRejected { reason: e.clone(), kept_revision: self.last_applied });
+            return Err(e);
+        }
+        if trial_secs == Some(0) {
+            let e = "a trial needs a deadline of at least one second".to_string();
+            self.spool.append(Event::PolicyRejected { reason: e.clone(), kept_revision: self.last_applied });
+            return Err(e);
+        }
         let res = (|| {
             let snap = verify_snapshot(&signed, &self.trust, Platform::Linux, self.last_applied, Utc::now()).map_err(|e| e.to_string())?;
             let (_, rep) = nft::render(&snap, &self.device_id, &self.layout(), &self.uid_of).map_err(|e| e.0)?;
@@ -270,6 +399,11 @@ impl<B: NftBackend> Endpoint<B> {
         match res {
             Ok((snap, rep)) => {
                 let rev = snap.revision;
+                // Keep the confirmed revision we are replacing as the rollback target (not while a trial is
+                // pending: then the target stays the revision confirmed before the trial).
+                if self.trial.is_none() && self.current.is_some() {
+                    let _ = fs::copy(self.state_dir.join(CURRENT), self.state_dir.join(trial::LAST_GOOD));
+                }
                 let tmp = self.state_dir.join(format!("{CURRENT}.tmp"));
                 fs::write(&tmp, serde_json::to_vec_pretty(&signed).unwrap()).map_err(|e| e.to_string())?;
                 fs::rename(&tmp, self.state_dir.join(CURRENT)).map_err(|e| e.to_string())?;
@@ -280,9 +414,38 @@ impl<B: NftBackend> Endpoint<B> {
                     skipped_allows: rep.skipped_allows.iter().map(|(id, _)| id.clone()).collect(),
                 });
                 self.last_applied = Some(rev);
+                let _ = trial::save_replay_mark(&self.state_dir, rev);
                 self.current = Some((signed, snap, rep));
                 if !self.recovery.enforcement_disabled {
                     self.set_enforcement(true, "policy enforced");
+                }
+                match trial_secs {
+                    Some(secs) => {
+                        let now = Utc::now();
+                        let t = TrialState {
+                            revision: rev,
+                            fallback_revision: fallback.unwrap_or(0),
+                            started_at: now,
+                            deadline: now + chrono::Duration::seconds(secs.min(7 * 24 * 3600) as i64),
+                            confirmed: false,
+                            revert_now: false,
+                            changed_by_uid: None,
+                        };
+                        let _ = t.save(&self.state_dir);
+                        self.spool.append(Event::PolicyTrialStarted {
+                            revision: rev,
+                            fallback_revision: t.fallback_revision,
+                            deadline: t.deadline,
+                        });
+                        self.trial = Some(t);
+                    }
+                    None => {
+                        // A revision applied without a trial ends any pending trial: the new revision is confirmed,
+                        // the earlier trial revision was never confirmed and is no longer installed.
+                        if self.trial.take().is_some() {
+                            TrialState::clear(&self.state_dir);
+                        }
+                    }
                 }
                 Ok(rev)
             }
@@ -290,6 +453,67 @@ impl<B: NftBackend> Endpoint<B> {
                 self.last_rejection = Some(e.clone());
                 self.spool.append(Event::PolicyRejected { reason: e.clone(), kept_revision: self.last_applied });
                 Err(e)
+            }
+        }
+    }
+
+    /// End or revert a pending trial. Reads the trial file each time so `moatd recover confirm|rollback` (root,
+    /// local) takes effect on the next tick, and also when it was written while the daemon was stopped.
+    pub fn tick_trial(&mut self, now: DateTime<Utc>) {
+        let Some(t) = TrialState::load(&self.state_dir) else {
+            self.trial = None;
+            return;
+        };
+        if t.confirmed {
+            TrialState::clear(&self.state_dir);
+            self.trial = None;
+            self.spool.append(Event::PolicyTrialConfirmed {
+                revision: t.revision,
+                by_uid: t.changed_by_uid,
+                how: "moatd recover confirm".into(),
+            });
+            return;
+        }
+        if !t.due(now) {
+            self.trial = Some(t);
+            return;
+        }
+        let reason = if t.revert_now {
+            "local rollback (moatd recover rollback)".to_string()
+        } else {
+            format!("trial not confirmed before {}", t.deadline.to_rfc3339())
+        };
+        TrialState::clear(&self.state_dir);
+        self.trial = None;
+        let res = (|| {
+            let signed = Self::read_signed(&self.state_dir.join(trial::LAST_GOOD)).ok_or("the last confirmed snapshot is missing")?;
+            let at = Self::decode_issued_at(&signed).unwrap_or(now);
+            let snap = verify_snapshot(&signed, &self.trust, Platform::Linux, None, at).map_err(|e| e.to_string())?;
+            let (_, rep) = nft::render(&snap, &self.device_id, &self.layout(), &self.uid_of).map_err(|e| e.0)?;
+            if !self.recovery.enforcement_disabled {
+                self.install(&snap)?;
+            }
+            Ok::<_, String>((signed, snap, rep))
+        })();
+        match res {
+            Ok((signed, snap, rep)) => {
+                let to = snap.revision;
+                let _ = fs::copy(self.state_dir.join(trial::LAST_GOOD), self.state_dir.join(CURRENT));
+                self.spool.append(Event::PolicyRolledBack { from_revision: t.revision, to_revision: to, reason: reason.clone() });
+                self.spool.append(Event::PolicyApplied {
+                    revision: to,
+                    rollback_of: Some(t.revision),
+                    policy_digest: snap.policy_digest.clone(),
+                    skipped_allows: rep.skipped_allows.iter().map(|(id, _)| id.clone()).collect(),
+                });
+                self.last_rejection = Some(format!("Rolled back from revision {} to {to} ({reason}).", t.revision));
+                self.current = Some((signed, snap, rep));
+                // last_applied (the replay high-water mark) intentionally stays at the trial revision.
+            }
+            Err(e) => {
+                let why = format!("rollback from revision {} failed: {e}; revision {} stays in force", t.revision, t.revision);
+                self.last_rejection = Some(why.clone());
+                self.spool.append(Event::PolicyRollbackFailed { revision: t.revision, reason: why });
             }
         }
     }
@@ -310,8 +534,12 @@ impl<B: NftBackend> Endpoint<B> {
             let r = fs::read_to_string(&f)
                 .map_err(|e| e.to_string())
                 .and_then(|t| serde_json::from_str::<SignedSnapshot>(&t).map_err(|e| format!("malformed snapshot: {e}")));
+            // A sidecar `<name>.trial` holding a number of seconds puts the revision on trial.
+            let trial_file = f.with_extension("trial");
+            let trial_secs = fs::read_to_string(&trial_file).ok().and_then(|t| t.trim().parse::<u64>().ok());
+            let _ = fs::remove_file(&trial_file);
             out.push(match r {
-                Ok(s) => self.offer(s),
+                Ok(s) => self.offer_with(s, trial_secs),
                 Err(e) => {
                     self.spool.append(Event::PolicyRejected { reason: e.clone(), kept_revision: self.last_applied });
                     Err(e)
@@ -379,6 +607,7 @@ impl<B: NftBackend> Endpoint<B> {
     }
 
     pub fn end_session(&mut self, id: &str, exit_code: Option<i32>, signal: Option<i32>) {
+        self.close_session_proxy(id);
         if let Some((_, cg)) = self.sessions.remove(id) {
             let _ = self.cgroups.close_session(&cg);
             self.spool.append(Event::SessionEnded { session_id: id.into(), exit_code, signal });
@@ -437,6 +666,9 @@ impl<B: NftBackend> Endpoint<B> {
             last_rejection: self.last_rejection.clone(),
             skipped_allows: self.current.as_ref().map(|c| c.2.skipped_allows.clone()).unwrap_or_default(),
             spool_next_seq: self.spool.next_seq(),
+            trial: self.trial.clone(),
+            egress_proxy: self.proxy.as_ref().map(|m| m.sessions.iter().map(|(id, p)| (id.clone(), p.port)).collect()).unwrap_or_default(),
+            proxied_profiles: self.current.as_ref().map(|c| c.2.proxied_profiles.clone()).unwrap_or_default(),
         }
     }
 }
@@ -666,5 +898,143 @@ pub(crate) mod tests {
         ep.offer(signed(&f.key, 1)).unwrap();
         assert!(ep.launch_refusal("coding-session", 1000).unwrap().contains("cannot enforce protected sessions"));
         assert_eq!(ep.status().coverage, "monitoring");
+    }
+
+    fn applied_revision(ep: &Endpoint<FakeNft>) -> String {
+        ep.backend.tables["moat"].lines().next().unwrap_or("").to_string()
+    }
+
+    #[test]
+    fn first_revision_cannot_be_a_trial() {
+        let (f, mut ep) = fixture();
+        ep.startup();
+        let e = ep.offer_with(signed(&f.key, 1), Some(60)).unwrap_err();
+        assert!(e.contains("confirmed revision to fall back to"));
+        assert_eq!(ep.status().revision, None);
+    }
+
+    #[test]
+    fn trial_reverts_unless_confirmed_and_replay_mark_holds() {
+        let (f, mut ep) = fixture();
+        ep.startup();
+        ep.offer(signed(&f.key, 1)).unwrap();
+        ep.offer_with(signed(&f.key, 2), Some(60)).unwrap();
+        let t = ep.status().trial.unwrap();
+        assert_eq!((t.revision, t.fallback_revision), (2, 1));
+        assert!(applied_revision(&ep).contains("revision 2 "));
+        ep.tick_trial(Utc::now() + Duration::seconds(30));
+        assert_eq!(ep.status().revision, Some(2), "not due yet");
+        ep.tick_trial(Utc::now() + Duration::seconds(61));
+        assert_eq!(ep.status().revision, Some(1));
+        assert!(ep.status().trial.is_none());
+        assert!(applied_revision(&ep).contains("revision 1 "), "fallback reinstalled in the kernel");
+        assert!(ep.status().last_rejection.unwrap().contains("Rolled back from revision 2 to 1"));
+        let evs = events(&ep);
+        assert!(evs.iter().any(|e| matches!(e, Event::PolicyTrialStarted { revision: 2, fallback_revision: 1, .. })));
+        assert!(evs.iter().any(|e| matches!(e, Event::PolicyRolledBack { from_revision: 2, to_revision: 1, .. })));
+        assert!(evs.iter().any(|e| matches!(e, Event::PolicyApplied { revision: 1, rollback_of: Some(2), .. })));
+        // the reverted revision cannot be replayed; a newer one is accepted
+        assert!(ep.offer(signed(&f.key, 2)).is_err());
+        assert_eq!(ep.offer(signed(&f.key, 3)).unwrap(), 3);
+        // restart keeps the high-water mark
+        drop(ep);
+        let mut ep2 = make(f.dir.path());
+        ep2.startup();
+        assert!(ep2.offer(signed(&f.key, 3)).is_err());
+    }
+
+    #[test]
+    fn confirmed_trial_stays_and_becomes_the_next_fallback() {
+        let (f, mut ep) = fixture();
+        ep.startup();
+        ep.offer(signed(&f.key, 1)).unwrap();
+        ep.offer_with(signed(&f.key, 2), Some(60)).unwrap();
+        // a second trial while one is pending keeps the original confirmed fallback
+        ep.offer_with(signed(&f.key, 3), Some(60)).unwrap();
+        assert_eq!(ep.status().trial.unwrap().fallback_revision, 1);
+        let mut t = TrialState::load(f.dir.path()).unwrap();
+        t.confirmed = true;
+        t.changed_by_uid = Some(0);
+        t.save(f.dir.path()).unwrap();
+        ep.reconcile();
+        assert!(ep.status().trial.is_none());
+        assert!(events(&ep).iter().any(|e| matches!(e, Event::PolicyTrialConfirmed { revision: 3, by_uid: Some(0), .. })));
+        ep.tick_trial(Utc::now() + Duration::seconds(3600));
+        assert_eq!(ep.status().revision, Some(3));
+        ep.offer_with(signed(&f.key, 4), Some(60)).unwrap();
+        assert_eq!(ep.status().trial.unwrap().fallback_revision, 3);
+        ep.tick_trial(Utc::now() + Duration::seconds(61));
+        assert_eq!(ep.status().revision, Some(3));
+    }
+
+    #[test]
+    fn trial_past_deadline_reverts_on_restart_and_never_touches_isolation() {
+        let (f, mut ep) = fixture();
+        ep.startup();
+        ep.offer(signed(&f.key, 1)).unwrap();
+        ep.offer_with(signed(&f.key, 2), Some(60)).unwrap();
+        let mut rec = RecoveryState::load(f.dir.path());
+        rec.isolation.active = true;
+        rec.save(f.dir.path()).unwrap();
+        ep.reconcile();
+        drop(ep);
+        // the daemon was down past the deadline
+        let mut t = TrialState::load(f.dir.path()).unwrap();
+        t.deadline = Utc::now() - Duration::seconds(1);
+        t.save(f.dir.path()).unwrap();
+        let mut ep2 = make(f.dir.path());
+        ep2.startup();
+        assert_eq!(ep2.status().revision, Some(1));
+        assert!(ep2.status().isolation_active);
+        assert!(ep2.backend.tables.contains_key("moat_local_emergency"));
+        // a non-trial apply ends a pending trial
+        ep2.offer_with(signed(&f.key, 3), Some(60)).unwrap();
+        ep2.offer(signed(&f.key, 4)).unwrap();
+        assert!(ep2.status().trial.is_none());
+        assert!(TrialState::load(f.dir.path()).is_none());
+    }
+
+    #[test]
+    fn local_rollback_request_reverts_now() {
+        let (f, mut ep) = fixture();
+        ep.startup();
+        ep.offer(signed(&f.key, 1)).unwrap();
+        ep.offer_with(signed(&f.key, 2), Some(3600)).unwrap();
+        let mut t = TrialState::load(f.dir.path()).unwrap();
+        t.revert_now = true;
+        t.save(f.dir.path()).unwrap();
+        ep.reconcile();
+        assert_eq!(ep.status().revision, Some(1));
+        assert!(events(&ep).iter().any(|e| matches!(e, Event::PolicyRolledBack { reason, .. } if reason.contains("local rollback"))));
+    }
+
+    #[test]
+    fn proxied_sessions_get_a_listener_and_redirect_before_launch() {
+        let (f, mut ep) = fixture();
+        let shared = std::sync::Arc::new(crate::proxy::Shared::new(Box::new(crate::proxy::system_resolver)));
+        ep = ep.with_proxy(ProxyManager::new(shared, (25000, 25050)));
+        ep.startup();
+        ep.offer(signed(&f.key, 1)).unwrap();
+        assert_eq!(ep.status().proxied_profiles, vec!["coding-session".to_string()]);
+        // not proxied: no hostname rules in this profile
+        assert_eq!(ep.prepare_session_proxy("x0", "local-inference").unwrap(), None);
+        fs::create_dir_all(f.dir.path().join("cg/moat.slice/p-coding-session/s-x1")).unwrap();
+        let port = ep.prepare_session_proxy("x1", "coding-session").unwrap().unwrap();
+        assert!((25000..=25050).contains(&port));
+        let t = &ep.backend.tables["moat"];
+        assert!(t.contains(&format!("redirect to :{port}")), "{t}");
+        assert_eq!(ep.status().egress_proxy.get("x1"), Some(&port));
+        // the listener is real
+        assert!(std::net::TcpStream::connect(("127.0.0.1", port)).is_ok());
+        ep.end_session("x1", Some(0), None);
+        assert!(ep.status().egress_proxy.is_empty());
+        ep.reconcile();
+        assert!(!ep.backend.tables["moat"].contains("redirect to"));
+        // without the capability (probe downgraded it), nothing is proxied and hostname allows are left out
+        ep.adv = CapabilityAdvertisement::linux_nftables_cgroup_ip_only();
+        ep.offer(signed(&f.key, 2)).unwrap();
+        assert!(ep.status().proxied_profiles.is_empty());
+        assert!(ep.status().skipped_allows.iter().any(|(id, _)| id == "coding-allow-github"));
+        assert_eq!(ep.prepare_session_proxy("x2", "coding-session").unwrap(), None);
     }
 }

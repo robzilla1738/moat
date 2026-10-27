@@ -16,6 +16,12 @@ pub struct HostFacts {
     /// A `socket cgroupv2` expression passed `nft -c`.
     pub socket_cgroupv2: bool,
     pub cgroup_kill: bool,
+    /// An `output` nat chain with `redirect to :port` passed `nft -c` (needed by the session egress proxy).
+    #[serde(default)]
+    pub nat_redirect: bool,
+    /// The operator turned the session egress proxy off (`moatd run --no-egress-proxy`).
+    #[serde(default)]
+    pub egress_proxy_disabled: bool,
     /// Why the `socket cgroupv2` probe failed, verbatim from nft, if it did.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub probe_error: Option<String>,
@@ -66,8 +72,26 @@ pub fn gather(cgroup_mount: &Path, moat_root: &str, nft: &str) -> HostFacts {
             }
         }
     };
+    let nat_redirect = netfilter_usable
+        && {
+            let test = "table inet moat_probe_nat {\n  chain n {\n    type nat hook output priority -100; policy accept;\n    meta l4proto tcp ip daddr 192.0.2.1 redirect to :15000\n  }\n}\n";
+            let mut c = Command::new(nft);
+            c.args(["-c", "-f", "-"])
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null());
+            c.spawn()
+                .map(|mut ch| {
+                    use std::io::Write;
+                    let _ = ch.stdin.take().unwrap().write_all(test.as_bytes());
+                    ch.wait().map(|s| s.success()).unwrap_or(false)
+                })
+                .unwrap_or(false)
+        };
     HostFacts {
         kernel: kernel_release(),
+        nat_redirect,
+        egress_proxy_disabled: false,
         cgroup2: crate::cgroup::is_cgroup2(cgroup_mount),
         nft_binary,
         netfilter_usable,
@@ -109,6 +133,13 @@ pub fn advertise(facts: &HostFacts) -> CapabilityAdvertisement {
         );
         downgrade(&mut adv, Capability::SessionEnforcement, &why);
     }
+    if adv.support(Capability::SessionEnforcement) == Support::Unsupported {
+        downgrade(&mut adv, Capability::SessionHostnameProxy, "no protected-session boundary on this host");
+    } else if facts.egress_proxy_disabled {
+        downgrade(&mut adv, Capability::SessionHostnameProxy, "session egress proxy disabled (moatd run --no-egress-proxy)");
+    } else if !facts.nat_redirect {
+        downgrade(&mut adv, Capability::SessionHostnameProxy, "nftables nat 'redirect' unavailable on this kernel");
+    }
     adv.advertised_at = Some(chrono::Utc::now());
     adv
 }
@@ -126,10 +157,17 @@ mod tests {
             netfilter_usable: true,
             socket_cgroupv2: true,
             cgroup_kill: true,
+            nat_redirect: true,
+            egress_proxy_disabled: false,
             probe_error: None,
         };
         let a = advertise(&f);
         assert_eq!(a.support(Capability::SessionEnforcement), Support::Supported);
+        assert_eq!(a.support(Capability::SessionHostnameProxy), Support::Untested);
+        let off = advertise(&HostFacts { egress_proxy_disabled: true, ..f.clone() });
+        assert_eq!(off.support(Capability::SessionHostnameProxy), Support::Unsupported);
+        let no_nat = advertise(&HostFacts { nat_redirect: false, ..f.clone() });
+        assert_eq!(no_nat.support(Capability::SessionHostnameProxy), Support::Unsupported);
         assert_eq!(a, {
             let mut b = CapabilityAdvertisement::linux_nftables_cgroup();
             b.advertised_at = a.advertised_at;
@@ -156,10 +194,13 @@ mod tests {
             netfilter_usable: true,
             socket_cgroupv2: false,
             cgroup_kill: false,
+            nat_redirect: true,
+            egress_proxy_disabled: false,
             probe_error: None,
         };
         let a = advertise(&f);
         assert_eq!(a.support(Capability::SessionEnforcement), Support::Unsupported);
+        assert_eq!(a.support(Capability::SessionHostnameProxy), Support::Unsupported);
         assert_eq!(a.support(Capability::UserEnforcement), Support::Supported);
     }
 }

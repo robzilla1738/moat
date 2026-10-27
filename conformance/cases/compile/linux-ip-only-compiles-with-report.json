@@ -1,8 +1,8 @@
 {
   "schema": "moat.conformance.compile_case.v1",
-  "name": "linux-compiles-with-report",
+  "name": "linux-ip-only-compiles-with-report",
   "policy": "../../policies/home.toml",
-  "adapter": "linux",
+  "adapter": "linux-ip-only",
   "expect": {
     "compiles": true,
     "omitted_contains": [

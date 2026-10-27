@@ -1,0 +1,30 @@
+{
+  "schema": "moat.conformance.policy_case.v1",
+  "name": "proxy-no-sni-denied",
+  "description": "TLS without SNI (or a server-first protocol): no hostname evidence, so hostname allows cannot match and the profile default applies.",
+  "policy": "../../policies/home.toml",
+  "flow": {
+    "id": "c",
+    "device_id": "omarchy",
+    "user": "robert",
+    "app": {
+      "family": "git",
+      "executable": "/usr/bin/git"
+    },
+    "ancestry_complete": true,
+    "remote_ip": "140.82.113.6",
+    "remote_port": 443,
+    "transport": "tcp",
+    "at": "2026-10-26T12:00:00Z",
+    "session": {
+      "id": "sess-1",
+      "profile": "coding-session",
+      "boundary": "linux_cgroup",
+      "verified": true
+    }
+  },
+  "expect": {
+    "verdict": "deny",
+    "winner": "profile:coding-session"
+  }
+}

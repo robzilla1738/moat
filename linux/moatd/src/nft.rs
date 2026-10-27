@@ -38,11 +38,28 @@ pub struct CgroupLayout {
     /// False when this host cannot enforce protected sessions: no session chains are rendered (and the launcher
     /// refuses sessions), so the ruleset never references cgroups that nftables cannot resolve.
     pub sessions_enabled: bool,
+    /// Session egress proxy, when this host runs it: hostname rules in session chains are then enforced by the
+    /// proxy (TCP only) instead of being left out.
+    pub proxy: Option<ProxyLayout>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ProxyLayout {
+    /// Loopback port range the session listeners use (outside the ephemeral range).
+    pub ports: (u16, u16),
+    pub sessions: Vec<ProxiedSession>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProxiedSession {
+    pub id: String,
+    pub profile: String,
+    pub port: u16,
 }
 
 impl Default for CgroupLayout {
     fn default() -> Self {
-        CgroupLayout { root_name: "moat.slice".into(), mount: "/sys/fs/cgroup".into(), sessions_enabled: true }
+        CgroupLayout { root_name: "moat.slice".into(), mount: "/sys/fs/cgroup".into(), sessions_enabled: true, proxy: None }
     }
 }
 
@@ -76,6 +93,9 @@ pub struct RenderReport {
     pub session_profiles: Vec<String>,
     /// Facts the UI should show next to this device's coverage.
     pub notes: Vec<String>,
+    /// Session profiles whose TCP goes through the session egress proxy (they have hostname rules).
+    #[serde(default)]
+    pub proxied_profiles: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -127,15 +147,18 @@ struct AddrMatch {
 }
 
 /// Expand destinations into nft address matches. Returns Err(reason) if something cannot be expressed.
-fn expand(policy: &Policy, d: &Destinations, depth: u8) -> Result<Vec<AddrMatch>, String> {
+/// With `via_proxy`, hostname (and hostname-based provider) destinations are left to the session egress proxy and
+/// produce no nftables match here.
+fn expand(policy: &Policy, d: &Destinations, depth: u8, via_proxy: bool) -> Result<Vec<AddrMatch>, String> {
     let mut out = Vec::new();
     if d.any {
         return Ok(vec![AddrMatch { v6: false, include: vec![], exclude: vec![] }]);
     }
-    if !d.hosts.is_empty() {
+    if !d.hosts.is_empty() && !via_proxy {
         return Err(format!("hostname destinations ({}) need hostname enforcement, which nftables lacks", d.hosts.join(", ")));
     }
-    if !d.providers.is_empty() {
+    let ip_providers = d.providers.iter().any(|p| p.mode == moat_core::policy::ProviderMode::KnownIps);
+    if !d.providers.is_empty() && (!via_proxy || ip_providers) {
         return Err("provider destinations need a loaded provider IP dataset; not rendered on this adapter yet".into());
     }
     let (mut v4, mut v6): (Vec<String>, Vec<String>) = (vec![], vec![]);
@@ -164,7 +187,7 @@ fn expand(policy: &Policy, d: &Destinations, depth: u8) -> Result<Vec<AddrMatch>
     if depth == 0 {
         for name in &d.sets {
             let set = policy.destination_sets.get(name).ok_or_else(|| format!("unknown destination set {name}"))?;
-            let sub = expand(policy, &set.destinations, 1).map_err(|e| format!("set {name}: {e}"))?;
+            let sub = expand(policy, &set.destinations, 1, via_proxy).map_err(|e| format!("set {name}: {e}"))?;
             out.extend(sub);
         }
     }
@@ -201,7 +224,7 @@ fn comment(s: &str) -> String {
 }
 
 /// Render the nft lines (without chain wrapper) for one rule. `uid_of` resolves policy user names.
-fn rule_lines(policy: &Policy, r: &Rule, uid_of: &dyn Fn(&str) -> Option<u32>) -> Result<Vec<String>, String> {
+fn rule_lines(policy: &Policy, r: &Rule, uid_of: &dyn Fn(&str) -> Option<u32>, via_proxy: bool) -> Result<Vec<String>, String> {
     if !r.selector.apps.is_empty() || !r.selector.ancestors.is_empty() {
         return Err("app/ancestor selectors need per-app enforcement, which nftables lacks".into());
     }
@@ -215,7 +238,7 @@ fn rule_lines(policy: &Policy, r: &Rule, uid_of: &dyn Fn(&str) -> Option<u32>) -
     }
     let l4m = l4(r.transport, &r.ports);
     let mut lines = Vec::new();
-    for m in expand(policy, &r.destinations, 0)? {
+    for m in expand(policy, &r.destinations, 0, via_proxy)? {
         let fam = if m.v6 { "ip6" } else { "ip" };
         let mut addr = String::new();
         if !m.include.is_empty() {
@@ -257,10 +280,11 @@ fn push_rules(
     uid_of: &dyn Fn(&str) -> Option<u32>,
     report: &mut RenderReport,
     session_scope: Option<(&CgroupLayout, &str)>,
+    via_proxy: bool,
 ) -> Result<(), RenderError> {
     for r in rules {
         let ids: &[String] = r.selector.session.as_ref().map(|s| s.session_ids.as_slice()).unwrap_or(&[]);
-        match rule_lines(policy, r, uid_of) {
+        match rule_lines(policy, r, uid_of, via_proxy) {
             Ok(lines) if !ids.is_empty() => {
                 // Bound to session instances: match the session's own cgroup. Sessions that no longer exist (or
                 // never existed here) are left out; leaving out an allow is stricter.
@@ -334,8 +358,16 @@ pub fn render_at(
             Some(sm) => sm.any_protected || sm.profiles.contains(&prof.id) || (sm.profiles.is_empty() && !sm.session_ids.is_empty()),
             None => true,
         }));
+        // A profile with session-scoped hostname rules sends its TCP through the egress proxy when this host runs it.
+        let proxied = layout.proxy.is_some()
+            && rules
+                .iter()
+                .any(|r| r.selector.session.is_some() && p.implied_capabilities(r).contains(&moat_core::Capability::HostnameEnforcement));
+        if proxied {
+            report.proxied_profiles.push(prof.id.clone());
+        }
         let _ = writeln!(chains, "  chain {} {{", chain_name(&prof.id));
-        push_rules(&mut chains, p, &rules, uid_of, &mut report, Some((layout, &prof.id)))?;
+        push_rules(&mut chains, p, &rules, uid_of, &mut report, Some((layout, &prof.id)), proxied)?;
         let _ = writeln!(chains, "    {}", default_line(prof.default, &prof.id));
         let _ = writeln!(chains, "  }}");
         report.session_profiles.push(prof.id.clone());
@@ -347,6 +379,44 @@ pub fn render_at(
     // add + delete + define in one transaction: atomic replacement, and a failure leaves the old table in place.
     let _ = writeln!(out, "table inet {TABLE}\ndelete table inet {TABLE}\ntable inet {TABLE} {{");
     let _ = writeln!(out, "  chain output {{\n    type filter hook output priority filter; policy accept;");
+    // Session egress proxy plumbing: its upstream connections were already decided with the full policy; each live
+    // proxied session may reach only its own listener; every other use of the proxy port range is refused.
+    let mut nat = String::new();
+    if let Some(px) = &layout.proxy {
+        let _ = writeln!(out, "    meta mark 0x{:08x} counter accept {}", crate::proxy::UPSTREAM_MARK, comment("egress-proxy-upstream"));
+        for s in &px.sessions {
+            if !report.proxied_profiles.contains(&s.profile) {
+                continue;
+            }
+            let rel = layout.session_dir(&s.profile, &s.id);
+            if !layout.exists(&rel) {
+                report.notes.push(format!("egress proxy for session {} not rendered: its cgroup is gone", s.id));
+                continue;
+            }
+            let c = comment(&format!("proxy:{}", s.id));
+            let _ = writeln!(out, "    socket cgroupv2 level 3 \"{rel}\" ip daddr 127.0.0.1 tcp dport {} accept {c}", s.port);
+            let _ = writeln!(out, "    socket cgroupv2 level 3 \"{rel}\" ip6 daddr ::1 tcp dport {} accept {c}", s.port);
+            let _ = writeln!(
+                nat,
+                "    socket cgroupv2 level 3 \"{rel}\" meta nfproto ipv4 meta l4proto tcp ip daddr != 127.0.0.0/8 counter redirect to :{} {c}",
+                s.port
+            );
+            let _ = writeln!(
+                nat,
+                "    socket cgroupv2 level 3 \"{rel}\" meta nfproto ipv6 meta l4proto tcp ip6 daddr != ::1 counter redirect to :{} {c}",
+                s.port
+            );
+        }
+        let (a, b) = px.ports;
+        let _ = writeln!(out, "    ip daddr 127.0.0.0/8 tcp dport {a}-{b} counter reject {}", comment("proxy:not-this-session"));
+        let _ = writeln!(out, "    ip6 daddr ::1 tcp dport {a}-{b} counter reject {}", comment("proxy:not-this-session"));
+        if !report.proxied_profiles.is_empty() {
+            report.notes.push(format!(
+                "hostname rules for {} are enforced for TCP by the session egress proxy (TLS SNI / HTTP CONNECT / HTTP Host, no TLS interception); UDP stays IP-only",
+                report.proxied_profiles.join(", ")
+            ));
+        }
+    }
     for prof in &session_profiles {
         let _ = writeln!(
             out,
@@ -362,7 +432,7 @@ pub fn render_at(
     }
     // Ordinary traffic: rules without a session selector, then the fallback profile default.
     let ordinary = ordered(device_rules.iter().copied().filter(|r| r.selector.session.is_none()));
-    push_rules(&mut out, p, &ordinary, uid_of, &mut report, None)?;
+    push_rules(&mut out, p, &ordinary, uid_of, &mut report, None, false)?;
     let fb = p.profile(&p.fallback_profile).ok_or_else(|| RenderError(format!("fallback profile {} missing", p.fallback_profile)))?;
     if p.profiles.iter().any(|pr| !pr.applies_to.apps.is_empty() || !pr.applies_to.ancestors.is_empty()) {
         report.notes.push(
@@ -371,6 +441,11 @@ pub fn render_at(
     }
     let _ = writeln!(out, "    {}", default_line(fb.default, &fb.id));
     let _ = writeln!(out, "  }}");
+    if layout.proxy.is_some() {
+        let _ = writeln!(out, "  chain proxy_nat {{\n    type nat hook output priority -100; policy accept;");
+        out.push_str(&nat);
+        let _ = writeln!(out, "  }}");
+    }
     out.push_str(&chains);
     let _ = writeln!(out, "}}");
     if fb.default == DefaultAction::Observe {
@@ -501,8 +576,10 @@ pub(crate) mod tests {
         assert!(s.contains("socket cgroupv2 level 2 \"moat.slice/p-coding-session\" jump s_coding_session"));
         assert!(s.contains("socket cgroupv2 level 1 \"moat.slice\" counter reject"));
         assert!(rep.session_profiles.contains(&"local-inference".to_string()));
-        // hostname-based coding allows were omitted at compile time for Linux; nothing renders them.
+        // without the session egress proxy, hostname-based coding allows are left out (stricter) with a report.
         assert!(!s.contains("github"));
+        assert!(rep.skipped_allows.iter().any(|(id, _)| id == "coding-allow-github"));
+        assert!(!s.contains("proxy_nat"));
     }
 
     #[test]
@@ -603,7 +680,7 @@ pub(crate) mod tests {
     #[test]
     fn session_bound_grants_render_only_for_live_sessions_and_expire() {
         let d = tempfile::tempdir().unwrap();
-        let layout = CgroupLayout { root_name: "moat.slice".into(), mount: d.path().into(), sessions_enabled: true };
+        let layout = CgroupLayout { root_name: "moat.slice".into(), mount: d.path().into(), sessions_enabled: true, proxy: None };
         let mut snap = home_snapshot();
         snap.policy = Policy::parse(include_str!("../../../conformance/policies/home-with-grant.toml")).unwrap();
         let before: chrono::DateTime<chrono::Utc> = "2026-10-26T12:30:00Z".parse().unwrap();
@@ -644,5 +721,47 @@ pub(crate) mod tests {
     #[test]
     fn sanitize_blocks_injection() {
         assert_eq!(sanitize("a\"; flush ruleset"), "a---flush-ruleset");
+    }
+
+    #[test]
+    fn session_proxy_redirects_only_its_own_session_and_fences_the_port_range() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(d.path().join("moat.slice/p-coding-session/s-a1")).unwrap();
+        let layout = CgroupLayout {
+            root_name: "moat.slice".into(),
+            mount: d.path().into(),
+            sessions_enabled: true,
+            proxy: Some(ProxyLayout {
+                ports: (15000, 15999),
+                sessions: vec![
+                    ProxiedSession { id: "a1".into(), profile: "coding-session".into(), port: 15000 },
+                    ProxiedSession { id: "gone".into(), profile: "coding-session".into(), port: 15001 },
+                ],
+            }),
+        };
+        let (s, rep) = render(&home_snapshot(), "omarchy", &layout, &uid).unwrap();
+        assert_eq!(rep.proxied_profiles, vec!["coding-session".to_string()], "only profiles with hostname rules");
+        assert!(rep.skipped_allows.is_empty(), "{:?}", rep.skipped_allows);
+        let out = s.split("chain output {").nth(1).unwrap().split("\n  }").next().unwrap();
+        let mark = out.find("meta mark 0x4d4f4154 counter accept").unwrap();
+        let own =
+            out.find("socket cgroupv2 level 3 \"moat.slice/p-coding-session/s-a1\" ip daddr 127.0.0.1 tcp dport 15000 accept").unwrap();
+        let fence = out.find("ip daddr 127.0.0.0/8 tcp dport 15000-15999 counter reject").unwrap();
+        let jump = out.find("jump s_coding_session").unwrap();
+        assert!(mark < own && own < fence && fence < jump, "{out}");
+        assert!(out.contains("ip6 daddr ::1 tcp dport 15000-15999 counter reject"));
+        assert!(!s.contains("s-gone"), "sessions whose cgroup is gone are not referenced");
+        let nat = s.split("chain proxy_nat {").nth(1).unwrap().split("\n  }").next().unwrap();
+        assert!(nat.contains("type nat hook output priority -100"));
+        assert!(nat.contains("socket cgroupv2 level 3 \"moat.slice/p-coding-session/s-a1\" meta nfproto ipv4 meta l4proto tcp ip daddr != 127.0.0.0/8 counter redirect to :15000"));
+        assert!(nat.contains("meta nfproto ipv6 meta l4proto tcp ip6 daddr != ::1 counter redirect to :15000"));
+        // hostname allows produce no nftables match (the proxy enforces them); IP rules and the safety deny remain
+        let chain = s.split("chain s_coding_session {").nth(1).unwrap().split("\n  }").next().unwrap();
+        assert!(!chain.contains("coding-allow-github"));
+        assert!(chain.contains("safety-workloads-never-reach-controller"));
+        assert!(chain.contains("counter reject comment \"default:coding-session\""));
+        assert!(rep.notes.iter().any(|n| n.contains("no TLS interception")));
+        // a profile without hostname rules is not proxied
+        assert!(!nat.contains("p-local-inference"));
     }
 }

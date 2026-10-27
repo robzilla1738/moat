@@ -38,6 +38,8 @@ struct Cli {
 enum Adapter {
     Macos,
     Linux,
+    /// Linux with the session egress proxy off (IP-only).
+    LinuxIpOnly,
     Dns,
 }
 
@@ -46,6 +48,7 @@ impl Adapter {
         match self {
             Adapter::Macos => CapabilityAdvertisement::macos_network_extension(),
             Adapter::Linux => CapabilityAdvertisement::linux_nftables_cgroup(),
+            Adapter::LinuxIpOnly => CapabilityAdvertisement::linux_nftables_cgroup_ip_only(),
             Adapter::Dns => CapabilityAdvertisement::dns_resolver("adguard-home"),
         }
     }
@@ -512,6 +515,7 @@ fn conformance(dir: &Path, o: &mut Out) -> Result<(), String> {
             } else {
                 let adv = match c["adapter"].as_str().unwrap_or("") {
                     "linux" => Adapter::Linux.adv(),
+                    "linux-ip-only" => Adapter::LinuxIpOnly.adv(),
                     "macos" => Adapter::Macos.adv(),
                     _ => Adapter::Dns.adv(),
                 };
@@ -526,10 +530,21 @@ fn conformance(dir: &Path, o: &mut Out) -> Result<(), String> {
                             .filter(|id| !s.report.omitted.iter().any(|o| o.rule_id == *id))
                             .map(String::from)
                             .collect();
-                        if missing.is_empty() {
-                            Ok(())
-                        } else {
+                        let not_kept: Vec<String> = exp
+                            .get("kept_contains")
+                            .and_then(|v| v.as_array())
+                            .into_iter()
+                            .flatten()
+                            .filter_map(|v| v.as_str())
+                            .filter(|id| !s.policy.rules.iter().any(|r| r.id == *id))
+                            .map(String::from)
+                            .collect();
+                        if !missing.is_empty() {
                             Err(format!("not omitted: {missing:?}"))
+                        } else if !not_kept.is_empty() {
+                            Err(format!("not kept: {not_kept:?}"))
+                        } else {
+                            Ok(())
                         }
                     }
                     (Err(_), false) => Ok(()),

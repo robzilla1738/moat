@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::capability::{Capability, CapabilityAdvertisement, Platform, Support};
+use crate::net::Transport;
 use crate::policy::{Action, OnUnsupported, Policy, PolicyError};
 
 pub const SNAPSHOT_SCHEMA: &str = "moat.snapshot.v1";
@@ -123,6 +124,44 @@ pub fn compile(policy: &Policy, adv: &CapabilityAdvertisement, opts: &CompileOpt
                 Support::Supported => {}
             }
         }
+        // Hostname rules scoped to protected sessions can be enforced for TCP by a session egress proxy that reads
+        // the TLS SNI / HTTP CONNECT target (no TLS interception). UDP has no hostname evidence there, so a hostname
+        // deny must be TCP-only (otherwise it would silently not cover UDP); a hostname allow on any transport is
+        // enforced for TCP only, which is stricter, and is reported as a warning.
+        if missing.contains(&Capability::HostnameEnforcement)
+            && r.selector.session.is_some()
+            && adv.has(Capability::SessionHostnameProxy)
+            && missing.iter().all(|c| *c == Capability::HostnameEnforcement)
+        {
+            if r.action == Action::Deny && r.transport != Transport::Tcp {
+                errors.push(PolicyError {
+                    path: format!("rules[{i}]"),
+                    message: format!(
+                        "rule {} denies hostnames on transport {:?}; the {} session proxy sees hostnames for TCP only, \
+                         so set transport = \"tcp\" (refusing to compile a deny that would not cover UDP)",
+                        r.id, r.transport, adv.adapter
+                    ),
+                });
+                continue;
+            }
+            missing.clear();
+            let note = adv.capabilities.get(&Capability::SessionHostnameProxy).and_then(|s| s.note.clone());
+            report.warnings.push(CompileWarning {
+                rule_id: r.id.clone(),
+                capability: Capability::SessionHostnameProxy,
+                support: adv.support(Capability::SessionHostnameProxy),
+                note: Some(match (r.action, r.transport) {
+                    (Action::Allow, t) if t != Transport::Tcp => {
+                        format!("enforced for TCP only (UDP to these hosts stays denied); {}", note.unwrap_or_default())
+                    }
+                    _ => note.unwrap_or_default(),
+                }),
+            });
+            report.required_capabilities.insert(Capability::SessionHostnameProxy);
+            report.required_capabilities.extend(caps.iter().copied().filter(|c| *c != Capability::HostnameEnforcement));
+            out.rules.push(r.clone());
+            continue;
+        }
         if !missing.is_empty() {
             let names: Vec<&str> = missing.iter().map(|c| c.label()).collect();
             if r.on_unsupported == OnUnsupported::SkipWithReport && r.action == Action::Allow {
@@ -197,10 +236,10 @@ mod tests {
         for r in &mut p.rules {
             r.on_unsupported = OnUnsupported::Reject;
         }
-        let errs = compile(&p, &CapabilityAdvertisement::linux_nftables_cgroup(), &opts()).unwrap_err();
+        let errs = compile(&p, &CapabilityAdvertisement::linux_nftables_cgroup_ip_only(), &opts()).unwrap_err();
         assert!(errs.iter().any(|e| e.message.contains("hostname enforcement")));
         // With the shipped policy the hostname allows opt into skip_with_report: stricter, and reported.
-        let s = compile(&home(), &CapabilityAdvertisement::linux_nftables_cgroup(), &opts()).unwrap();
+        let s = compile(&home(), &CapabilityAdvertisement::linux_nftables_cgroup_ip_only(), &opts()).unwrap();
         assert!(s.report.omitted.iter().any(|o| o.rule_id == "coding-allow-github"));
         assert!(s.policy.rules.iter().any(|r| r.id == "safety-workloads-never-reach-controller"));
     }
@@ -218,5 +257,46 @@ mod tests {
         let mut p = home();
         p.fallback_profile = "nope".into();
         assert!(compile(&p, &CapabilityAdvertisement::linux_nftables_cgroup(), &opts()).is_err());
+    }
+
+    #[test]
+    fn session_hostname_rules_use_the_proxy_capability() {
+        let mut p = home();
+        for r in &mut p.rules {
+            r.on_unsupported = OnUnsupported::Reject;
+        }
+        let s = compile(&p, &CapabilityAdvertisement::linux_nftables_cgroup(), &opts()).unwrap();
+        assert!(s.report.omitted.is_empty(), "{:?}", s.report.omitted);
+        assert!(s.policy.rules.iter().any(|r| r.id == "coding-allow-github"));
+        assert!(s.report.required_capabilities.contains(&Capability::SessionHostnameProxy));
+        assert!(!s.report.required_capabilities.contains(&Capability::HostnameEnforcement));
+        let w = s.report.warnings.iter().find(|w| w.rule_id == "coding-allow-github").unwrap();
+        assert_eq!(w.capability, Capability::SessionHostnameProxy);
+        assert_eq!(w.support, Support::Untested);
+        assert!(w.note.as_deref().unwrap().contains("no TLS interception"));
+    }
+
+    fn with_rule(extra: &str) -> Policy {
+        let src = format!("{}\n{extra}", include_str!("../../../conformance/policies/home.toml"));
+        Policy::parse(&src).unwrap()
+    }
+
+    #[test]
+    fn proxy_never_covers_ordinary_traffic_or_udp_denies() {
+        // hostname deny for ordinary traffic: no session, no proxy, rejected
+        let p = with_rule("[[rules]]\nid = \"deny-x\"\naction = \"deny\"\nselector = {}\ndestinations = { hosts = [\"x.example\"] }\nprovenance = { kind = \"git\", reference = \"t\" }\n");
+        let e = compile(&p, &CapabilityAdvertisement::linux_nftables_cgroup(), &opts()).unwrap_err();
+        assert!(e.iter().any(|x| x.message.contains("hostname enforcement")), "{e:?}");
+        // session hostname deny on any transport: rejected with the reason
+        let p = with_rule("[[rules]]\nid = \"deny-y\"\naction = \"deny\"\nselector = { session = { profiles = [\"coding-session\"] } }\ndestinations = { hosts = [\"y.example\"] }\nprovenance = { kind = \"git\", reference = \"t\" }\n");
+        let e = compile(&p, &CapabilityAdvertisement::linux_nftables_cgroup(), &opts()).unwrap_err();
+        assert!(e.iter().any(|x| x.message.contains("TCP only")), "{e:?}");
+        // the same deny restricted to TCP compiles
+        let p = with_rule("[[rules]]\nid = \"deny-y\"\naction = \"deny\"\ntransport = \"tcp\"\nselector = { session = { profiles = [\"coding-session\"] } }\ndestinations = { hosts = [\"y.example\"] }\nprovenance = { kind = \"git\", reference = \"t\" }\n");
+        assert!(compile(&p, &CapabilityAdvertisement::linux_nftables_cgroup(), &opts()).is_ok());
+        // a session hostname allow on any transport compiles with a TCP-only warning
+        let p = with_rule("[[rules]]\nid = \"allow-z\"\naction = \"allow\"\nselector = { session = { profiles = [\"coding-session\"] } }\ndestinations = { hosts = [\"z.example\"] }\nprovenance = { kind = \"git\", reference = \"t\" }\n");
+        let s = compile(&p, &CapabilityAdvertisement::linux_nftables_cgroup(), &opts()).unwrap();
+        assert!(s.report.warnings.iter().any(|w| w.rule_id == "allow-z" && w.note.as_deref().unwrap().contains("TCP only")));
     }
 }

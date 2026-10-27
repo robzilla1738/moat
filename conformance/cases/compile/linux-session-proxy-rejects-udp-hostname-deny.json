@@ -1,0 +1,10 @@
+{
+  "schema": "moat.conformance.compile_case.v1",
+  "name": "linux-session-proxy-rejects-udp-hostname-deny",
+  "policy": "../../policies/home-proxy-udp-deny.toml",
+  "adapter": "linux",
+  "expect": {
+    "compiles": false,
+    "error_contains": "TCP only"
+  }
+}

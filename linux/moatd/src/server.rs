@@ -136,6 +136,27 @@ fn launch<B: NftBackend + Send + 'static>(
                 return;
             }
         };
+        // Proxied profile: open the session's egress-proxy listener and install its redirect before the workload
+        // exists, so no connection can precede it. Tools that honour proxy variables use CONNECT on it directly.
+        let mut env = env;
+        match e.prepare_session_proxy(&id, &profile) {
+            Ok(Some(port)) => {
+                let url = format!("http://127.0.0.1:{port}");
+                env.insert("MOAT_EGRESS_PROXY".into(), url.clone());
+                for k in ["HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"] {
+                    env.entry(k.into()).or_insert_with(|| url.clone());
+                }
+                env.entry("NO_PROXY".into()).or_insert_with(|| "localhost,127.0.0.1,::1".into());
+                env.entry("no_proxy".into()).or_insert_with(|| "localhost,127.0.0.1,::1".into());
+            }
+            Ok(None) => {}
+            Err(reason) => {
+                let _ = e.cgroups.close_session(&cg);
+                e.refuse(&profile, p.uid, &reason);
+                let _ = send(&s, &Reply::Refused { reason }, &[]);
+                return;
+            }
+        }
         let spec = LaunchSpec {
             argv,
             cwd,
@@ -167,6 +188,7 @@ fn launch<B: NftBackend + Send + 'static>(
                 (id, child)
             }
             Err(err) => {
+                e.close_session_proxy(&id);
                 let _ = e.cgroups.close_session(&cg);
                 let reason = format!("launch failed: {err}");
                 e.refuse(&profile, p.uid, &reason);

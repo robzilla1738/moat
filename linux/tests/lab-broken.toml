@@ -1,0 +1,59 @@
+# Trial revision for the netns test: the LAN allow becomes a deny (a "broken" revision that must roll back).
+# Policy for the netns enforcement test (linux/tests/netns-enforcement.sh).
+schema = "moat.policy.v1"
+name = "netns-lab"
+description = "Two protected-session profiles and an observed ordinary profile on a private veth lab."
+fallback_profile = "ordinary"
+
+[destination_sets.admin]
+description = "Stand-in for the controller admin port."
+cidrs = ["10.77.0.2/32", "fd00:77::2/128"]
+
+[[profiles]]
+id = "ordinary"
+default = "observe"
+learning = "observe"
+
+[[profiles]]
+id = "lab-allow"
+default = "deny"
+learning = "restrictive"
+
+[[profiles]]
+id = "lab-hosts"
+description = "Hostname allows enforced by the session egress proxy (TCP: SNI / CONNECT / Host)."
+default = "deny"
+learning = "restrictive"
+
+[[profiles]]
+id = "lab-deny"
+default = "deny"
+learning = "restrictive"
+
+[[rules]]
+id = "safety-admin"
+action = "deny"
+layer = "safety"
+selector = { session = { any_protected = true } }
+destinations = { sets = ["admin"] }
+transport = "tcp"
+ports = [9090]
+provenance = { kind = "built_in", reference = "lab" }
+
+[[rules]]
+id = "lab-lan-tcp"
+action = "deny"
+selector = { session = { profiles = ["lab-allow"] } }
+destinations = { scopes = ["lan"] }
+transport = "tcp"
+ports = ["8000-9999"]
+provenance = { kind = "git", reference = "lab" }
+
+[[rules]]
+id = "lab-hosts-allowed-lab"
+action = "allow"
+selector = { session = { profiles = ["lab-hosts"] } }
+destinations = { hosts = ["allowed.lab"] }
+transport = "tcp"
+ports = [8443, 8081]
+provenance = { kind = "git", reference = "lab" }

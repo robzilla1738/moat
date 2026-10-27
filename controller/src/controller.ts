@@ -219,6 +219,23 @@ export class Controller {
           if (e.kept_revision !== undefined) this.raise({ kind: "policy_rejected", device: d.id, destination: "-", reason: String(e.reason ?? "rejected"), urgency: "high", ref: `seq:${r.seq}`, at: r.at });
           flowRecs.push({ seq: r.seq, at: r.at, kind: "receipt" });
           break;
+        case "policy_trial_started":
+          this.recordRevisionState(d.id, Number(e.revision), "trial", `reverts to ${e.fallback_revision} at ${e.deadline} unless confirmed on the device`);
+          flowRecs.push({ seq: r.seq, at: r.at, kind: "receipt", policy_revision: Number(e.revision) });
+          break;
+        case "policy_trial_confirmed":
+          this.recordRevisionState(d.id, Number(e.revision), "confirmed", String(e.how ?? "confirmed locally"));
+          flowRecs.push({ seq: r.seq, at: r.at, kind: "receipt", policy_revision: Number(e.revision) });
+          break;
+        case "policy_rolled_back":
+          this.recordRevisionState(d.id, Number(e.from_revision), "rolled_back", `to revision ${e.to_revision}: ${e.reason}`);
+          this.raise({ kind: "policy_rolled_back", device: d.id, destination: "-", revision: Number(e.from_revision), reason: `revision ${e.from_revision} was rolled back to ${e.to_revision} on the device (${e.reason})`, urgency: "high", ref: `seq:${r.seq}`, at: r.at });
+          flowRecs.push({ seq: r.seq, at: r.at, kind: "receipt", policy_revision: Number(e.to_revision) });
+          break;
+        case "policy_rollback_failed":
+          this.raise({ kind: "policy_rejected", device: d.id, destination: "-", revision: Number(e.revision), reason: String(e.reason ?? "rollback failed"), urgency: "high", ref: `seq:${r.seq}`, at: r.at });
+          flowRecs.push({ seq: r.seq, at: r.at, kind: "receipt" });
+          break;
         case "rule_counter":
           flowRecs.push({ seq: r.seq, at: r.at, kind: "rule_counter", rule: String(e.rule), packets: Number(e.packets ?? 0), bytes_out: Number(e.bytes ?? 0), counter_scope: String(e.scope ?? "rule"), measurement_source: "nftables rule counter", verdict: String(e.rule).startsWith("default:") || String(e.rule).startsWith("session:") ? "deny" : null });
           if (String(e.rule).startsWith("default:") || String(e.rule).startsWith("session:unknown")) {

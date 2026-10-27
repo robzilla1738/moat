@@ -176,6 +176,8 @@ pub enum HostnameSource {
     ConnectProxy,
     /// TLS SNI observed in cleartext.
     Sni,
+    /// The Host header of a plain-HTTP request, seen by a policy proxy (first request on the connection only).
+    HttpHost,
     /// Correlated from a DNS answer seen shortly before the connection.
     DnsAnswer,
     /// Reverse lookup or cache inference; weakest.

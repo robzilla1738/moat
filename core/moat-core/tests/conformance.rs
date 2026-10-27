@@ -78,6 +78,7 @@ fn compile_cases() {
         let policy = load_policy(&path, c["policy"].as_str().unwrap());
         let adv = match c["adapter"].as_str().unwrap() {
             "linux" => CapabilityAdvertisement::linux_nftables_cgroup(),
+            "linux-ip-only" => CapabilityAdvertisement::linux_nftables_cgroup_ip_only(),
             "macos" => CapabilityAdvertisement::macos_network_extension(),
             "dns_resolver" => CapabilityAdvertisement::dns_resolver("adguard-home"),
             other => panic!("unknown adapter {other}"),
@@ -88,6 +89,13 @@ fn compile_cases() {
             let s = res.unwrap_or_else(|e| panic!("{name}: {e:?}"));
             for id in exp.get("omitted_contains").and_then(|v| v.as_array()).into_iter().flatten() {
                 assert!(s.report.omitted.iter().any(|o| o.rule_id == id.as_str().unwrap()), "{name}: {id} not omitted");
+            }
+            for id in exp.get("kept_contains").and_then(|v| v.as_array()).into_iter().flatten() {
+                assert!(s.policy.rules.iter().any(|r| r.id == id.as_str().unwrap()), "{name}: {id} not kept");
+                assert!(!s.report.omitted.iter().any(|o| o.rule_id == id.as_str().unwrap()), "{name}: {id} omitted");
+            }
+            for id in exp.get("warned_contains").and_then(|v| v.as_array()).into_iter().flatten() {
+                assert!(s.report.warnings.iter().any(|w| w.rule_id == id.as_str().unwrap()), "{name}: {id} not warned");
             }
             for id in exp.get("unavailable_profiles_contains").and_then(|v| v.as_array()).into_iter().flatten() {
                 assert!(s.report.unavailable_session_profiles.iter().any(|o| o == id.as_str().unwrap()), "{name}");

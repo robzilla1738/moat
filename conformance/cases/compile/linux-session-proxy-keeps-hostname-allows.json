@@ -1,0 +1,11 @@
+{
+  "schema": "moat.conformance.compile_case.v1",
+  "name": "linux-session-proxy-keeps-hostname-allows",
+  "policy": "../../policies/home-strict.toml",
+  "adapter": "linux",
+  "expect": {
+    "compiles": true,
+    "kept_contains": ["coding-allow-github", "coding-allow-npm", "coding-allow-anthropic"],
+    "warned_contains": ["coding-allow-github"]
+  }
+}

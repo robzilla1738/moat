@@ -37,10 +37,13 @@ pub enum Capability {
     Ipv6Enforcement,
     /// Enforce UDP (including QUIC), not just TCP.
     UdpEnforcement,
+    /// Enforce hostname rules for TCP inside protected sessions through a local policy proxy that reads the TLS SNI,
+    /// an HTTP CONNECT target or a plain-HTTP Host header. No TLS interception; UDP has no hostname evidence.
+    SessionHostnameProxy,
 }
 
 impl Capability {
-    pub const ALL: [Capability; 12] = [
+    pub const ALL: [Capability; 13] = [
         Capability::ProcessIdentity,
         Capability::AncestorAttribution,
         Capability::AppEnforcement,
@@ -53,6 +56,7 @@ impl Capability {
         Capability::TelemetryCompleteness,
         Capability::Ipv6Enforcement,
         Capability::UdpEnforcement,
+        Capability::SessionHostnameProxy,
     ];
 
     pub fn label(&self) -> &'static str {
@@ -69,6 +73,7 @@ impl Capability {
             Capability::TelemetryCompleteness => "telemetry completeness",
             Capability::Ipv6Enforcement => "IPv6 enforcement",
             Capability::UdpEnforcement => "UDP/QUIC enforcement",
+            Capability::SessionHostnameProxy => "session hostname proxy (SNI/CONNECT, TCP only)",
         }
     }
 }
@@ -176,12 +181,24 @@ impl CapabilityAdvertisement {
         m.insert(SessionEnforcement, s(Support::Supported, "cgroup v2 path match (socket cgroupv2); CI netns tests"));
         m.insert(UserEnforcement, s(Support::Supported, "meta skuid"));
         m.insert(DnsEvidence, s(Support::Unsupported, "no resolver integration on the endpoint yet"));
-        m.insert(HostnameEnforcement, s(Support::Unsupported, "IP-only; hostname rules need a policy proxy"));
+        m.insert(
+            HostnameEnforcement,
+            s(Support::Unsupported, "IP-only for ordinary traffic; protected sessions can use the session hostname proxy"),
+        );
         m.insert(ByteCounters, s(Support::Partial, "per-rule nftables counters, not per flow"));
         m.insert(ExistingFlowRevocation, s(Support::Partial, "new packets of established flows hit the rule; no conntrack flush"));
         m.insert(TelemetryCompleteness, s(Support::Supported, "spool sequence numbers, restart and gap markers"));
         m.insert(Ipv6Enforcement, s(Support::Supported, "inet family table"));
         m.insert(UdpEnforcement, s(Support::Supported, "matches all L4 protocols in the output hook"));
+        m.insert(
+            SessionHostnameProxy,
+            s(
+                Support::Untested,
+                "TCP in protected sessions only, via the moatd egress proxy: TLS SNI, HTTP CONNECT or plain-HTTP Host; \
+                 no TLS interception; the proxy connects to the name it resolves, never the client-chosen IP; \
+                 domain fronting through an allowed host remains possible",
+            ),
+        );
         CapabilityAdvertisement {
             platform: Platform::Linux,
             adapter: "moatd-nftables".into(),
@@ -189,6 +206,16 @@ impl CapabilityAdvertisement {
             capabilities: m,
             advertised_at: None,
         }
+    }
+
+    /// The Linux contract on a host where the session egress proxy is off or unavailable: IP-only.
+    pub fn linux_nftables_cgroup_ip_only() -> Self {
+        let mut a = Self::linux_nftables_cgroup();
+        a.capabilities.insert(
+            Capability::SessionHostnameProxy,
+            CapabilityStatus { support: Support::Unsupported, note: Some("session egress proxy disabled on this host".into()) },
+        );
+        a
     }
 
     /// A cooperative DNS resolver can only ever offer DNS evidence.

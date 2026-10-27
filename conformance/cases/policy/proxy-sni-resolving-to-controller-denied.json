@@ -1,0 +1,35 @@
+{
+  "schema": "moat.conformance.policy_case.v1",
+  "name": "proxy-sni-resolving-to-controller-denied",
+  "description": "An allowed SNI name that resolves to the controller admin address is still denied by the safety rule: the proxy evaluates the resolved address too.",
+  "policy": "../../policies/home.toml",
+  "flow": {
+    "id": "c",
+    "device_id": "omarchy",
+    "user": "robert",
+    "app": {
+      "family": "git",
+      "executable": "/usr/bin/git"
+    },
+    "ancestry_complete": true,
+    "remote_ip": "100.100.1.2",
+    "remote_port": 443,
+    "transport": "tcp",
+    "at": "2026-10-26T12:00:00Z",
+    "hostname": {
+      "name": "github.com",
+      "source": "sni",
+      "confidence": "medium"
+    },
+    "session": {
+      "id": "sess-1",
+      "profile": "coding-session",
+      "boundary": "linux_cgroup",
+      "verified": true
+    }
+  },
+  "expect": {
+    "verdict": "deny",
+    "winner": "rule:safety-workloads-never-reach-controller"
+  }
+}

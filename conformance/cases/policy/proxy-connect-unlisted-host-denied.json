@@ -1,0 +1,35 @@
+{
+  "schema": "moat.conformance.policy_case.v1",
+  "name": "proxy-connect-unlisted-host-denied",
+  "description": "A CONNECT to a host outside the session's allows falls to the profile default.",
+  "policy": "../../policies/home.toml",
+  "flow": {
+    "id": "c",
+    "device_id": "omarchy",
+    "user": "robert",
+    "app": {
+      "family": "git",
+      "executable": "/usr/bin/git"
+    },
+    "ancestry_complete": true,
+    "remote_ip": "198.51.100.7",
+    "remote_port": 443,
+    "transport": "tcp",
+    "at": "2026-10-26T12:00:00Z",
+    "hostname": {
+      "name": "paste.example",
+      "source": "connect_proxy",
+      "confidence": "medium"
+    },
+    "session": {
+      "id": "sess-1",
+      "profile": "coding-session",
+      "boundary": "linux_cgroup",
+      "verified": true
+    }
+  },
+  "expect": {
+    "verdict": "deny",
+    "winner": "profile:coding-session"
+  }
+}

@@ -1,8 +1,8 @@
 {
   "schema": "moat.conformance.compile_case.v1",
-  "name": "linux-rejects-strict-hostname-rules",
+  "name": "linux-ip-only-rejects-strict-hostname-rules",
   "policy": "../../policies/home-strict.toml",
-  "adapter": "linux",
+  "adapter": "linux-ip-only",
   "expect": {
     "compiles": false,
     "error_contains": "hostname enforcement"
