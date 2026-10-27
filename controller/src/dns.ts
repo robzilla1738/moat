@@ -69,10 +69,16 @@ export function storeObservations(db: DB, obs: DnsObservation[], reachable: bool
   return n;
 }
 
-export function dnsClients(db: DB) {
-  return (db.prepare("SELECT * FROM dns_clients ORDER BY last_query_at DESC").all() as Record<string, unknown>[]).map((c) => ({
-    ...c,
-    coverage: "dns-only",
-    claim: "Resolver queries from this client. No app, process, connection or byte count is known; direct-IP and alternative encrypted DNS are not covered.",
-  }));
+export function dnsClients(db: DB, now: Date = new Date()) {
+  const health = new Map((db.prepare("SELECT resolver, health, last_ok_at FROM dns_adapter_state").all() as { resolver: string; health: string; last_ok_at: string | null }[]).map((h) => [h.resolver, h]));
+  return (db.prepare("SELECT * FROM dns_clients ORDER BY last_query_at DESC").all() as Record<string, unknown>[]).map((c) => {
+    const h = health.get(String(c.resolver));
+    return {
+      ...c,
+      coverage: "dns-only",
+      claim: "Resolver queries from this client. No app, process, connection or byte count is known; direct-IP and alternative encrypted DNS are not covered.",
+      resolver_health: h?.health ?? "unknown",
+      evidence_age_s: h?.last_ok_at ? Math.max(0, Math.round((now.getTime() - Date.parse(h.last_ok_at)) / 1000)) : null,
+    };
+  });
 }
