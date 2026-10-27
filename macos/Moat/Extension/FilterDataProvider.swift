@@ -5,7 +5,8 @@ import Security
 
 /// NEFilterDataProvider: decides each new outbound socket flow at its first decision point.
 ///
-/// * Identity: the source app's audit token -> signing identifier, team ID and executable path (Security framework).
+/// * Identity: the responsible app's audit token -> signing identifier, team ID and executable path (Security
+///   framework); the socket process's audit token is resolved separately and recorded as `FlowFacts.process`.
 /// * A deny is a `.drop()` before any payload passes the filter, recorded as "blocked before data was sent".
 /// * Allowed flows ask for a report; byte counts are attached only when macOS delivers one.
 /// * Inbound flows are not filtered. Ancestry is not available here (no Endpoint Security).
@@ -32,7 +33,14 @@ final class FilterDataProvider: NEFilterDataProvider {
         guard let socketFlow = flow as? NEFilterSocketFlow, let endpoint = socketFlow.remoteEndpoint as? NWHostEndpoint else {
             return .allow()
         }
+        // Responsible app (what app rules match and Activity groups by) and the process that actually opened the
+        // socket are different identities; keep both, never flatten them into one string.
         let identity = CodeIdentity.resolve(auditToken: flow.sourceAppAuditToken)
+        var process: ProcessIdentity?
+        if let token = flow.sourceProcessAuditToken {
+            let p = CodeIdentity.resolve(auditToken: token)
+            process = ProcessIdentity(signingID: p.signingID, teamID: p.teamID, executable: p.path, pid: p.pid, pidVersion: p.pidVersion)
+        }
         let transport: Transport = socketFlow.socketProtocol == Int32(IPPROTO_UDP) ? .udp : .tcp
         let host = socketFlow.remoteHostname
         let facts = FlowFacts(
@@ -46,7 +54,8 @@ final class FilterDataProvider: NEFilterDataProvider {
             hostSource: host == nil ? nil : .flowApi,
             remoteIP: endpoint.hostname,
             remotePort: UInt16(endpoint.port) ?? 0,
-            transport: transport)
+            transport: transport,
+            process: process)
         let decision = runtime.engine.decide(facts)
         switch decision.verdict {
         case .deny:
@@ -71,6 +80,8 @@ struct CodeIdentity {
     var teamID: String?
     var path: String?
     var pid: Int32?
+    /// audit_token_t word 7: the per-process generation, so a reused pid is a different process.
+    var pidVersion: Int32?
 
     static func resolve(auditToken: Data?) -> CodeIdentity {
         guard let token = auditToken else { return CodeIdentity() }
@@ -78,6 +89,7 @@ struct CodeIdentity {
         // audit_token_t is eight 32-bit words; word 5 is the pid.
         if token.count >= 32 {
             out.pid = token.withUnsafeBytes { raw in raw.load(fromByteOffset: 20, as: Int32.self) }
+            out.pidVersion = token.withUnsafeBytes { raw in raw.load(fromByteOffset: 28, as: Int32.self) }
         }
         var code: SecCode?
         let attrs = [kSecGuestAttributeAudit: token] as CFDictionary

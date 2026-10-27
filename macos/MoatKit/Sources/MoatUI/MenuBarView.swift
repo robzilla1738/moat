@@ -105,7 +105,7 @@ public struct MenuBarContent: View {
         } else {
             VStack(alignment: .leading, spacing: 8) {
                 if confirming {
-                    Text("Block everything except loopback on this Mac until you turn it off?")
+                    Text("Block new outbound connections except loopback on this Mac until you turn it off? Open connections are not cut.")
                         .font(.callout.weight(.medium)).fixedSize(horizontal: false, vertical: true)
                 }
                 MoatGlassContainer(spacing: 8) {

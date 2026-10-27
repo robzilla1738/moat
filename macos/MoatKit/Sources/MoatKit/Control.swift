@@ -15,6 +15,7 @@ import Foundation
     func rollbackToLastKnownGood(reply: @escaping (Data?, String?) -> Void)
     func enterIsolation(reason: String, reply: @escaping (Data?, String?) -> Void)
     func exitIsolation(confirmation: String, reply: @escaping (Data?, String?) -> Void)
+    func reloadTrust(reply: @escaping (Data?, String?) -> Void)
 }
 
 /// The same operations as a closed Swift enum: what the handler executes and what the audit log records.
@@ -26,6 +27,8 @@ public enum ControlOperation: Equatable, Sendable {
     case rollbackToLastKnownGood
     case enterIsolation(reason: String)
     case exitIsolation(confirmation: String)
+    /// Re-read the root-owned trusted-keys file and re-verify the installed policy under it. Adds no trust itself.
+    case reloadTrust
 
     public var name: String {
         switch self {
@@ -36,6 +39,7 @@ public enum ControlOperation: Equatable, Sendable {
         case .rollbackToLastKnownGood: return "rollback_to_last_known_good"
         case .enterIsolation: return "enter_isolation"
         case .exitIsolation: return "exit_isolation"
+        case .reloadTrust: return "reload_trust"
         }
     }
 
@@ -74,9 +78,12 @@ public final class ControlHandler: @unchecked Sendable {
     public let version: String
     private let makeEvaluator: (Data) throws -> PolicyEvaluator
     private let filterEnabled: () -> Bool
+    private let trust: TrustStore?
+    private let makeVerifier: ((TrustConfig) -> SnapshotVerifier)?
     private let lock = NSLock()
     private var audit: [AuditEntry] = []
     private var loadError: String?
+    private var restoration: String?
 
     private func setLoadError(_ e: String?) {
         lock.lock()
@@ -84,20 +91,63 @@ public final class ControlHandler: @unchecked Sendable {
         lock.unlock()
     }
 
-    public init(engine: FilterEngine, store: PolicyStore, version: String, filterEnabled: @escaping () -> Bool, makeEvaluator: @escaping (Data) throws -> PolicyEvaluator) {
+    /// - Parameters:
+    ///   - trust: the trusted-keys file as the running extension sees it; when set, `tick()` and `reloadTrust`
+    ///     push changes to the verifier and re-verify what is installed.
+    ///   - makeVerifier: builds the snapshot verifier for a trust configuration (production: moat-core).
+    public init(engine: FilterEngine, store: PolicyStore, version: String, filterEnabled: @escaping () -> Bool, makeEvaluator: @escaping (Data) throws -> PolicyEvaluator, trust: TrustStore? = nil, makeVerifier: ((TrustConfig) -> SnapshotVerifier)? = nil) {
         self.engine = engine
         self.store = store
         self.version = version
         self.filterEnabled = filterEnabled
         self.makeEvaluator = makeEvaluator
+        self.trust = trust
+        self.makeVerifier = makeVerifier
+        if let trust, let makeVerifier { store.setVerifier(makeVerifier(trust.config)) }
     }
 
-    /// Restore persisted state into the engine at extension start. Isolation survives restarts.
+    private var trustGeneration: UInt64 { trust?.generation ?? 0 }
+
+    /// Restore persisted state into the engine at extension start. Isolation survives restarts. The installed
+    /// policy is re-verified under the current trusted keys before it is enforced again; a candidate that no longer
+    /// verifies (corrupt, untrusted, tampered) is not restored. See `PolicyStore.Restoration`.
     public func restore() {
         engine.setIsolation(store.isolation)
-        if let e = store.installed {
-            installIntoEngine(e)
+        reinstallVerified()
+    }
+
+    private func reinstallVerified() {
+        var built: (Data, PolicyEvaluator)?
+        let (outcome, entry) = store.restoreVerified(usable: { e in
+            do {
+                built = (e.policyJSON, try self.makeEvaluator(e.policyJSON))
+                return nil
+            } catch {
+                return "its evaluator could not be loaded: \(error)"
+            }
+        })
+        lock.lock()
+        restoration = outcome.label
+        lock.unlock()
+        if let entry, let b = built, b.0 == entry.policyJSON {
+            engine.install(entry.summary, evaluator: b.1, expiries: PolicyExpiries.from(policyJSON: entry.policyJSON), trustGeneration: trustGeneration)
+            setLoadError(nil)
+        } else if let entry {
+            installIntoEngine(entry)
+        } else if case .failed = outcome {
+            engine.uninstallPolicy()
+            setLoadError(outcome.label)
         }
+    }
+
+    /// Re-read the trusted keys; when they changed, give the verifier the new keys and re-verify the installed
+    /// policy. Returns whether anything changed.
+    @discardableResult
+    public func reloadTrustIfChanged() -> Bool {
+        guard let trust, let makeVerifier, trust.reloadIfChanged() else { return false }
+        store.setVerifier(makeVerifier(trust.config))
+        reinstallVerified()
+        return true
     }
 
     public var auditLog: [AuditEntry] {
@@ -132,21 +182,42 @@ public final class ControlHandler: @unchecked Sendable {
         case let .applySignedSnapshot(data, canary):
             guard data.count <= Self.maxSnapshotBytes else { return .failure(ControlError("snapshot is larger than \(Self.maxSnapshotBytes) bytes")) }
             guard canary >= 0, canary <= Self.maxCanarySeconds else { return .failure(ControlError("canary must be 0...\(Self.maxCanarySeconds) seconds")) }
-            switch store.apply(signed: data, canary: TimeInterval(canary), now: now) {
+            // Candidate first: verify, then build its evaluator. Only a candidate that passes both replaces the running
+            // generation; a failed candidate leaves the previous evaluator and state exactly as they were.
+            switch store.prepare(signed: data, now: now) {
             case let .failure(f):
                 return .failure(ControlError("Rejected; the current policy is unchanged. \(f.message)"))
-            case let .success(summary):
-                guard let e = store.installed else { return .failure(ControlError("internal: no installed entry")) }
-                installIntoEngine(e)
-                return encode(summary)
+            case let .success(entry):
+                let ev: PolicyEvaluator
+                do {
+                    ev = try makeEvaluator(entry.policyJSON)
+                } catch {
+                    return .failure(ControlError("Rejected; the current policy is unchanged. The verified policy could not be loaded by the evaluator: \(error)"))
+                }
+                let durable = store.commit(entry, canary: TimeInterval(canary), now: now)
+                engine.install(entry.summary, evaluator: ev, expiries: PolicyExpiries.from(policyJSON: entry.policyJSON), trustGeneration: trustGeneration)
+                setLoadError(nil)
+                if !durable {
+                    return .failure(ControlError("Revision \(entry.summary.revision) is enforced now, but it could not be saved and will not survive a restart. \(store.lastPersistError ?? "")"))
+                }
+                return encode(entry.summary)
             }
         case .confirmCanary:
             return store.confirmCanary() ? encode(["confirmed": true]) : .failure(ControlError("No canary rollout is pending."))
         case .rollbackToLastKnownGood:
+            guard let good = store.lastKnownGood else {
+                return .failure(ControlError("There is no last known good revision to roll back to."))
+            }
+            let ev: PolicyEvaluator
+            do {
+                ev = try makeEvaluator(good.policyJSON)
+            } catch {
+                return .failure(ControlError("The last known good revision could not be loaded; nothing changed: \(error)"))
+            }
             guard let s = store.rollbackToLastKnownGood(now: now), let e = store.installed else {
                 return .failure(ControlError("There is no last known good revision to roll back to."))
             }
-            installIntoEngine(e)
+            engine.install(e.summary, evaluator: ev, expiries: PolicyExpiries.from(policyJSON: e.policyJSON), trustGeneration: trustGeneration)
             return encode(s)
         case let .enterIsolation(reason):
             let trimmed = String(reason.prefix(200))
@@ -161,11 +232,15 @@ public final class ControlHandler: @unchecked Sendable {
             store.setIsolation(.off)
             engine.setIsolation(.off)
             return encode(IsolationState.off)
+        case .reloadTrust:
+            let changed = reloadTrustIfChanged()
+            return encode(["changed": changed])
         }
     }
 
-    /// Called periodically by the extension: performs a due canary rollback.
+    /// Called periodically by the extension: picks up trusted-key changes and performs a due canary rollback.
     public func tick(now: Date = Date()) {
+        reloadTrustIfChanged()
         if store.tick(now: now) != nil, let e = store.installed {
             installIntoEngine(e)
         }
@@ -177,8 +252,10 @@ public final class ControlHandler: @unchecked Sendable {
         var allNotes = notes
         lock.lock()
         let le = loadError
+        let rest = restoration
         lock.unlock()
         if let le { allNotes.insert(le, at: 0) }
+        if let pe = store.lastPersistError { allNotes.insert(pe, at: 0) }
         if let d = store.canaryDeadline {
             allNotes.append("Canary rollout: rolls back automatically at \(ISO8601DateFormatter().string(from: d)) unless confirmed.")
         }
@@ -188,24 +265,28 @@ public final class ControlHandler: @unchecked Sendable {
             coverageNotes: allNotes,
             filterEnabled: enabled,
             isolation: engine.currentIsolation,
-            installed: store.installed?.summary,
+            // what the filter enforces now (the engine's generation), not merely what is stored on disk
+            installed: engine.installedPolicy,
             lastKnownGood: store.lastKnownGood?.summary,
             lastRejection: store.lastRejection,
             flowsSeen: engine.flowsSeen,
             flowsDenied: engine.flowsDenied,
             telemetryGaps: engine.spool.gaps,
-            capabilities: CapabilityRow.macOSDesign)
+            capabilities: CapabilityRow.macOSDesign,
+            evaluatorGeneration: engine.currentGeneration?.generation,
+            trustGeneration: trust?.generation,
+            durable: store.lastPersistError == nil,
+            restoration: rest)
     }
 
+    /// Install an already-committed entry (canary rollback). If its evaluator cannot be built, the running generation
+    /// is kept and the failure is reported; nothing silently drops to observation.
     private func installIntoEngine(_ e: PolicyStore.Entry) {
         do {
-            engine.install(e.summary, evaluator: try makeEvaluator(e.policyJSON))
+            engine.install(e.summary, evaluator: try makeEvaluator(e.policyJSON), expiries: PolicyExpiries.from(policyJSON: e.policyJSON), trustGeneration: trustGeneration)
             setLoadError(nil)
         } catch {
-            // A verified policy the evaluator cannot load. The engine falls back to observation and the
-            // status report says so loudly; it is never presented as enforcement.
-            engine.uninstallPolicy()
-            setLoadError("The installed policy could not be loaded by the evaluator: \(error). Moat is observing only.")
+            setLoadError("Revision \(e.summary.revision) could not be loaded by the evaluator (\(error)); the filter keeps enforcing generation \(engine.currentGeneration.map { String($0.generation) } ?? "none") (revision \(engine.installedPolicy.map { String($0.revision) } ?? "none")).")
         }
     }
 
@@ -263,6 +344,7 @@ public protocol ControlClient: Sendable {
     func rollbackToLastKnownGood() async throws -> PolicySummary
     func enterIsolation(reason: String) async throws -> IsolationState
     func exitIsolation(confirmation: String) async throws -> IsolationState
+    func reloadTrust() async throws -> Bool
 }
 
 /// Talks to the extension's NEMachServiceName. Untested on a real device until a signed build exists.
@@ -292,9 +374,15 @@ public final class XPCControlClient: ControlClient, @unchecked Sendable {
         return connection?.remoteObjectProxyWithErrorHandler(fail) as? MoatControlXPC
     }
 
+    /// Every call is bounded: a filter that stops answering is reported as unreachable, not waited on forever.
+    public static let callTimeout: TimeInterval = 10
+
     private func call<T: Decodable>(_ type: T.Type, _ body: @escaping (MoatControlXPC, @escaping (Data?, String?) -> Void) -> Void) async throws -> T {
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<T, Error>) in
             let once = Once()
+            DispatchQueue.global().asyncAfter(deadline: .now() + Self.callTimeout) {
+                once.run { cont.resume(throwing: ControlError("The Moat filter did not answer within \(Int(Self.callTimeout)) s.")) }
+            }
             guard let p = proxy({ err in once.run { cont.resume(throwing: ControlError("Cannot reach the Moat filter: \(err.localizedDescription)")) } }) else {
                 once.run { cont.resume(throwing: ControlError("Cannot reach the Moat filter.")) }
                 return
@@ -323,6 +411,10 @@ public final class XPCControlClient: ControlClient, @unchecked Sendable {
     public func enterIsolation(reason: String) async throws -> IsolationState { try await call(IsolationState.self) { $0.enterIsolation(reason: reason, reply: $1) } }
     public func exitIsolation(confirmation: String) async throws -> IsolationState {
         try await call(IsolationState.self) { $0.exitIsolation(confirmation: confirmation, reply: $1) }
+    }
+    public func reloadTrust() async throws -> Bool {
+        let r = try await call([String: Bool].self) { $0.reloadTrust(reply: $1) }
+        return r["changed"] ?? false
     }
 }
 
@@ -368,4 +460,5 @@ public final class ControlXPCService: NSObject, MoatControlXPC {
     public func exitIsolation(confirmation: String, reply: @escaping (Data?, String?) -> Void) {
         self.reply(handler.perform(.exitIsolation(confirmation: confirmation)), reply)
     }
+    public func reloadTrust(reply: @escaping (Data?, String?) -> Void) { self.reply(handler.perform(.reloadTrust), reply) }
 }

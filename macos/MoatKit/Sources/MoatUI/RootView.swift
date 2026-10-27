@@ -43,7 +43,7 @@ public struct RootView: View {
             Button("Isolate now", role: .destructive) { Task { await model.enterIsolation(reason: "Turned on from the Moat toolbar") } }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("All network access except loopback is blocked until you turn isolation off in Recovery. It does not reopen on its own.")
+            Text("New outbound connections except loopback are blocked until you turn isolation off in Recovery. It does not reopen on its own. Connections already open are not cut.")
         }
     }
 
@@ -73,7 +73,7 @@ public struct RootView: View {
                 } label: {
                     Label("Isolate", systemImage: "lock.shield")
                 }
-                .help("Emergency isolation: block everything except loopback (asks first)")
+                .help("Emergency isolation: block new outbound connections except loopback (asks first)")
             }
         }
     }

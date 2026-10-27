@@ -67,3 +67,59 @@ public struct TrustConfig: Equatable, Sendable {
         s.count == 64 && s.allSatisfy { $0.isHexDigit }
     }
 }
+
+/// The running extension's view of the trusted-keys file, with a generation number that increases whenever its
+/// content changes. Reloading never adds trust by itself: it reads the root-owned file the owner edited.
+public final class TrustStore: @unchecked Sendable {
+    public let path: String
+    private let lock = NSLock()
+    private var fingerprint: String
+    private var current: TrustConfig
+    private var currentProblems: [String]
+    private(set) public var generation: UInt64 = 1
+    private let read: (String) -> String?
+
+    /// - Parameter read: file reader (injected by tests); nil content means the file is missing.
+    public init(path: String = TrustConfig.defaultPath, read: @escaping (String) -> String? = { try? String(contentsOfFile: $0, encoding: .utf8) }) {
+        self.path = path
+        self.read = read
+        let text = read(path)
+        fingerprint = Self.fingerprint(text)
+        let parsed = text.map(TrustConfig.parse) ?? (TrustConfig(keys: []), ["no trusted keys file at \(path); every snapshot will be rejected"])
+        current = parsed.0
+        currentProblems = parsed.1
+    }
+
+    public var config: TrustConfig {
+        lock.lock()
+        defer { lock.unlock() }
+        return current
+    }
+
+    public var problems: [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return currentProblems
+    }
+
+    /// Re-read the file. Returns true (and bumps the generation) when its content changed.
+    @discardableResult
+    public func reloadIfChanged() -> Bool {
+        let text = read(path)
+        let fp = Self.fingerprint(text)
+        lock.lock()
+        defer { lock.unlock() }
+        guard fp != fingerprint else { return false }
+        fingerprint = fp
+        let parsed = text.map(TrustConfig.parse) ?? (TrustConfig(keys: []), ["no trusted keys file at \(path); every snapshot will be rejected"])
+        current = parsed.0
+        currentProblems = parsed.1
+        generation &+= 1
+        return true
+    }
+
+    static func fingerprint(_ text: String?) -> String {
+        guard let text else { return "missing" }
+        return SHA256.hash(data: Data(text.utf8)).map { String(format: "%02x", $0) }.joined()
+    }
+}
