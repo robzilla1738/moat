@@ -26,10 +26,30 @@ jobs:
       - uses: actions/upload-pages-artifact@v3
         with:
           path: web/dist
+  pages-check:
+    name: is GitHub Pages enabled?
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: read
+    outputs:
+      enabled: ${{ steps.check.outputs.enabled }}
+    steps:
+      - id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh api "repos/${GITHUB_REPOSITORY}/pages" --jq '.build_type' > /tmp/pages 2>/dev/null; then
+            echo "Pages build_type: $(cat /tmp/pages)"
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice title=Pages deploy skipped::GitHub Pages is not enabled for this repository. Enable it at Settings > Pages > Source: GitHub Actions, then re-run this workflow."
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          fi
   deploy:
     name: deploy demo to GitHub Pages
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-    needs: build
+    needs: [build, pages-check]
+    if: needs.pages-check.outputs.enabled == 'true'
     runs-on: ubuntu-latest
     permissions:
       pages: write

@@ -595,6 +595,7 @@ name = "moat-ffi"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "hex",
  "moat-core",
  "serde",
  "serde_json",
