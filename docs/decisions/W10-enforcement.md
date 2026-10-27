@@ -35,4 +35,4 @@ the candidates meets all three with what Moat ships today:
 
 A cgroup/connect BPF program loaded by moatd, keyed on executable file identity, with a netns CI check that a denied
 executable's connect never reaches the receiver while an allowed one does, plus the exec/inheritance/interpreter
-cases in docs/adversarial-matrix.md. That is W10 increment 3 and needs a loader dependency decision (aya vs libbpf-rs).
+cases in docs/adversarial-matrix.md. That is W10 increment 3. Loader decision: [W10-increment-3-loader.md](W10-increment-3-loader.md) (aya loader + a C program; not built yet).
