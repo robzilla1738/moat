@@ -89,13 +89,15 @@ pub struct EvalContext<'a> {
     pub enricher: &'a Enricher,
     /// Device groups the evaluating device belongs to.
     pub device_groups: Vec<String>,
+    /// The evaluating device.
+    pub device_id: String,
 }
 
 impl<'a> EvalContext<'a> {
     pub fn new(policy: &'a Policy, enricher: &'a Enricher, device_id: &str) -> Self {
         let device_groups =
             policy.device_groups.iter().filter(|(_, members)| members.iter().any(|m| m == device_id)).map(|(g, _)| g.clone()).collect();
-        EvalContext { policy, enricher, device_groups }
+        EvalContext { policy, enricher, device_groups, device_id: device_id.to_string() }
     }
 }
 
@@ -127,6 +129,20 @@ fn app_matches(m: &AppMatcher, a: &AppIdentity) -> bool {
 
 /// Does the selector match this flow? Returns (matched, notes).
 fn selector_matches(ctx: &EvalContext, s: &Selector, f: &FlowAttempt, notes: &mut Vec<String>) -> bool {
+    if !s.devices.is_empty() && !s.devices.contains(&ctx.device_id) {
+        return false;
+    }
+    if !s.processes.is_empty() {
+        // The flow's process instance must be attributed on this device, in the named boot, with the same start
+        // generation. Missing attribution never matches.
+        let hit = f.process.as_ref().is_some_and(|p| {
+            p.device_id == ctx.device_id
+                && s.processes.iter().any(|m| m.boot_id == p.boot_id && m.pid == p.pid && m.start_generation == p.start_generation)
+        });
+        if !hit {
+            return false;
+        }
+    }
     if !s.device_groups.is_empty() && !s.device_groups.iter().any(|g| ctx.device_groups.contains(g)) {
         return false;
     }

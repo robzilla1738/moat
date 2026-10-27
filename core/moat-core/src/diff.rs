@@ -138,8 +138,10 @@ fn session_subset(o: &Option<SessionMatch>, n: &Option<SessionMatch>) -> bool {
 }
 
 fn selector_subset(o: &Selector, n: &Selector) -> bool {
-    let Selector { device_groups, users, apps, ancestors, session } = o;
-    list_subset(device_groups, &n.device_groups)
+    let Selector { devices, device_groups, users, apps, ancestors, session, processes } = o;
+    list_subset(devices, &n.devices)
+        && list_subset(processes, &n.processes)
+        && list_subset(device_groups, &n.device_groups)
         && list_subset(users, &n.users)
         && list_subset(apps, &n.apps)
         && list_subset(ancestors, &n.ancestors)

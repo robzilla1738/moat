@@ -45,6 +45,9 @@ pub struct CompileReport {
     /// `implemented_unproven`: compilation alone never proves an installed capability.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub items: Vec<ItemDisposition>,
+    /// Digest of base policy + overlay grants + compiler identity (`sha256:` canonical). Set by every compile.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_digest: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -76,9 +79,26 @@ pub struct CompileOptions {
     pub not_after: Option<DateTime<Utc>>,
 }
 
+/// sha256 (hex) of the canonical JSON of a policy (contracts/README.md rules: sorted keys, no whitespace), so any
+/// implementation can recompute it.
 pub fn policy_digest(p: &Policy) -> String {
-    let bytes = serde_json::to_vec(p).expect("policy serializes");
-    hex::encode(Sha256::digest(bytes))
+    let v = serde_json::to_value(p).expect("policy serializes");
+    hex::encode(Sha256::digest(crate::contracts::canonical_bytes(&v)))
+}
+
+/// Compile base policy + grant overlay. The report's `effective_digest` binds the base, every overlay grant and the
+/// compiler identity (W03).
+pub fn compile_with_grants(
+    base: &Policy,
+    grants: &[crate::contracts::Grant],
+    adv: &CapabilityAdvertisement,
+    opts: &CompileOptions,
+) -> Result<Snapshot, Vec<PolicyError>> {
+    let eff =
+        crate::grants::apply_grants(base, grants, opts.issued_at).map_err(|e| vec![PolicyError { path: "grants".into(), message: e.0 }])?;
+    let mut s = compile(&eff, adv, opts)?;
+    s.report.effective_digest = Some(crate::grants::effective_digest(base, grants));
+    Ok(s)
 }
 
 fn capability_name(c: Capability) -> String {
@@ -325,6 +345,7 @@ pub fn compile(policy: &Policy, adv: &CapabilityAdvertisement, opts: &CompileOpt
         });
     }
     report.items.sort_by(|a, b| a.item.cmp(&b.item));
+    report.effective_digest = Some(crate::grants::effective_digest(policy, &[]));
     Ok(Snapshot {
         schema: SNAPSHOT_SCHEMA.into(),
         revision: opts.revision,

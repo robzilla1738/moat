@@ -256,8 +256,10 @@ fn default_line(d: DefaultAction, profile: &str) -> String {
 
 /// Which rules apply to this device (device-group selectors evaluated here).
 fn applies_to_device(policy: &Policy, r: &Rule, device_id: &str) -> bool {
-    r.selector.device_groups.is_empty()
-        || r.selector.device_groups.iter().any(|g| policy.device_groups.get(g).map(|m| m.iter().any(|x| x == device_id)).unwrap_or(false))
+    let by_device = r.selector.devices.is_empty() || r.selector.devices.iter().any(|d| d == device_id);
+    let by_group = r.selector.device_groups.is_empty()
+        || r.selector.device_groups.iter().any(|g| policy.device_groups.get(g).map(|m| m.iter().any(|x| x == device_id)).unwrap_or(false));
+    by_device && by_group
 }
 
 /// Order rules by precedence: layer rank, then deny before allow, then source order.
