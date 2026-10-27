@@ -4,6 +4,7 @@
  * localhost is not treated as trusted — every route authenticates.
  */
 import { apps, appDetail, diagnostics, whatChanged } from "./standalone.ts";
+import { advanceRollout, createRollout, reconciliation, resolveLocalChange, rolloutStatus } from "./fleet.ts";
 export const CONTROLLER_VERSION = "0.1.0";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { readFileSync, existsSync, statSync } from "node:fs";
@@ -82,6 +83,12 @@ r("GET", "/v1/apps/:id", async ({ c, p, params }) => {
 });
 r("GET", "/v1/what-changed", ({ c, p, query }) => (c.require(p, "owner", "viewer"), whatChanged(c, { device: query.get("device"), app: query.get("app"), working: query.get("working"), failing: query.get("failing") })));
 r("GET", "/v1/diagnostics", ({ c, p }) => (c.require(p, "owner", "viewer"), diagnostics(c, CONTROLLER_VERSION)));
+// W13 fleet: desired/current reconciliation, staged rollouts, owner resolution of offline local changes.
+r("GET", "/v1/reconciliation", ({ c, p }) => (c.require(p, "owner", "viewer"), reconciliation(c)));
+r("POST", "/v1/rollouts", ({ c, p, json }) => createRollout(c, c.require(p, "owner"), json));
+r("GET", "/v1/rollouts/:rev", ({ c, p, params }) => (c.require(p, "owner", "viewer"), rolloutStatus(c, Number(params[0]))));
+r("POST", "/v1/rollouts/:rev/advance", ({ c, p, params }) => advanceRollout(c, c.require(p, "owner"), Number(params[0])));
+r("POST", "/v1/devices/:id/local-change/resolve", ({ c, p, params, json }) => resolveLocalChange(c, c.require(p, "owner"), params[0]!, json.resolution));
 r("GET", "/v1/dns/clients", ({ c, p }) => (c.require(p, "owner", "viewer"), dnsClients(c.db)));
 r("GET", "/v1/notifications", ({ c, p }) => (c.require(p, "owner"), { destinations: c.notifier.list(), status: c.notifier.status() }));
 r("POST", "/v1/notifications/destinations", ({ c, p, json }) => (c.require(p, "owner"), c.notifier.addDestination(json)));

@@ -58,6 +58,7 @@ export interface WireRevision { revision: number; created_at: string; approved_b
 export interface WireSession { id: string; device_id: string; profile: string; boundary: string; verified: number; state: string; started_at: string; ended_at: string | null; intent: string | null; close_requested_at: string | null }
 export interface WireGrant { id: string; kind: string; device_id: string | null; session_id: string | null; process_instance: string | null; destination: string; transport: string; port: number | null; expires_at: string; created_by: string; state: string }
 export interface WireApp { id: string; name: string; family: string | null; exe: string | null; signer: string | null; identity: "executable" | "unknown"; devices: string[]; sessions: number; flows: number; denied: number; observed: number; destinations: { host: string; port: number | null; count: number; verdict: "allow" | "deny" | "observed"; firstAt: string; lastAt: string; new: boolean }[]; lastActive: string; firstSeen: string }
+export interface WireReconciliation { device: string; desired: number | null; current: number | null; state: NonNullable<Device["sync"]>["state"]; detail: string | null }
 export interface WireRollup { hour: string; verdict: string; flows: number }
 export interface WireGrantStatus { id: string; state: "pending" | "active" | "rejected" | "expired" | "revoked"; revision: number | null; authorized_by: string | null; expires_at: string; devices: { device_id: string; state: string; stale: boolean; evidence: { revision: number; state: string; at: string; detail: string | null } | null }[]; server_time: string }
 export interface WireProposal { id: string; broadening: boolean; status: string; base_revision: number | null; rollback_of: number | null; message: string; authorization_subject: string; authorization_digest: string; diff: Record<string, unknown> }
@@ -185,7 +186,7 @@ export function grantScope(g: Pick<WireGrant, "device_id" | "session_id" | "proc
 
 export async function loadLive(api: Api, now = () => new Date()): Promise<Snapshot> {
   const since = new Date(now().getTime() - 24 * 3600_000).toISOString();
-  const [me, overview, devices, incidents, revisions, sessions, grants, rollups, apps] = await Promise.all([
+  const [me, overview, devices, incidents, revisions, sessions, grants, rollups, apps, recon] = await Promise.all([
     api.get<WireMe>("/v1/me"),
     api.get<WireOverview>("/v1/overview"),
     api.get<WireDevice[]>("/v1/devices"),
@@ -195,6 +196,7 @@ export async function loadLive(api: Api, now = () => new Date()): Promise<Snapsh
     api.get<WireGrant[]>("/v1/grants"),
     api.get<WireRollup[]>(`/v1/rollups?since=${encodeURIComponent(since)}`),
     api.get<WireApp[]>("/v1/apps"),
+    api.get<WireReconciliation[]>("/v1/reconciliation"),
   ]);
   const hours = new Map<string, { hour: string; allowed: number; blocked: number; observed: number }>();
   for (const r of rollups) {
@@ -212,7 +214,10 @@ export async function loadLive(api: Api, now = () => new Date()): Promise<Snapsh
     demo: false,
     viewer: { name: me.name, role: me.role },
     policyRevision: overview.revision ?? 0,
-    devices: devices.map(mapDevice),
+    devices: devices.map((d) => {
+      const r = (recon ?? []).find((x) => x.device === d.id);
+      return { ...mapDevice(d), ...(r ? { sync: { desired: r.desired, state: r.state, detail: r.detail } } : {}) };
+    }),
     incidents: incidents.map(mapIncident),
     revisions: revisions.map(mapRevision),
     sessions: sessions.map(mapSession),

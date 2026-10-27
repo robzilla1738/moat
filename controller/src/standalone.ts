@@ -306,7 +306,7 @@ export function whatChanged(c: Controller, q: { device?: string | null; app?: st
 export function diagnostics(c: Controller, version: string) {
   const now = c.now();
   const devices = (c.devices() as unknown as { id: string; name: string; platform: string; last_seen_at: string | null; last_revision: number | null; coverage: string | null; stale: boolean; effective_coverage: string; coverage_note: string | null; capabilities: { capabilities?: Record<string, { support?: string; note?: string }> } | null; status: Record<string, unknown> | null; revision_states: { revision: number; state: string; at: string; detail: string | null }[]; telemetry_gaps: [number, number][] }[]).map((d) => {
-    const seq = c.flows.db.prepare("SELECT max_seq FROM device_seq WHERE device_id = ?").get(d.id) as { max_seq: number } | undefined;
+    const ack = c.flows.ackState(d.id);
     const trial = d.revision_states.find((s) => s.state === "trial");
     const caps = Object.entries(d.capabilities?.capabilities ?? {});
     return {
@@ -317,7 +317,7 @@ export function diagnostics(c: Controller, version: string) {
       policy: { applied: d.last_revision, latest_state: d.revision_states[0] ?? null, trial: trial && !d.revision_states.some((s) => s.revision === trial.revision && (s.state === "confirmed" || s.state === "rolled_back")) ? trial : null },
       health: { reported_coverage: d.coverage, effective_coverage: d.effective_coverage, stale: d.stale, note: d.coverage_note, evidence_age_s: d.last_seen_at ? Math.round((now.getTime() - Date.parse(d.last_seen_at)) / 1000) : null },
       capabilities: { supported: caps.filter(([, v]) => v.support === "supported").map(([k]) => k), downgraded: caps.filter(([, v]) => v.support !== "supported").map(([k, v]) => ({ key: k, support: v.support ?? "untested", note: v.note ?? null })) },
-      spool: { acknowledged_seq: seq?.max_seq ?? 0, gaps: d.telemetry_gaps },
+      spool: { acknowledged_seq: ack.acked, highest_seq: ack.max, gaps: d.telemetry_gaps },
     };
   });
   const pubs = c.db.prepare("SELECT status, COUNT(*) AS n FROM publications GROUP BY status").all() as { status: string; n: number }[];

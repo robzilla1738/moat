@@ -27,6 +27,10 @@ export const FLOW_MIGRATIONS = [
    ALTER TABLE flows ADD COLUMN signer TEXT;
    ALTER TABLE flows ADD COLUMN detail TEXT;
    CREATE INDEX flows_exe_at ON flows (exe, at);`,
+  // 3 (W13): at-least-once delivery. `contiguous` is the acknowledgement high-water: every seq at or below it was
+  // stored or explicitly declared lost. Out-of-order records above it are stored but not acknowledged.
+  `ALTER TABLE device_seq ADD COLUMN contiguous INTEGER NOT NULL DEFAULT 0;
+   UPDATE device_seq SET contiguous = max_seq;`,
 ];
 
 export interface FlowRecord {
@@ -69,8 +73,14 @@ export class FlowStore {
     this.db = openDb(path, FLOW_MIGRATIONS);
   }
 
-  /** Insert a batch in one transaction; duplicates (same device+seq) are ignored. Returns counts and new gaps. */
-  insertBatch(deviceId: string, records: FlowRecord[]): { inserted: number; duplicates: number; gaps: [number, number][] } {
+  /**
+   * Insert a batch in one transaction. Delivery is at-least-once: duplicates (same device + seq) are ignored, records
+   * may arrive out of order, and the returned `acked` is the contiguous high-water (every seq ≤ acked is stored or was
+   * declared lost by the endpoint). A hole above it is *pending*, not a gap: the endpoint keeps unacknowledged records
+   * and resends them. A hole becomes a gap only when the endpoint says it no longer has those records
+   * (`lostRanges`: its own gap events, or everything below its spool's lowest retained seq).
+   */
+  insertBatch(deviceId: string, records: FlowRecord[], lostRanges: [number, number][] = []): { inserted: number; duplicates: number; gaps: [number, number][]; acked: number; pending: [number, number][] } {
     return tx(this.db, () => {
       const ins = this.db.prepare(
         "INSERT OR IGNORE INTO flows (device_id, seq, at, kind, app, session_id, process_instance, destination, port, transport, verdict, observed, rule, policy_revision, packets, bytes_out, bytes_in, counter_scope, measurement_source, attempt, exe, signer, detail) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -79,11 +89,9 @@ export class FlowStore {
         "INSERT INTO rollups (hour, device_id, app, destination, verdict, rule, flows, packets, bytes) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?) ON CONFLICT (hour, device_id, app, destination, verdict, rule) DO UPDATE SET flows = flows + 1, packets = packets + excluded.packets, bytes = bytes + excluded.bytes",
       );
       let inserted = 0;
-      const prev = (this.db.prepare("SELECT max_seq, gaps FROM device_seq WHERE device_id = ?").get(deviceId) as { max_seq: number; gaps: string } | undefined) ?? { max_seq: 0, gaps: "[]" };
+      const prev = (this.db.prepare("SELECT max_seq, gaps, contiguous FROM device_seq WHERE device_id = ?").get(deviceId) as { max_seq: number; gaps: string; contiguous: number } | undefined) ?? { max_seq: 0, gaps: "[]", contiguous: 0 };
       let max = prev.max_seq;
-      const gaps: [number, number][] = [];
       for (const r of [...records].sort((a, b) => a.seq - b.seq)) {
-        if (r.seq > max + 1 && max > 0) gaps.push([max + 1, r.seq - 1]);
         if (r.seq > max) max = r.seq;
         const res = ins.run(deviceId, r.seq, r.at, r.kind, r.app ?? null, r.session_id ?? null, r.process_instance ?? null, r.destination ?? null, r.port ?? null, r.transport ?? null, r.verdict ?? null, r.observed ? 1 : 0, r.rule ?? null, r.policy_revision ?? null, r.packets ?? null, r.bytes_out ?? null, r.bytes_in ?? null, r.counter_scope ?? null, r.measurement_source ?? null, r.attempt ?? null, r.exe ?? null, r.signer ?? null, r.detail ?? null);
         if (res.changes) {
@@ -91,10 +99,53 @@ export class FlowStore {
           roll.run(r.at.slice(0, 13) + ":00:00Z", deviceId, r.app ?? r.session_id ?? "", r.destination ?? "", r.verdict ?? (r.observed ? "observed" : ""), r.rule ?? "", r.packets ?? 0, (r.bytes_out ?? 0) + (r.bytes_in ?? 0));
         }
       }
-      const allGaps = [...(JSON.parse(prev.gaps) as [number, number][]), ...gaps].slice(-200);
-      this.db.prepare("INSERT INTO device_seq (device_id, max_seq, gaps) VALUES (?, ?, ?) ON CONFLICT (device_id) DO UPDATE SET max_seq = excluded.max_seq, gaps = excluded.gaps").run(deviceId, max, JSON.stringify(allGaps));
-      return { inserted, duplicates: records.length - inserted, gaps };
+      // Lost ranges the endpoint declared: recorded once each (only the part not already stored or recorded).
+      const known = JSON.parse(prev.gaps) as [number, number][];
+      const newGaps: [number, number][] = [];
+      const has = this.db.prepare("SELECT 1 FROM flows WHERE device_id = ? AND seq = ?");
+      for (const [a, b] of lostRanges) {
+        if (!(a >= 1 && b >= a)) continue;
+        let runStart: number | null = null;
+        for (let q = a; q <= Math.min(b, a + 100_000); q++) {
+          const covered = known.some(([x, y]) => q >= x && q <= y) || newGaps.some(([x, y]) => q >= x && q <= y) || !!has.get(deviceId, q);
+          if (!covered && runStart === null) runStart = q;
+          if (covered && runStart !== null) (newGaps.push([runStart, q - 1]), (runStart = null));
+        }
+        if (runStart !== null) newGaps.push([runStart, Math.min(b, a + 100_000)]);
+        if (b > max) max = b;
+      }
+      const allGaps = [...known, ...newGaps].slice(-200);
+      // Advance the acknowledgement high-water over stored records and declared-lost ranges only.
+      let contiguous = prev.contiguous;
+      const next = this.db.prepare("SELECT seq FROM flows WHERE device_id = ? AND seq > ? ORDER BY seq LIMIT 1000");
+      for (;;) {
+        const before = contiguous;
+        const gap = allGaps.find(([x, y]) => x <= contiguous + 1 && y > contiguous);
+        if (gap) contiguous = gap[1];
+        for (const row of next.all(deviceId, contiguous) as { seq: number }[]) {
+          if (row.seq === contiguous + 1) contiguous = row.seq;
+          else break;
+        }
+        if (contiguous === before) break;
+      }
+      const pending: [number, number][] = [];
+      if (max > contiguous) {
+        let q = contiguous + 1;
+        for (const row of next.all(deviceId, contiguous) as { seq: number }[]) {
+          if (row.seq > q) pending.push([q, row.seq - 1]);
+          q = row.seq + 1;
+          if (pending.length > 50) break;
+        }
+      }
+      this.db.prepare("INSERT INTO device_seq (device_id, max_seq, gaps, contiguous) VALUES (?, ?, ?, ?) ON CONFLICT (device_id) DO UPDATE SET max_seq = excluded.max_seq, gaps = excluded.gaps, contiguous = excluded.contiguous").run(deviceId, max, JSON.stringify(allGaps), contiguous);
+      return { inserted, duplicates: records.length - inserted, gaps: newGaps, acked: contiguous, pending };
     });
+  }
+
+  /** Acknowledgement state for a device (W13 diagnostics). */
+  ackState(deviceId: string): { acked: number; max: number } {
+    const r = this.db.prepare("SELECT contiguous, max_seq FROM device_seq WHERE device_id = ?").get(deviceId) as { contiguous: number; max_seq: number } | undefined;
+    return { acked: r?.contiguous ?? 0, max: r?.max_seq ?? 0 };
   }
 
   recent(opts: { deviceId?: string; verdict?: string; limit?: number; before?: string } = {}) {
