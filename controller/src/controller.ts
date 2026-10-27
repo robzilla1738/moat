@@ -4,6 +4,7 @@
  * clients. It coordinates; it never sits in the traffic path, never signs (see signer.ts) and never sends shell
  * commands to endpoints — device actions are a closed set of typed operations.
  */
+import { Integrations } from "./integrations.ts";
 import { isIP } from "node:net";
 import { audit, CONTROL_MIGRATIONS, HttpError, openDb, tx, type DB } from "./db.ts";
 import { canonicalJson, generateKeyPair, id, keyIdOf, keyPairFromSeed, publicFromHex, requestString, responseString, sha256hex, signB64, token, verifyB64, type KeyPair } from "./crypto.ts";
@@ -64,6 +65,7 @@ export class Controller {
   moatctl: Moatctl;
   now: () => Date;
   key: KeyPair;
+  integrations: Integrations;
   constructor(o: ControllerOptions) {
     const mem = o.dataDir === ":memory:";
     this.db = openDb(mem ? ":memory:" : `${o.dataDir}/control.db`, CONTROL_MIGRATIONS);
@@ -74,6 +76,7 @@ export class Controller {
     this.moatctl = o.moatctl;
     this.key = o.controllerSeedHex ? keyPairFromSeed(o.controllerSeedHex) : generateKeyPair();
     ensureLearning(this);
+    this.integrations = new Integrations(this);
   }
   private iso() {
     return this.now().toISOString();

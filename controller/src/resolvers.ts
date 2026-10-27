@@ -49,8 +49,10 @@ export interface PollResult {
   resolver: string;
   health: Health;
   version: string | null;
-  observations: DnsObservation[];
+  observations: (DnsObservation & { source_id?: string })[];
   stored: number;
+  /** The observations this poll stored for the first time (a re-poll of the same query is not here). */
+  fresh: (DnsObservation & { source_id?: string })[];
   gaps: Gap[];
   pages: number;
   error: string | null;
@@ -291,7 +293,7 @@ export class ResolverPoller {
   async poll(): Promise<PollResult> {
     const st = this.state();
     const at = this.now();
-    const base: PollResult = { resolver: this.cfg.id, health: "error", version: st.version, observations: [], stored: 0, gaps: [], pages: 0, error: null };
+    const base: PollResult = { resolver: this.cfg.id, health: "error", version: st.version, observations: [], stored: 0, fresh: [], gaps: [], pages: 0, error: null };
     try {
       const version = this.cfg.kind === "adguard" ? await this.adguardVersion() : await this.piholeVersion();
       const sup = SUPPORTED[this.cfg.kind];
@@ -322,7 +324,8 @@ export class ResolverPoller {
       // storage keys deduplicate whatever was already stored
       this.db.exec("BEGIN IMMEDIATE");
       try {
-        r.stored = storeDeduped(this.db, r.observations, this.cfg.id);
+        r.fresh = storeDeduped(this.db, r.observations, this.cfg.id);
+        r.stored = r.fresh.length;
         for (const g of r.gaps) this.db.prepare("INSERT INTO dns_gaps (resolver, from_at, to_at, reason, detected_at) VALUES (?, ?, ?, ?, ?)").run(this.cfg.id, g.from, g.to, g.reason, iso);
         this.db.prepare("UPDATE dns_adapter_state SET version = ?, checkpoint = ?, health = 'ok', last_ok_at = ?, last_attempt_at = ?, last_error = NULL, failures = 0, next_poll_at = ?, started_at = COALESCE(started_at, ?) WHERE resolver = ?")
           .run(r.version, ok.checkpoint === null ? null : JSON.stringify(ok.checkpoint), iso, iso, new Date(at.getTime() + this.cfg.intervalMs).toISOString(), ok.startedAt, this.cfg.id);
@@ -344,16 +347,16 @@ export class ResolverPoller {
   }
 }
 
-/** Store observations; a repeat (same resolver id, or same resolver/client/name/instant) is ignored. */
-export function storeDeduped(db: DB, obs: (DnsObservation & { source_id?: string })[], resolver: string): number {
+/** Store observations; a repeat (same resolver id, or same resolver/client/name/instant) is ignored. Returns the new ones. */
+export function storeDeduped(db: DB, obs: (DnsObservation & { source_id?: string })[], resolver: string): (DnsObservation & { source_id?: string })[] {
   const ins = db.prepare("INSERT OR IGNORE INTO dns_observations (resolver, client, name, qtype, answer_status, blocked, at, source_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
   const cli = db.prepare("INSERT INTO dns_clients (id, name, resolver, client, last_query_at, reachable) VALUES (?, ?, ?, ?, ?, 1) ON CONFLICT (resolver, client) DO UPDATE SET last_query_at = MAX(COALESCE(dns_clients.last_query_at, ''), excluded.last_query_at), reachable = 1");
-  let n = 0;
+  const fresh: (DnsObservation & { source_id?: string })[] = [];
   for (const o of obs) {
-    n += Number(ins.run(resolver, o.client, o.name, o.qtype, o.answer_status, o.blocked ? 1 : 0, o.at, o.source_id ?? null).changes);
+    if (Number(ins.run(resolver, o.client, o.name, o.qtype, o.answer_status, o.blocked ? 1 : 0, o.at, o.source_id ?? null).changes)) fresh.push(o);
     cli.run(`${resolver}:${o.client}`, o.client, resolver, o.client, o.at);
   }
-  return n;
+  return fresh;
 }
 
 /** Health for the UI and API: the state row, its open gaps and the evidence age (computed, never a stored label). */

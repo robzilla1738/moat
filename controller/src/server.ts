@@ -107,7 +107,11 @@ r("POST", "/v1/learning/baselines/:id/retire", ({ c, p, params, json }) => retir
 r("GET", "/v1/packs", ({ c, p }) => (c.require(p, "owner", "viewer"), workflowPacks().map((x) => ({ ...x, problems: packProblems(x) }))));
 r("POST", "/v1/packs/propose", ({ c, p, json }) => proposePack(c, c.require(p, "owner"), workflowPacks(), json));
 r("POST", "/v1/incidents/:id/mute", ({ c, p, params, json }) => muteIncident(c, c.require(p, "owner"), params[0]!, json.minutes));
-r("GET", "/v1/dns/clients", ({ c, p }) => (c.require(p, "owner", "viewer"), dnsClients(c.db)));
+r("GET", "/v1/dns/clients", ({ c, p }) => (c.require(p, "owner", "viewer"), dnsClients(c.db, c.now())));
+// W16: resolver health (version, checkpoint age, failures, declared gaps) and a manual poll; DK producer authority.
+r("GET", "/v1/dns/resolvers", ({ c, p }) => (c.require(p, "owner", "viewer"), c.integrations.resolverStatus()));
+r("POST", "/v1/dns/resolvers/:id/poll", ({ c, p, params }) => (c.require(p, "owner"), c.integrations.pollResolver(params[0]!)));
+r("GET", "/v1/integrations/digital-kingdom", ({ c, p }) => (c.require(p, "owner", "viewer"), c.integrations.dkStatus()));
 r("GET", "/v1/notifications", ({ c, p }) => (c.require(p, "owner"), { destinations: c.notifier.list(), status: c.notifier.status() }));
 r("POST", "/v1/notifications/destinations", ({ c, p, json }) => (c.require(p, "owner"), c.notifier.addDestination(json)));
 // --- Harness / Dispatch protected-launch contract

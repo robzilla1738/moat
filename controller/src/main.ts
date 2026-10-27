@@ -8,7 +8,8 @@
  *   delegate-issuer <owner-file> <issuer-public-hex> --devices a,b [--max-ttl 3600] [--days 30] [--kinds allow_once] [--label phone]
  *                                   delegate a bounded approval scope (e.g. phone allow-once) to another key
  *   signer-serve                    run the signer as a separate service (MOAT_SIGNER_KEY, MOAT_OWNER_KEYS, MOAT_SIGNER_SOCKET)
- *   serve                           run the controller (MOAT_DATA, MOAT_SIGNER_SOCKET, MOAT_LISTEN, MOAT_WEB_DIR)
+ *   serve                           run the controller (MOAT_DATA, MOAT_SIGNER_SOCKET, MOAT_LISTEN, MOAT_WEB_DIR;
+ *                                   optional MOAT_RESOLVERS_FILE, MOAT_DK_URL + MOAT_DK_SOURCE_KEY_FILE: docs/integrations.md)
  *   agent-enroll / agent-sync       reference endpoint sync agent for moatd
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -20,6 +21,7 @@ import { Signer } from "./signer.ts";
 import { serveSigner, signerClient } from "./signer-service.ts";
 import { startServer } from "./server.ts";
 import { enroll, syncOnce, type AgentState } from "./agent.ts";
+import { parseResolverConfig } from "./integrations.ts";
 
 const [cmd, ...args] = process.argv.slice(2);
 const env = process.env;
@@ -89,6 +91,17 @@ async function main() {
       startServer(c, { host: host!, port: Number(port), webDir: env.MOAT_WEB_DIR ?? null });
       setInterval(() => void c.notifier.deliver().catch(() => {}), 5000);
       setInterval(() => c.flows.retain(new Date()), 3600_000);
+      if (env.MOAT_RESOLVERS_FILE) {
+        c.integrations.configureResolvers(parseResolverConfig(readFileSync(env.MOAT_RESOLVERS_FILE, "utf8")), (u, i) => fetch(u, i));
+        setInterval(() => void c.integrations.pollDue().catch((e) => console.error(`dns: ${(e as Error).message}`)), 5000);
+      }
+      if (env.MOAT_DK_URL && env.MOAT_DK_SOURCE_KEY_FILE) {
+        c.integrations.configureDk(env.MOAT_DK_URL, readFileSync(env.MOAT_DK_SOURCE_KEY_FILE, "utf8").trim(), (u, i) => fetch(u, i));
+        setInterval(() => {
+          const dk = c.integrations.dk!;
+          if (dk.due()) void dk.push().catch((e) => console.error(`digital kingdom: ${(e as Error).message}`));
+        }, 10_000);
+      }
       console.log(`moat controller on http://${host}:${port} (signer ${signer.keyId})`);
       return;
     }
