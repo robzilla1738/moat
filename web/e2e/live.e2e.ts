@@ -18,7 +18,11 @@ const dialogs: string[] = [];
 const SHOTS = process.env.MOAT_SCREENSHOT_DIR;
 /** Evidence screenshots of the real live UI (CI uploads them; docs/screenshots keeps reviewed copies). */
 async function shot(page: Page, name: string) {
-  if (SHOTS) await page.screenshot({ path: `${SHOTS}/${name}.png` });
+  if (!SHOTS) return;
+  // capture the settled screen, never a frame of the page-enter animation
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.evaluate(() => Promise.all(document.getAnimations().map((a) => a.finished.catch(() => undefined))));
+  await page.screenshot({ path: `${SHOTS}/${name}.png` });
 }
 
 const at = () => new Date().toISOString();
@@ -173,8 +177,9 @@ test("hostile names and destinations render as inert text with a visible warning
 
 test("W12 standalone: Apps-first landing, app detail with four evidence sections, diagnostics and What changed?", async () => {
   const page = await signedIn(h.ownerToken);
-  // one enrolled device: the fleet section reads "This computer", not empty fleet administration
-  await page.locator(".tabbar").getByText("This computer").waitFor();
+  // one enrolled device: the fleet section reads "Computer" in the phone tab bar ("This computer" elsewhere), not
+  // empty fleet administration
+  await page.locator(".tabbar").getByText("Computer", { exact: true }).waitFor();
   await page.getByRole("heading", { name: "Apps", exact: true }).waitFor();
   // the app card (decision cards above it also mention curl, as the blocked process)
   await page.locator("button.app-card").filter({ hasText: "/usr/bin/curl" }).first().click();

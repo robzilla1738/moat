@@ -36,6 +36,8 @@ const NAV: { key: string; label: string; icon: IconName; mobile: boolean }[] = [
 ];
 /** A one-computer user does not land in fleet administration: "Devices" reads "This computer". */
 const navLabel = (key: string, label: string, deviceCount: number) => (key === "devices" && deviceCount === 1 ? "This computer" : label);
+/** The phone tab bar has room for one word per tab: "Computer" there, "This computer" everywhere else. */
+const tabLabel = (key: string, label: string, deviceCount: number) => (key === "devices" && deviceCount === 1 ? "Computer" : label);
 
 function useTheme(): [string, () => void] {
   const [theme, setTheme] = useState(() => (typeof window === "undefined" ? "dark" : localStorage.getItem("moat.theme") ?? (window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark")));
@@ -253,7 +255,7 @@ function Shell() {
               <Icon name={n.icon} size={21} />
               {n.key === "activity" && open > 0 && <span className="tab-badge">{open}</span>}
             </span>
-            <span>{navLabel(n.key, n.label, data.devices.length)}</span>
+            <span className="tab-label">{tabLabel(n.key, n.label, data.devices.length)}</span>
           </a>
         ))}
       </nav>
