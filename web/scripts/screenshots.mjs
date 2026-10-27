@@ -1,5 +1,5 @@
 // Render the demo build to PNGs and check every rendered page for horizontal overflow, clipped text and WCAG AA
-// colour contrast (axe-core), in dark and light, with and without reduced transparency.
+// colour contrast (axe-core), in dark and light. (Moat has no translucency, so Reduce Transparency changes nothing.)
 //
 //   npm run build:demo -w web && node web/scripts/screenshots.mjs <out-dir> [more out-dirs...]
 //
