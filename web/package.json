@@ -10,7 +10,9 @@
     "build:demo": "VITE_MOAT_DEMO=1 vite build --base=./",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "screenshots": "node scripts/screenshots.mjs ../docs/screenshots"
+    "screenshots": "node scripts/screenshots.mjs ../docs/screenshots",
+    "build:live": "vite build --outDir build/live",
+    "e2e": "node --test --test-concurrency=1 e2e/*.e2e.ts"
   },
   "dependencies": {
     "@fontsource-variable/inter": "^5.1.0",

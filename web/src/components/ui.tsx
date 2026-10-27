@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { inspectIdent } from "../data/ident";
 import type { ActionState, ChainNode, Coverage, Device, Support, TimelinePoint } from "../data/types";
 import { COVERAGE, SUPPORT } from "../format";
 
@@ -95,7 +96,7 @@ export function Chain({ nodes, complete = true, compact = false }: { nodes: Chai
         {nodes.map((n, i) => (
           <span key={i} className="chain-inline-node">
             {i > 0 && <span className="chain-arrow">→</span>}
-            {n.name}
+            <Ident value={n.name} />
           </span>
         ))}
         {!complete && <span className="muted"> (ancestry incomplete)</span>}
@@ -110,11 +111,11 @@ export function Chain({ nodes, complete = true, compact = false }: { nodes: Chai
           </span>
           <div className="chain-body">
             <div className="chain-name">
-              {n.name}
+              <Ident value={n.name} />
               {n.note && <span className="chain-note">{n.note}</span>}
             </div>
             <div className="chain-exe mono">
-              {n.exe}
+              <Ident value={n.exe} />
               {n.pid ? <span className="muted"> · pid {n.pid}</span> : null}
             </div>
           </div>
@@ -202,5 +203,23 @@ export function SubNav({ active }: { active: "devices" | "apps" | "coverage" }) 
         </a>
       ))}
     </nav>
+  );
+}
+
+/**
+ * Untrusted identifiers (hostnames, app names, session ids, agent text). Hidden characters are shown as escapes,
+ * and look-alike or altered values carry a visible warning. The raw value is available on hover for copying.
+ */
+export function Ident({ value, kind = "id", mono = false, className = "" }: { value: unknown; kind?: "host" | "text" | "id"; mono?: boolean; className?: string }) {
+  const r = inspectIdent(value, { kind });
+  return (
+    <span className={`ident ${mono ? "mono" : ""} ${className}`} title={r.altered || r.warnings.length ? `${String(value ?? "")}${r.warnings.length ? `\n⚠ ${r.warnings.join("; ")}` : ""}` : undefined}>
+      {r.text}
+      {r.warnings.length > 0 && (
+        <span className="ident-warn" role="note" aria-label={`Caution: ${r.warnings.join("; ")}`}>
+          <Icon name="alert" size={12} /> {r.warnings[0]}
+        </span>
+      )}
+    </span>
   );
 }

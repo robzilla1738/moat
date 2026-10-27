@@ -36,6 +36,32 @@ jobs:
       - uses: actions/upload-pages-artifact@v3
         with:
           path: web/dist
+  live-e2e:
+    name: live UI against the real controller API (Chromium)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build -p moatctl
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build:live -w web
+      - run: npx playwright install --with-deps chromium
+      - name: Browser integration tests (real controller, signer, moatctl, device-signed sync)
+        run: npm run e2e -w web
+        env:
+          MOATCTL: ${{ github.workspace }}/target/debug/moatctl
+          MOAT_SCREENSHOT_DIR: ${{ github.workspace }}/web/build/live-screenshots
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: web-live-screenshots
+          path: web/build/live-screenshots
+          if-no-files-found: ignore
   pages-check:
     name: is GitHub Pages enabled?
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'

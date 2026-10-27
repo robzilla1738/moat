@@ -1,22 +1,28 @@
-import { Badge, Bars, Card, Chain, CoverageBadge, DeviceIcon, Icon, SectionTitle, Stat } from "../components/ui";
-import { useStore } from "../data/store";
+import { Badge, Bars, Card, Chain, CoverageBadge, DeviceIcon, Icon, Ident, SectionTitle, Stat } from "../components/ui";
+import { useData, useFreshness } from "../data/store";
 import { ago, compact } from "../format";
 import { DecisionCard } from "./Activity";
 
+function greeting(h = new Date().getHours()) {
+  return h < 12 ? "Morning" : h < 18 ? "Afternoon" : "Evening";
+}
+
 export function Home({ go }: { go: (to: string) => void }) {
-  const { data } = useStore();
+  const data = useData();
+  const fresh = useFreshness();
   const decisions = data.incidents.filter((i) => i.state === "open" && i.kind === "blocked_connection" && i.sessionId);
   const attention = data.incidents.filter((i) => i.state === "open" && i.kind !== "blocked_connection" && i.urgency !== "low");
-  const covered = data.devices.filter((d) => d.coverage !== "degraded").length;
+  const covered = data.devices.filter((d) => !["degraded", "unknown"].includes(fresh(d).coverage)).length;
   const blocked = data.timeline.reduce((s, p) => s + p.blocked, 0);
   const latest = data.revisions[0];
-  const applied = latest ? latest.devices.filter((d) => d.states.some((s) => s.state === "applied")).length : 0;
+  const applied = latest ? latest.devices.filter((d) => d.states.some((s) => s.state === "applied" || s.state === "confirmed")).length : 0;
 
   return (
     <div className="page">
       <div className="hero">
         <div className="hero-eyebrow">
-          <span className="pulse" /> Evening, Robert
+          <span className="pulse" /> {greeting()}
+          {data.viewer?.name ? `, ${data.viewer.name}` : ""}
         </div>
         <h1 className="hero-title">
           {decisions.length ? (
@@ -58,19 +64,22 @@ export function Home({ go }: { go: (to: string) => void }) {
           </div>
         </Card>
         <Card as="button" onClick={() => go("rules")}>
-          <SectionTitle action={<Badge tone="blue">rev {latest?.revision}</Badge>}>What changed</SectionTitle>
+          <SectionTitle action={latest ? <Badge tone="blue">rev {latest.revision}</Badge> : undefined}>What changed</SectionTitle>
+          {!latest && <div className="muted small">No policy revision has been signed yet.</div>}
           {latest && (
             <>
-              <div className="change-title">{latest.title}</div>
+              <div className="change-title">
+                <Ident value={latest.title} kind="text" />
+              </div>
               <div className="muted small">
-                {latest.author} · {ago(latest.createdAt)} · {latest.authorizedBy === "owner_key" ? "signed with your owner key" : latest.authorizedBy === "narrowing" ? "narrowing change" : "temporary grant"}
+                <Ident value={latest.author} /> · {ago(latest.createdAt)} · {latest.authorizedBy === "owner_key" ? "signed with an owner key" : latest.authorizedBy === "narrowing" ? "narrowing change" : latest.authorizedBy === "temporary_grant_overlay" ? "temporary grant" : "authorizer not recorded"}
               </div>
               <div className="rollout">
                 <div className="rollout-bar">
-                  <span style={{ width: `${(applied / latest.devices.length) * 100}%` }} />
+                  <span style={{ width: `${latest.devices.length ? (applied / latest.devices.length) * 100 : 0}%` }} />
                 </div>
                 <span className="small">
-                  Applied on {applied} of {latest.devices.length} endpoints
+                  Endpoint receipts: applied on {applied} of {latest.devices.length}
                 </span>
               </div>
             </>
@@ -83,13 +92,15 @@ export function Home({ go }: { go: (to: string) => void }) {
           <SectionTitle>Worth a look</SectionTitle>
           <div className="stack">
             {attention.map((i) => (
-              <Card key={i.id} as="button" onClick={() => go(`activity/${i.id}`)} className="notice">
+              <Card key={i.id} as="button" onClick={() => go(`activity/${encodeURIComponent(i.id)}`)} className="notice">
                 <div className={`notice-icon tone-${i.kind === "coverage_lost" ? "red" : "amber"}`}>
                   <Icon name={i.kind === "telemetry_gap" ? "clock" : "alert"} size={18} />
                 </div>
                 <div className="notice-body">
-                  <div className="notice-title">{i.kind === "telemetry_gap" ? "Activity gap on " + data.devices.find((d) => d.id === i.deviceId)?.name : i.reason}</div>
-                  <div className="muted small">{i.explanation}</div>
+                  <div className="notice-title">{i.kind === "telemetry_gap" ? <>Activity gap on <Ident value={data.devices.find((d) => d.id === i.deviceId)?.name ?? i.deviceId} /></> : <Ident value={i.reason} kind="text" />}</div>
+                  <div className="muted small">
+                    <Ident value={i.explanation} kind="text" />
+                  </div>
                 </div>
                 <Icon name="chevron" size={16} className="row-chevron" />
               </Card>
@@ -108,9 +119,11 @@ export function Home({ go }: { go: (to: string) => void }) {
               </span>
               <span className="muted small">{ago(d.lastSeen)}</span>
             </div>
-            <div className="device-name">{d.name}</div>
+            <div className="device-name">
+              <Ident value={d.name} />
+            </div>
             <div className="muted small ellipsis">{d.model}</div>
-            <CoverageBadge c={d.coverage} />
+            <CoverageBadge c={fresh(d).coverage} />
           </Card>
         ))}
       </div>

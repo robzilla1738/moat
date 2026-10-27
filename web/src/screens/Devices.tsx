@@ -1,9 +1,10 @@
 import { SubNav, Badge, Card, CoverageBadge, DeviceIcon, Icon, SectionTitle, SupportBadge } from "../components/ui";
-import { useStore } from "../data/store";
+import { useData, useFreshness } from "../data/store";
 import { ago, compact, COVERAGE } from "../format";
 
 export function Devices({ go }: { go: (to: string) => void }) {
-  const { data } = useStore();
+  const data = useData();
+  const fresh = useFreshness();
   return (
     <div className="page">
       <SubNav active="devices" />
@@ -22,10 +23,10 @@ export function Devices({ go }: { go: (to: string) => void }) {
                 <span className="device-name">{d.name}</span>
                 {d.isController && <Badge>controller</Badge>}
               </span>
-              <span className="muted small ellipsis">{d.coverageNote}</span>
+              <span className="muted small ellipsis">{fresh(d).note ?? d.coverageNote}</span>
             </span>
             <span className="device-row-side">
-              <CoverageBadge c={d.coverage} />
+              <CoverageBadge c={fresh(d).coverage} />
               <span className="muted small">{d.revision ? `rev ${d.revision}` : "no policy"} · {ago(d.lastSeen)}</span>
             </span>
           </Card>
@@ -36,9 +37,11 @@ export function Devices({ go }: { go: (to: string) => void }) {
 }
 
 export function DeviceDetail({ id, go }: { id: string; go: (to: string) => void }) {
-  const { data } = useStore();
+  const data = useData();
+  const fresh = useFreshness();
   const d = data.devices.find((x) => x.id === id);
   if (!d) return <div className="page">Not found</div>;
+  const f = fresh(d);
   return (
     <div className="page">
       <button type="button" className="back" onClick={() => go("devices")}>
@@ -48,14 +51,15 @@ export function DeviceDetail({ id, go }: { id: string; go: (to: string) => void 
         <div className="eyebrow">{d.model}</div>
         <h1 className="detail-title">{d.name}</h1>
         <div className="head-badges">
-          <CoverageBadge c={d.coverage} />
+          <CoverageBadge c={f.coverage} />
+          {f.stale && <Badge tone="amber">stale</Badge>}
           {d.revision && <Badge tone="blue">rev {d.revision} {d.revisionState}</Badge>}
           <span className="muted small">seen {ago(d.lastSeen)}</span>
         </div>
       </div>
       <Card>
-        <p className="claim">{COVERAGE[d.coverage].claim}</p>
-        <div className="muted small">{d.coverageNote}</div>
+        <p className="claim">{COVERAGE[f.coverage].claim}</p>
+        <div className="muted small">{f.note ?? d.coverageNote}</div>
       </Card>
       <div className="grid-3">
         <Card>

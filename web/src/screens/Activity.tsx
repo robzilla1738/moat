@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { Badge, Card, Chain, Empty, Icon, SectionTitle, Steps } from "../components/ui";
-import { useStore } from "../data/store";
-import type { Incident } from "../data/types";
+import { Badge, Card, Chain, Empty, Icon, Ident, SectionTitle, Steps } from "../components/ui";
+import { useData, useStore } from "../data/store";
+import type { ActionState, Incident } from "../data/types";
 import { ago, until } from "../format";
 
 const KIND: Record<Incident["kind"], { label: string; icon: "lock" | "alert" | "clock" | "globe" | "spark" }> = {
@@ -14,55 +14,94 @@ const KIND: Record<Incident["kind"], { label: string; icon: "lock" | "alert" | "
   new_destination: { label: "New destination", icon: "spark" },
 };
 
+/** Why an allow-once cannot be offered for this incident, or null when the controller could accept it. */
+export function allowOnceUnavailable(i: Incident): string | null {
+  if (i.kind !== "blocked_connection") return "Only a blocked connection can be allowed once.";
+  if (!i.sessionId) return "Allow once is bound to a verified protected session. Ordinary-app grants stay unavailable until device-scoped app identity is proven (roadmap W03/W07).";
+  if (!i.port || i.destination === "rule-scoped" || i.destination === "-") return "This platform recorded a rule-scoped counter, not a destination. Make a reviewed policy change instead.";
+  if (i.state === "resolved") return "This incident is resolved.";
+  return null;
+}
+
+function phaseBadge(a: ActionState) {
+  const map: Record<ActionState["phase"], [string, string]> = {
+    sending: ["blue", "sending"],
+    pending: ["amber", "pending: no endpoint receipt yet"],
+    active: ["green", "active on the endpoint"],
+    rejected: ["red", "rejected"],
+    failed: ["red", "not sent"],
+    expired: ["neutral", "expired"],
+    revoked: ["neutral", "revoked"],
+    done: ["neutral", "recorded"],
+    simulated: ["violet", "demo: simulated"],
+  };
+  const [tone, label] = map[a.phase];
+  return <Badge tone={tone}>{label}</Badge>;
+}
+
 export function DecisionCard({ incident: i, go, detailed = false }: { incident: Incident; go: (to: string) => void; detailed?: boolean }) {
-  const { allowOnce, keepBlocked, data } = useStore();
+  const { allowOnce, keepBlocked, actions, canAct } = useStore();
+  const data = useData();
   const device = data.devices.find((d) => d.id === i.deviceId);
-  const pending = i.action && i.action.steps.some((s) => s.state !== "done");
+  const action = actions[i.id];
+  const unavailable = allowOnceUnavailable(i);
+  const busy = action?.phase === "sending" || action?.phase === "pending";
+  const settled = action && !["failed", "rejected"].includes(action.phase);
   return (
-    <Card className={`decision ${i.action ? "decision-acted" : ""}`}>
-      <button type="button" className="decision-head" onClick={() => go(`activity/${i.id}`)}>
+    <Card className={`decision ${action ? "decision-acted" : ""}`}>
+      <button type="button" className="decision-head" onClick={() => go(`activity/${encodeURIComponent(i.id)}`)}>
         <div className="decision-icon">
           <Icon name="lock" size={18} />
         </div>
         <div className="decision-meta">
-          <div className="decision-chain">{i.chain ? <Chain nodes={i.chain} compact complete={i.chainComplete} /> : i.app}</div>
+          <div className="decision-chain">{i.chain ? <Chain nodes={i.chain} compact complete={i.chainComplete} /> : <Ident value={i.app ?? "unknown app"} />}</div>
           <div className="muted small">
-            {device?.name} · {i.sessionId ? `session ${i.sessionId.slice(-6)}` : "no session"} · {ago(i.lastAt)}
+            <Ident value={device?.name ?? i.deviceId} /> · {i.sessionId ? <>session <Ident value={i.sessionId.slice(-6)} mono /></> : "no session"} · {ago(i.lastAt)}
             {i.occurrences > 1 ? ` · ${i.occurrences}×` : ""}
           </div>
         </div>
         {!detailed && <Icon name="chevron" size={16} className="row-chevron" />}
       </button>
       <div className="decision-dest">
-        <span className="mono dest">{i.destination}</span>
+        <Ident value={i.destination} kind="host" mono className="dest" />
         <span className="muted">
-          {i.protocol ?? `port ${i.port}`}
+          {i.protocol ?? (i.port ? `port ${i.port}` : "port not recorded")}
           {i.destinationLabel ? ` · ${i.destinationLabel}` : ""}
         </span>
       </div>
-      <p className="decision-text">{i.explanation}</p>
-      {i.action ? (
-        <div className="decision-progress">
-          <Steps action={i.action} />
-          {i.action.kind === "allow_once" && i.action.expiresAt && !pending && <div className="small muted">Expires on its own · {until(i.action.expiresAt)}</div>}
+      <p className="decision-text">
+        <Ident value={i.explanation} kind="text" />
+      </p>
+      {action && (
+        <div className="decision-progress" aria-live="polite">
+          <div className="decision-phase">{phaseBadge(action)}</div>
+          <Steps action={action} />
+          {action.error && <div className="small bad">{action.error}</div>}
+          {action.kind === "allow_once" && action.expiresAt && action.phase === "active" && <div className="small muted">Expires at its original deadline · {until(action.expiresAt)}. Retries never extend it.</div>}
         </div>
-      ) : (
+      )}
+      {!settled && (
         <div className="decision-actions">
-          <button type="button" className="btn btn-primary" onClick={() => allowOnce(i.id)}>
+          <button type="button" className="btn btn-primary" disabled={!!unavailable || !canAct.ok || busy} onClick={() => allowOnce(i)} aria-describedby={`why-${i.id}`}>
             <Icon name="check" size={16} /> Allow once for this session
           </button>
-          <button type="button" className="btn btn-quiet" onClick={() => keepBlocked(i.id)}>
+          <button type="button" className="btn btn-quiet" disabled={!canAct.ok || busy} onClick={() => keepBlocked(i)}>
             Keep blocked
           </button>
         </div>
       )}
-      {!i.action && <div className="decision-fine">Only this session, this destination, {i.protocol ?? "this port"}, for 1 hour. Bound to policy rev {i.policyRevision}; a newer revision makes this button stale.</div>}
+      {!settled && (
+        <div className="decision-fine" id={`why-${i.id}`}>
+          {unavailable ?? canAct.reason ?? `Only this session on ${device?.name ?? i.deviceId}, this destination, ${i.protocol ?? "this port"}, for 1 hour. Bound to incident revision ${i.revision} and policy revision ${data.policyRevision}; if either changes, the controller refuses it as stale.`}
+        </div>
+      )}
     </Card>
   );
 }
 
 export function Activity({ go }: { go: (to: string) => void }) {
-  const { data } = useStore();
+  const data = useData();
+  const { actions } = useStore();
   const [filter, setFilter] = useState<"all" | "open" | "blocked" | "gaps">("open");
   const list = data.incidents.filter((i) => (filter === "all" ? true : filter === "open" ? i.state === "open" : filter === "blocked" ? i.kind === "blocked_connection" || i.kind === "dns_blocked" : i.kind === "telemetry_gap" || i.kind === "coverage_lost"));
   return (
@@ -83,7 +122,7 @@ export function Activity({ go }: { go: (to: string) => void }) {
           const k = KIND[i.kind];
           const device = data.devices.find((d) => d.id === i.deviceId);
           return (
-            <button key={i.id} type="button" className={`tl-item urg-${i.urgency} ${i.state !== "open" ? "tl-quiet" : ""}`} onClick={() => go(`activity/${i.id}`)}>
+            <button key={i.id} type="button" className={`tl-item urg-${i.urgency} ${i.state !== "open" ? "tl-quiet" : ""}`} onClick={() => go(`activity/${encodeURIComponent(i.id)}`)}>
               <span className="tl-rail">
                 <span className={`tl-icon kind-${i.kind}`}>
                   <Icon name={k.icon} size={14} />
@@ -95,23 +134,24 @@ export function Activity({ go }: { go: (to: string) => void }) {
                   <span className="muted small">{ago(i.lastAt)}</span>
                 </span>
                 <span className="tl-title">
-                  {i.chain ? <Chain nodes={i.chain} compact /> : device?.name}
+                  {i.chain ? <Chain nodes={i.chain} compact /> : <Ident value={device?.name ?? i.deviceId} />}
                   {i.destination !== "-" && (
                     <>
                       {" "}
-                      <span className="muted">→</span> <span className="mono">{i.destination}</span>
+                      <span className="muted">→</span> <Ident value={i.destination} kind="host" mono />
                     </>
                   )}
                 </span>
                 <span className="tl-sub muted small">
-                  {device?.name} · {i.reason}
+                  <Ident value={device?.name ?? i.deviceId} /> · <Ident value={i.reason} kind="text" />
                 </span>
                 <span className="tl-badges">
                   {i.occurrences > 1 && <Badge>{i.occurrences}×</Badge>}
                   {i.state === "acknowledged" && <Badge tone="neutral">acknowledged</Badge>}
                   {i.state === "resolved" && <Badge tone="neutral">resolved</Badge>}
                   {i.kind === "dns_blocked" && <Badge tone="violet">DNS only</Badge>}
-                  {i.action?.kind === "allow_once" && <Badge tone="green">allowed once</Badge>}
+                  {actions[i.id] && actions[i.id]!.kind === "allow_once" && actions[i.id]!.phase === "active" && <Badge tone="green">allowed once</Badge>}
+                  {actions[i.id] && actions[i.id]!.kind === "allow_once" && actions[i.id]!.phase === "pending" && <Badge tone="amber">allow pending</Badge>}
                 </span>
               </span>
             </button>
@@ -128,10 +168,22 @@ export function Activity({ go }: { go: (to: string) => void }) {
 }
 
 export function IncidentDetail({ id, go }: { id: string; go: (to: string) => void }) {
-  const { data, acknowledge } = useStore();
-  const i = data.incidents.find((x) => x.id === id);
-  if (!i) return <div className="page">Not found</div>;
+  const { acknowledge, incidentById, actions, canAct } = useStore();
+  const data = useData();
+  const i = incidentById(id);
+  if (!i)
+    return (
+      <div className="page">
+        <button type="button" className="back" onClick={() => go("activity")}>
+          <Icon name="chevron" size={16} className="flip" /> Activity
+        </button>
+        <Empty title="No such incident" icon="alert">
+          Nothing with this reference exists in the data this page has. No other incident was opened in its place.
+        </Empty>
+      </div>
+    );
   const decision = i.kind === "blocked_connection" && i.sessionId && i.state !== "resolved";
+  const action = actions[i.id];
   return (
     <div className="page">
       <button type="button" className="back" onClick={() => go("activity")}>
@@ -139,19 +191,26 @@ export function IncidentDetail({ id, go }: { id: string; go: (to: string) => voi
       </button>
       <div className="page-head">
         <div className="eyebrow">
-          {KIND[i.kind].label} · {data.devices.find((d) => d.id === i.deviceId)?.name}
+          {KIND[i.kind].label} · <Ident value={data.devices.find((d) => d.id === i.deviceId)?.name ?? i.deviceId} /> · incident <Ident value={i.id} mono /> rev {i.revision}
         </div>
-        <h1 className="detail-title">{i.destination !== "-" ? <span className="mono">{i.destination}</span> : i.reason}</h1>
+        <h1 className="detail-title">{i.destination !== "-" ? <Ident value={i.destination} kind="host" mono /> : <Ident value={i.reason} kind="text" />}</h1>
       </div>
       {decision ? (
         <DecisionCard incident={i} go={go} detailed />
       ) : (
         <Card>
-          <p className="decision-text">{i.explanation}</p>
+          <p className="decision-text">
+            <Ident value={i.explanation} kind="text" />
+          </p>
+          {action && <Steps action={action} />}
+          {action?.error && <div className="small bad">{action.error}</div>}
           {i.state === "open" && (
-            <button type="button" className="btn btn-quiet" onClick={() => acknowledge(i.id)}>
-              Acknowledge
-            </button>
+            <>
+              <button type="button" className="btn btn-quiet" disabled={!canAct.ok || action?.phase === "sending"} onClick={() => acknowledge(i)}>
+                Acknowledge
+              </button>
+              <div className="muted small">{canAct.reason ?? "Acknowledge means seen. It never allows anything; a new occurrence reopens the incident."}</div>
+            </>
           )}
         </Card>
       )}
@@ -167,7 +226,9 @@ export function IncidentDetail({ id, go }: { id: string; go: (to: string) => voi
           <dl className="facts">
             <div>
               <dt>Decision</dt>
-              <dd>{i.reason}</dd>
+              <dd>
+                <Ident value={i.reason} kind="text" />
+              </dd>
             </div>
             {i.policyRevision && (
               <div>
@@ -183,7 +244,7 @@ export function IncidentDetail({ id, go }: { id: string; go: (to: string) => voi
               <div key={f.label}>
                 <dt>{f.label}</dt>
                 <dd>
-                  {f.value}
+                  <Ident value={f.value} kind="text" />
                   {f.source && <span className="fact-src">{f.source}</span>}
                 </dd>
               </div>

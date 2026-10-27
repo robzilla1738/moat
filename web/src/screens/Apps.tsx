@@ -1,10 +1,10 @@
 import { useState } from "react";
 import { Badge, Card, Icon, SubNav } from "../components/ui";
-import { useStore } from "../data/store";
+import { useData } from "../data/store";
 import { ago } from "../format";
 
 export function Apps({ go: _go }: { go: (to: string) => void }) {
-  const { data } = useStore();
+  const data = useData();
   const [q, setQ] = useState("");
   const list = data.apps.filter((a) => (a.name + a.family + a.category).toLowerCase().includes(q.toLowerCase()));
   return (

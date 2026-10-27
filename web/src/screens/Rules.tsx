@@ -1,14 +1,80 @@
 import { useState } from "react";
-import { Badge, Card, Icon, SectionTitle } from "../components/ui";
-import { useStore } from "../data/store";
+import { Badge, Card, Icon, Ident, SectionTitle } from "../components/ui";
+import type { WireProposal } from "../data/api";
+import { useData, useStore } from "../data/store";
 import type { RevisionState } from "../data/types";
 import { ago, until } from "../format";
 
 const STATES: RevisionState[] = ["approved", "distributed", "received", "applied", "verified"];
 
+const AUTH: Record<string, [string, string]> = { owner_key: ["blue", "owner key"], narrowing: ["neutral", "narrowing"], temporary_grant_overlay: ["green", "grant overlay"] };
+
+/** A prepared rollback: a new proposal with an older revision's rules. Broadening needs an owner-key signature made off this page. */
+function ProposalPanel({ p, onDone }: { p: WireProposal; onDone: () => void }) {
+  const { approve, canAct } = useStore();
+  const [auth, setAuth] = useState("");
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const submit = async () => {
+    setErr(null);
+    let a: { key_id: string; signature: string } | null = null;
+    if (p.broadening) {
+      try {
+        const j = JSON.parse(auth) as { key_id?: unknown; signature?: unknown };
+        if (typeof j.key_id !== "string" || typeof j.signature !== "string") throw new Error("needs key_id and signature");
+        a = { key_id: j.key_id, signature: j.signature };
+      } catch (e) {
+        setErr(`Paste the JSON printed by owner-authorize (${(e as Error).message}).`);
+        return;
+      }
+    }
+    setBusy(true);
+    try {
+      await approve(p.id, a);
+      onDone();
+    } catch {
+      /* the store reported it */
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Card className="proposal">
+      <SectionTitle action={<Badge tone={p.broadening ? "amber" : "neutral"}>{p.broadening ? "broadens access" : "narrowing"}</Badge>}>Prepared, not signed</SectionTitle>
+      <div className="small">
+        Proposal <Ident value={p.id} mono /> restores revision {p.rollback_of}'s rules as a new revision on top of {p.base_revision}. Nothing changes on any device until it is signed and each device reports it applied.
+      </div>
+      {p.broadening ? (
+        <>
+          <div className="small muted">This broadens access, so the signer needs your owner key. The key never belongs in a browser. On the machine that holds it, run:</div>
+          <pre className="code">{`moat-controller owner-authorize <owner.key> ${p.authorization_subject} ${p.authorization_digest}`}</pre>
+          <label className="small" htmlFor={`auth-${p.id}`}>
+            Paste the printed authorization
+          </label>
+          <textarea id={`auth-${p.id}`} className="input mono" rows={3} value={auth} onChange={(e) => setAuth(e.target.value)} spellCheck={false} />
+        </>
+      ) : (
+        <div className="small muted">Narrowing changes are signed without an owner key.</div>
+      )}
+      {err && <div className="small bad">{err}</div>}
+      <div className="decision-actions">
+        <button type="button" className="btn btn-primary" disabled={!canAct.ok || busy || (p.broadening && !auth.trim())} onClick={submit}>
+          {busy ? "Signing…" : "Ask the signer to sign"}
+        </button>
+        <button type="button" className="btn btn-quiet" onClick={onDone}>
+          Close
+        </button>
+      </div>
+      {canAct.reason && <div className="small muted">{canAct.reason}</div>}
+    </Card>
+  );
+}
+
 export function Rules({ go }: { go: (to: string) => void }) {
-  const { data, rollback } = useStore();
+  const data = useData();
+  const { rollback, canAct, mode } = useStore();
   const [openRev, setOpenRev] = useState<number>(data.revisions[0]?.revision ?? 0);
+  const [proposal, setProposal] = useState<WireProposal | null>(null);
   const sim = data.simulation;
   return (
     <div className="page">
@@ -17,6 +83,9 @@ export function Rules({ go }: { go: (to: string) => void }) {
         <p className="lede">Policy lives in Git and is signed by a separate signer. Broadening changes need your owner key; agents can prepare a diff but never authorize one.</p>
       </div>
 
+      {proposal && <ProposalPanel p={proposal} onDone={() => setProposal(null)} />}
+
+      {sim ? (
       <Card className="sim">
         <SectionTitle action={<Badge tone="amber">proposal · not signed</Badge>}>Simulate before deploying</SectionTitle>
         <div className="sim-title">{sim.title}</div>
@@ -60,6 +129,12 @@ export function Rules({ go }: { go: (to: string) => void }) {
         {sim.unacknowledged.length > 0 && <div className="muted small">Not acknowledging the current revision: {sim.unacknowledged.join(", ")}</div>}
         <div className="footnote">{sim.disclaimer}</div>
       </Card>
+      ) : (
+        <Card>
+          <SectionTitle>Simulate before deploying</SectionTitle>
+          <div className="small muted">No open proposal. Prepare one with <span className="mono">moat-controller</span> or an agent proposal; its replay against recorded flows appears here before anything is signed.</div>
+        </Card>
+      )}
 
       {data.grants.length > 0 && (
         <>
@@ -69,9 +144,11 @@ export function Rules({ go }: { go: (to: string) => void }) {
               <Card key={g.id} className="grant">
                 <Icon name="clock" size={16} />
                 <div>
-                  <div className="mono small">{g.destination}</div>
+                  <div className="small">
+                    <Ident value={g.destination} kind="host" mono />
+                  </div>
                   <div className="muted small">
-                    {g.scope} · by {g.by}
+                    <Ident value={g.scope} /> · by <Ident value={g.by} />
                   </div>
                 </div>
                 <Badge tone="green">{until(g.expiresAt)}</Badge>
@@ -90,12 +167,14 @@ export function Rules({ go }: { go: (to: string) => void }) {
               <button type="button" className="rev-head" onClick={() => setOpenRev(open ? 0 : r.revision)}>
                 <span className={`rev-num ${r.revision === data.policyRevision ? "rev-current" : ""}`}>{r.revision}</span>
                 <span className="rev-meta">
-                  <span className="rev-title">{r.title}</span>
+                  <span className="rev-title">
+                    <Ident value={r.title} kind="text" />
+                  </span>
                   <span className="muted small">
-                    {r.author} · {ago(r.createdAt)} · {r.source}
+                    <Ident value={r.author} /> · {ago(r.createdAt)} · {r.source}
                   </span>
                 </span>
-                <Badge tone={r.authorizedBy === "owner_key" ? "blue" : r.authorizedBy === "narrowing" ? "neutral" : "green"}>{r.authorizedBy === "owner_key" ? "owner key" : r.authorizedBy === "narrowing" ? "narrowing" : "grant overlay"}</Badge>
+                <Badge tone={r.authorizedBy ? AUTH[r.authorizedBy]![0] : "amber"}>{r.authorizedBy ? AUTH[r.authorizedBy]![1] : "authorizer not recorded"}</Badge>
               </button>
               {open && (
                 <div className="rev-body">
@@ -140,9 +219,12 @@ export function Rules({ go }: { go: (to: string) => void }) {
                     </ul>
                   )}
                   {r.revision !== data.policyRevision && (
-                    <button type="button" className="btn btn-quiet" onClick={() => rollback(r.revision)}>
-                      <Icon name="undo" size={15} /> Roll back to this
-                    </button>
+                    <>
+                      <button type="button" className="btn btn-quiet" disabled={!canAct.ok} onClick={async () => setProposal(await rollback(r.revision))}>
+                        <Icon name="undo" size={15} /> Prepare rollback to this
+                      </button>
+                      <div className="small muted">{canAct.reason ?? (mode === "demo" ? "Demo: preparing sends nothing." : "Prepares a new proposal; it is signed only after review.")}</div>
+                    </>
                   )}
                 </div>
               )}

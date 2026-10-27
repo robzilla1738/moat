@@ -42,6 +42,8 @@ export const CONTROL_MIGRATIONS: string[] = [
    INSERT INTO device_revisions_v2 SELECT * FROM device_revisions;
    DROP TABLE device_revisions;
    ALTER TABLE device_revisions_v2 RENAME TO device_revisions;`,
+  // 3: the authorizer of each revision is recorded from the signer's answer (never assumed by a consumer).
+  `ALTER TABLE policy_revisions ADD COLUMN authorized_by TEXT;`,
 ];
 
 export function openDb(path: string, migrations: string[]): DB {

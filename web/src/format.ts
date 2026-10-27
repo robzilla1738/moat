@@ -1,6 +1,7 @@
 import type { Coverage, Support } from "./data/types";
 
-export function ago(iso: string, now = Date.now()): string {
+export function ago(iso: string | null | undefined, now = Date.now()): string {
+  if (!iso) return "never";
   const s = Math.max(0, Math.round((now - Date.parse(iso)) / 1000));
   if (s < 45) return "just now";
   const m = Math.round(s / 60);
@@ -32,6 +33,7 @@ export const COVERAGE: Record<Coverage, { label: string; tone: string; claim: st
   "dns-only": { label: "DNS only", tone: "violet", claim: "Resolver queries only. No app, process, connection or byte count." },
   degraded: { label: "Degraded", tone: "amber", claim: "Something the policy needs is not in force. See why." },
   isolated: { label: "Isolated", tone: "red", claim: "Emergency isolation: only the recovery paths you chose are open." },
+  unknown: { label: "Unknown", tone: "neutral", claim: "No current report from this device. Moat cannot say what it enforces right now." },
 };
 
 export const SUPPORT: Record<Support, { label: string; tone: string }> = {

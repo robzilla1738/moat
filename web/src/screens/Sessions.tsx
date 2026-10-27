@@ -1,9 +1,9 @@
-import { Badge, Card, Chain, Icon, SectionTitle } from "../components/ui";
-import { useStore } from "../data/store";
+import { Badge, Card, Chain, Icon, Ident, SectionTitle } from "../components/ui";
+import { useData, useStore } from "../data/store";
 import { ago } from "../format";
 
 export function Sessions({ go }: { go: (to: string) => void }) {
-  const { data } = useStore();
+  const data = useData();
   return (
     <div className="page">
       <div className="page-head">
@@ -50,7 +50,8 @@ export function Sessions({ go }: { go: (to: string) => void }) {
 }
 
 export function SessionDetail({ id, go }: { id: string; go: (to: string) => void }) {
-  const { data } = useStore();
+  const data = useData();
+  const { closeSession, canAct } = useStore();
   const s = data.sessions.find((x) => x.id === id);
   if (!s) return <div className="page">Not found</div>;
   const device = data.devices.find((d) => d.id === s.deviceId);
@@ -119,16 +120,18 @@ export function SessionDetail({ id, go }: { id: string; go: (to: string) => void
       {s.intent && (
         <Card>
           <SectionTitle action={<Badge>self-reported</Badge>}>Stated intent</SectionTitle>
-          <p className="intent">“{s.intent}”</p>
+          <p className="intent">
+            “<Ident value={s.intent} kind="text" />”
+          </p>
           <div className="muted small">Reported by the agent. It enriches the timeline; it cannot grant access or confirm a block.</div>
         </Card>
       )}
       {s.state === "running" && (
         <div className="decision-actions">
-          <button type="button" className="btn btn-danger">
-            End session
+          <button type="button" className="btn btn-danger" disabled={!canAct.ok || !!s.closeRequestedAt} onClick={() => closeSession(s)}>
+            {s.closeRequestedAt ? "Close requested" : "End session"}
           </button>
-          <span className="muted small">Sent as a typed close action on the device's next sync; done when the endpoint reports it ended.</span>
+          <span className="muted small">{canAct.reason ?? (s.closeRequestedAt ? `Requested ${ago(s.closeRequestedAt)}; still running until the endpoint reports it ended.` : "Sent as a typed close action on the device's next sync; done when the endpoint reports it ended.")}</span>
         </div>
       )}
     </div>

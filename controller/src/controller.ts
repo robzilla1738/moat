@@ -319,14 +319,25 @@ export class Controller {
     if (!i) throw new HttpError(404, "no such incident");
     return { ...i, facts: JSON.parse(i.facts), log: this.db.prepare("SELECT seq, type, source_ref, at, actor FROM incident_log WHERE incident_id = ? ORDER BY seq DESC LIMIT 50").all(iid) };
   }
-  acknowledge(actor: Principal, iid: string) {
+  /** State changes carry the incident revision the caller saw: a changed incident is never acted on blindly. */
+  private precondition(iid: string, expected: unknown): IncidentRow {
+    const i = this.db.prepare("SELECT * FROM incidents WHERE id = ?").get(iid) as unknown as IncidentRow | undefined;
+    if (!i) throw new HttpError(404, "no such incident");
+    if (expected === undefined || expected === null || !Number.isInteger(Number(expected))) throw new HttpError(428, "expected_revision is required: send the incident revision you reviewed");
+    if (Number(expected) !== i.revision) throw new HttpError(409, `stale: the incident is now at revision ${i.revision}; review it again`);
+    return i;
+  }
+  acknowledge(actor: Principal, iid: string, expectedRevision?: unknown) {
     this.require(actor, "owner");
+    this.precondition(iid, expectedRevision);
     const r = this.db.prepare("UPDATE incidents SET state = 'acknowledged', acknowledged_at = ?, acknowledged_occurrences = occurrences WHERE id = ? AND state = 'open'").run(this.iso(), iid);
     if (r.changes) this.db.prepare("INSERT INTO incident_log (incident_id, type, at, actor) VALUES (?, 'acknowledged', ?, ?)").run(iid, this.iso(), actor.id);
     return this.incident(iid);
   }
-  resolve(actor: Principal, iid: string) {
+  resolve(actor: Principal, iid: string, expectedRevision?: unknown) {
     this.require(actor, "owner");
+    const i = this.precondition(iid, expectedRevision);
+    if (i.state === "resolved") return this.incident(iid);
     this.db.prepare("UPDATE incidents SET state = 'resolved', resolved_at = ? WHERE id = ?").run(this.iso(), iid);
     this.db.prepare("INSERT INTO incident_log (incident_id, type, at, actor) VALUES (?, 'resolved', ?, ?)").run(iid, this.iso(), actor.id);
     return this.incident(iid);
@@ -398,8 +409,8 @@ export class Controller {
     const profiles = norm.code === 0 ? ((JSON.parse(norm.stdout) as { profiles: { id: string }[] }).profiles ?? []).map((p) => p.id) : [];
     const res = await this.signer.sign({ subject, source: effective, revision, rollbackOf: opts.rollbackOf ?? null, platforms: this.platformsNeeded(), ownerAuthorization: opts.ownerAuthorization ?? null, ownerSessionAttested: opts.ownerSessionAttested ?? false, issuedAt: this.now() });
     tx(this.db, () => {
-      this.db.prepare("INSERT INTO policy_revisions (revision, proposal_id, source, source_digest, effective_source, rollback_of, grants, profiles, approved_by, owner_key_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-        .run(revision, opts.proposalId ?? null, base, sha256hex(base), effective, opts.rollbackOf ?? null, JSON.stringify(grants.map((g) => g.id)), JSON.stringify(profiles), actor.id, opts.ownerAuthorization?.key_id ?? null, this.iso());
+      this.db.prepare("INSERT INTO policy_revisions (revision, proposal_id, source, source_digest, effective_source, rollback_of, grants, profiles, approved_by, owner_key_id, created_at, authorized_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+        .run(revision, opts.proposalId ?? null, base, sha256hex(base), effective, opts.rollbackOf ?? null, JSON.stringify(grants.map((g) => g.id)), JSON.stringify(profiles), actor.id, res.authorizedBy === "owner_key" ? opts.ownerAuthorization?.key_id ?? null : null, this.iso(), res.authorizedBy);
       for (const s of res.snapshots) this.db.prepare("INSERT INTO snapshots (revision, platform, signed, report) VALUES (?, ?, ?, ?)").run(revision, s.platform, JSON.stringify(s.signed), JSON.stringify(s.report));
       for (const d of this.db.prepare("SELECT id FROM devices WHERE revoked_at IS NULL").all() as { id: string }[]) this.recordRevisionState(d.id, revision, "approved", null);
       for (const g of grants) this.db.prepare("UPDATE grants SET revision = COALESCE(revision, ?) WHERE id = ?").run(revision, String(g.id));
@@ -434,9 +445,10 @@ export class Controller {
   }
 
   revisions() {
-    const revs = this.db.prepare("SELECT revision, proposal_id, source_digest, rollback_of, grants, approved_by, owner_key_id, created_at FROM policy_revisions ORDER BY revision DESC LIMIT 50").all() as { revision: number; proposal_id: string | null; source_digest: string; rollback_of: number | null; grants: string; approved_by: string; owner_key_id: string | null; created_at: string }[];
+    const revs = this.db.prepare("SELECT revision, proposal_id, source_digest, rollback_of, grants, approved_by, owner_key_id, authorized_by, created_at FROM policy_revisions ORDER BY revision DESC LIMIT 50").all() as { revision: number; proposal_id: string | null; source_digest: string; rollback_of: number | null; grants: string; approved_by: string; owner_key_id: string | null; authorized_by: string | null; created_at: string }[];
     return revs.map((r) => ({
       ...r,
+      message: r.proposal_id ? ((this.db.prepare("SELECT message FROM policy_proposals WHERE id = ?").get(r.proposal_id) as { message: string } | undefined)?.message ?? null) : null,
       grants: JSON.parse(String(r.grants)),
       devices: this.db.prepare("SELECT device_id, state, at, detail FROM device_revisions WHERE revision = ? ORDER BY device_id, at").all(Number(r.revision)),
       platforms: this.db.prepare("SELECT platform, report FROM snapshots WHERE revision = ?").all(Number(r.revision)).map((s) => ({ platform: (s as { platform: string }).platform, report: JSON.parse((s as { report: string }).report) })),
@@ -485,6 +497,52 @@ export class Controller {
 
   grants(): (Record<string, unknown> & { id: string; state: string })[] {
     return (this.db.prepare("SELECT * FROM grants ORDER BY created_at DESC LIMIT 100").all() as (Record<string, unknown> & { id: string })[]).map((g) => ({ ...g, state: g.revoked_at ? "revoked" : String(g.expires_at) <= this.iso() ? "expired" : "active" }));
+  }
+
+  /**
+   * The status of one grant, derived only from endpoint evidence: "active" needs an endpoint receipt for a revision
+   * that carries the grant; a request, a signature or a delivery is "pending". Expiry and revocation are computed
+   * here from the grant's original deadline, never extended by a later revision.
+   */
+  grantStatus(gid: string) {
+    const g = this.db.prepare("SELECT * FROM grants WHERE id = ?").get(gid) as Record<string, unknown> | undefined;
+    if (!g) throw new HttpError(404, "no such grant");
+    const rev = g.revision === null || g.revision === undefined ? null : Number(g.revision);
+    const targets = g.device_id ? [String(g.device_id)] : (this.db.prepare("SELECT id FROM devices WHERE revoked_at IS NULL ORDER BY id").all() as { id: string }[]).map((r) => r.id);
+    const devices = targets.map((deviceId) => {
+      const dev = this.db.prepare("SELECT last_seen_at, coverage FROM devices WHERE id = ?").get(deviceId) as Pick<DeviceRow, "last_seen_at" | "coverage"> | undefined;
+      const rows = rev === null ? [] : (this.db.prepare("SELECT revision, state, at, detail FROM device_revisions WHERE device_id = ? AND revision >= ? ORDER BY revision DESC, at DESC").all(deviceId, rev) as { revision: number; state: string; at: string; detail: string | null }[]);
+      const latestApplied = rows.find((r) => r.state === "applied" || r.state === "confirmed" || r.state === "trial");
+      const rolledBack = rows.find((r) => r.state === "rolled_back" && (!latestApplied || r.revision >= latestApplied.revision));
+      const rejected = rows.find((r) => r.state === "rejected" && (!latestApplied || r.revision >= latestApplied.revision));
+      const state = rolledBack ? "rolled_back" : rejected ? "rejected" : latestApplied ? (latestApplied.state === "trial" ? "trial" : "applied") : rows.some((r) => r.state === "received") ? "received" : rows.some((r) => r.state === "distributed") ? "delivered" : "queued";
+      const evidence = rolledBack ?? rejected ?? latestApplied ?? rows[0] ?? null;
+      return { device_id: deviceId, state, evidence, ...(dev ? this.staleness(dev) : { stale: true, effective_coverage: "unknown", coverage_note: "device revoked or unknown" }) };
+    });
+    const now = this.iso();
+    const expired = String(g.expires_at) <= now;
+    const anyApplied = devices.some((d) => d.state === "applied" || d.state === "trial");
+    const state = g.revoked_at ? "revoked" : expired ? "expired" : devices.some((d) => d.state === "rejected" || d.state === "rolled_back") && !anyApplied ? "rejected" : anyApplied ? "active" : "pending";
+    return {
+      id: String(g.id),
+      kind: String(g.kind),
+      state,
+      device_id: g.device_id ?? null,
+      session_id: g.session_id ?? null,
+      destination: String(g.destination),
+      transport: String(g.transport),
+      port: g.port === null ? null : Number(g.port),
+      created_at: String(g.created_at),
+      created_by: String(g.created_by),
+      expires_at: String(g.expires_at),
+      revoked_at: g.revoked_at ?? null,
+      revision: rev,
+      authorized_by: rev === null ? null : ((this.db.prepare("SELECT authorized_by FROM policy_revisions WHERE revision = ?").get(rev) as { authorized_by: string | null } | undefined)?.authorized_by ?? null),
+      incident_id: g.incident_id ?? null,
+      devices,
+      server_time: now,
+      note: "active means an endpoint receipt names a revision that carries this grant; it is not independent proof of every packet verdict.",
+    };
   }
 
   /**
@@ -570,6 +628,7 @@ export class Controller {
     const devices = this.devices();
     const open = this.db.prepare("SELECT COUNT(*) AS n FROM incidents WHERE state = 'open'").get() as { n: number };
     return {
+      server_time: this.iso(),
       revision: this.currentRevision()?.revision ?? null,
       devices: devices.map((d) => ({ id: d.id, name: d.name, platform: d.platform, coverage: d.coverage, effective_coverage: d.effective_coverage, stale: d.stale, last_seen_at: d.last_seen_at, last_revision: d.last_revision })),
       open_incidents: open.n,
