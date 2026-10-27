@@ -407,6 +407,8 @@ pgrep -u nobody -f "sleep 45" >/dev/null && bad "W06: a session from before the 
 status | jq -e '.activation.phase == "confirmed" and .activation.active == 8 and .activation.durability == "durable" and .activation.replay_high_water >= 8' >/dev/null \
   && ok "W06: activation journal reports confirmed revision 8, durable, high-water >= 8" || bad "W06: activation status ($(status | jq -c .activation))"
 
+expect "lab-deny still blocked after restart" blocked "$(launch lab-deny tcp4_8080)"
+
 # --- W06: disk full on a real filesystem ------------------------------------------------------------------------
 # The state directory moves to a small tmpfs; the daemon is paused while the snapshot is queued and the disk filled,
 # so the first durable step (the journal intent) meets ENOSPC.
@@ -434,7 +436,6 @@ start_daemon
 wait_for '.revision == 9 and .activation.phase == "confirmed"' && ok "W06: restart after the disk-full episode: revision 9, confirmed" || bad "W06: restart after disk full"
 kill "$DAEMON_PID"; wait "$DAEMON_PID" 2>/dev/null || true; DAEMON_PID=""
 umount "$SMALL"; S="$S_FULL"
-expect "lab-deny still blocked after restart" blocked "$(launch lab-deny tcp4_8080)"
 
 # --- spool ------------------------------------------------------------------------------------------------------
 SP=$(cat "$S"/spool/seg-*.jsonl)
