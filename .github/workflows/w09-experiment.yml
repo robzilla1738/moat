@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Install bpftrace, jq, python venv
         run: sudo apt-get update -qq && sudo apt-get install -y -qq bpftrace jq python3-venv
       - name: Host facts
@@ -26,7 +26,7 @@ jobs:
       - name: Collect
         if: always()
         run: sudo chmod -R a+r /tmp/w09-out || true
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
           name: w09-results

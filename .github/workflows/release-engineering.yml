@@ -1,0 +1,74 @@
+name: release-engineering
+# W15 groundwork (MASTER_ROADMAP §15.4, §17): pinned actions, dependency licence report with a copyleft gate,
+# and the release manifest generated from the claim ledger. Artifacts are uploaded on every run; nothing is published.
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  actions-pinned:
+    name: every third-party action is pinned to a commit SHA
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - run: python3 release/check-actions-pinned.py .github/workflows
+      - name: negative control (an unpinned reference must fail)
+        run: |
+          d=$(mktemp -d); printf 'jobs:\n  x:\n    steps:\n      - uses: actions/checkout@v4\n' > "$d/x.yml"
+          if python3 release/check-actions-pinned.py "$d"; then echo "checker passed an unpinned action"; exit 1; fi
+
+  licenses:
+    name: dependency licence report (cargo-deny + license-checker), no GPL in Apache components
+    runs-on: ubuntu-latest
+    env:
+      CARGO_DENY_VERSION: "0.20.2"
+      CARGO_DENY_SHA256: "9f12ed4c49936e09b48bf862b595cde2fe64fcbd9d74dfacac6131ca824c8d5f" # x86_64-unknown-linux-musl
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+      - name: install cargo-deny (release binary, checksum verified)
+        run: |
+          f=cargo-deny-$CARGO_DENY_VERSION-x86_64-unknown-linux-musl
+          curl -sSfL -o /tmp/cd.tgz https://github.com/EmbarkStudios/cargo-deny/releases/download/$CARGO_DENY_VERSION/$f.tar.gz
+          echo "$CARGO_DENY_SHA256  /tmp/cd.tgz" | sha256sum -c -
+          tar xzf /tmp/cd.tgz -C /tmp && sudo install /tmp/$f/cargo-deny /usr/local/bin/cargo-deny
+      - name: cargo deny check (licence allowlist, sources, wildcards)
+        run: cargo deny check licenses bans sources
+      - name: licence gate self-test (negative controls)
+        run: python3 release/license-gate.py --self-test
+      - name: reports
+        run: |
+          mkdir -p dist
+          cargo deny list -f json -l crate > dist/cargo-licenses.json
+          npm ci --ignore-scripts --no-audit --no-fund
+          # All npm packages, dev included (stricter; --production lists nothing in a workspace root). The gate also
+          # fails if any package in package-lock.json is missing from the report, so it cannot pass vacuously.
+          npx --yes license-checker@25.0.1 --json > dist/npm-licenses.json
+          python3 release/license-gate.py --cargo dist/cargo-licenses.json --npm dist/npm-licenses.json --npm-lock package-lock.json --out dist/license-report.md
+          # negative control: an empty npm report must fail the coverage check, not pass vacuously
+          echo '{}' > /tmp/empty.json
+          if python3 release/license-gate.py --cargo dist/cargo-licenses.json --npm /tmp/empty.json --npm-lock package-lock.json --out /tmp/x.md 2>/dev/null; then echo "gate passed an empty npm report"; exit 1; fi
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: license-report
+          path: dist/
+
+  manifest:
+    name: release manifest from the claim ledger
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0 # ancestry decides whether a claim was tested on a commit this build contains
+      - run: python3 release/manifest.py --commit "${{ github.event.pull_request.head.sha || github.sha }}" --out-dir dist
+      - run: cat dist/release-manifest.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-manifest
+          path: dist/

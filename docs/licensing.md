@@ -25,8 +25,15 @@ are marked in source, e.g. `core/moat-core/src/authority.rs` (producer authority
 ## Third-party dependencies
 
 Rust crates and npm packages are pulled through `Cargo.lock` / `package-lock.json` under their own permissive
-licenses (MIT / Apache-2.0 / BSD / ISC). Before a binary release, generate an SBOM and a license report (`cargo
-about` / `license-checker`) and ship them with the release; this is tracked in [STATUS.md](STATUS.md).
+licenses (MIT / Apache-2.0 / BSD / ISC). CI generates the dependency licence report on every push
+(`release-engineering` workflow, artifact `license-report`): `cargo deny check licenses` against the allowlist in
+`deny.toml` and `license-checker` for npm, then `release/license-gate.py`, which **fails on GPL, AGPL or LGPL
+without a permissive alternative, or on a missing licence**, in any dependency of the Apache-2.0 components. The
+report ships with each release. A full SBOM is not generated yet.
+
+A future BPF program for Linux app enforcement would need a GPL-compatible licence string to use GPL-only kernel
+helpers; it would be a separate artifact under `linux/bpf/`, not linked into the Apache crates, and needs a licensing
+decision before it ships ([W10 loader decision](decisions/W10-increment-3-loader.md)).
 
 ## Commercial options
 

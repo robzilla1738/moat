@@ -1,4 +1,5 @@
 [package]
+publish = false
 name = "moatd"
 description = "Moat Linux endpoint: nftables enforcement, cgroup v2 protected sessions, event spool"
 version.workspace = true

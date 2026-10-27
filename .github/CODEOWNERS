@@ -1,0 +1,41 @@
+# Code ownership around Moat's trust boundaries (MASTER_ROADMAP §17.3). Changes here need the owner's review.
+# Robert is the only maintainer today; the point of listing these is that a change to them is never routine.
+# Turn on "Require review from Code Owners" in the branch ruleset for this file to have effect.
+
+# Signer: owner/team policy authorization and snapshot signing
+/core/moat-core/src/signing.rs               @robzilla1738
+/controller/src/signer.ts                    @robzilla1738
+/controller/src/signer-service.ts            @robzilla1738
+/controller/src/crypto.ts                    @robzilla1738
+/macos/MoatKit/Sources/MoatKit/OwnerSigner.swift @robzilla1738
+
+# Policy compiler and structured diff (what an approval actually authorizes)
+/core/moat-core/src/compile.rs               @robzilla1738
+/core/moat-core/src/diff.rs                  @robzilla1738
+/core/moat-core/src/policy.rs                @robzilla1738
+/core/moat-core/src/grants.rs                @robzilla1738
+/core/moat-core/src/revision.rs              @robzilla1738
+
+# Privileged launcher and session boundary (Linux)
+/linux/moatd/src/launch.rs                   @robzilla1738
+/linux/moatd/src/bin/moat-launch.rs          @robzilla1738
+/linux/moatd/src/cgroup.rs                   @robzilla1738
+/linux/moatd/src/caller.rs                   @robzilla1738
+/linux/moatd/src/nft.rs                      @robzilla1738
+/linux/moatd/src/proxy.rs                    @robzilla1738
+/linux/packaging/                            @robzilla1738
+
+# Native control APIs
+/linux/moatd/src/control.rs                  @robzilla1738
+/linux/moatd/src/server.rs                   @robzilla1738
+/core/moat-ffi/                              @robzilla1738
+/macos/MoatKit/Sources/MoatKit/Control.swift @robzilla1738
+/macos/MoatKit/Sources/CMoatFFI/             @robzilla1738
+/macos/Moat/Extension/                       @robzilla1738
+
+# Claims, release and supply chain
+/docs/claim-ledger.json                      @robzilla1738
+/deny.toml                                   @robzilla1738
+/release/                                    @robzilla1738
+/.github/                                    @robzilla1738
+/macos/scripts/release.sh                    @robzilla1738

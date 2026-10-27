@@ -8,6 +8,9 @@ The machine-readable source is [`claim-ledger.json`](claim-ledger.json). A test
 (`core/moat-core/tests/claim_ledger.rs`) fails CI if a claim is marked supported without installed or
 real-workflow evidence, if a claim cites a defect that does not exist, or if this page leaves a claim out.
 
+Supported platforms and end-of-support rules: [support-matrix.md](support-matrix.md). Per-build test coverage:
+the release manifest artifact of the `release-engineering` workflow.
+
 ## How to read a claim
 
 | Field | Meaning |

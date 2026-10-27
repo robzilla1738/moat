@@ -1,4 +1,5 @@
 [package]
+publish = false
 name = "moat-ffi"
 description = "C ABI over moat-core for the macOS app and Network Extension (JSON in, JSON out)"
 version.workspace = true

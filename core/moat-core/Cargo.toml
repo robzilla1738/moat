@@ -1,4 +1,5 @@
 [package]
+publish = false
 name = "moat-core"
 description = "Moat shared policy, capability, snapshot and attribution core"
 version.workspace = true
