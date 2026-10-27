@@ -97,7 +97,7 @@ Unit tests are Rust test function names.
 | Concurrent publication | ci (ci-node) | controller `grants.test.ts` journaled publication (Lane B, #15) | |
 | Lost signer response | ci (unit + ci-node) | `retried_request_keeps_the_original_expiry`; controller signer journal tests (Lane B) | |
 | Partial rollout | ci (unit) | `summary_lists_unacknowledged` | Real two-endpoint rollout: device (W13). |
-| Offline local change | ci (ci-netns) | netns `local disable recorded`, `resume re-enforces last policy`, `restart restores last valid policy offline` | |
+| Offline local change | ci (unit + ci-netns) | netns `local disable recorded`, `resume re-enforces last policy`, `restart restores last valid policy offline`; `local_owner_revisions_are_reported_as_local_changes_until_the_fleet_supersedes_them` | Endpoint reports `local_change` (W13); controller hold is Lane B; no real two-endpoint run. |
 
 ## Updates
 
@@ -117,7 +117,7 @@ Unit tests are Rust test function names.
 | Sensor map / queue limits | ci (unit + ci-netns) | `missed_short_lived_connections_are_counted_never_silent`, `unreadable_tables_are_reported`; W09 overload scenario (artifact) | |
 | Proxy exhaustion | ci (unit) | `exhaustion_refuses_and_reports_rather_than_bypassing` | |
 | Slow disk | gap | none | Lane A: fault store with injected latency. |
-| Log quota | ci (unit) | `quota_drops_and_records_gap`, `unexplained_gap_detection` | |
+| Log quota | ci (unit + ci-netns) | `quota_evicts_the_oldest_unacknowledged_segment_with_an_exact_gap`, `acknowledged_segments_go_first_and_need_no_gap`, `an_event_that_cannot_fit_is_dropped_with_a_gap`, `unexplained_gap_detection`, netns `W13: an acknowledgement beyond what was written is refused` | Bounded by --spool-mib; eviction and drops leave exact gap records. |
 | Notification floods | gap | none | Lane B (UI/controller). |
 
 ## Compatibility
