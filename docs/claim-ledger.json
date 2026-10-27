@@ -1388,9 +1388,13 @@
     {
       "family": "Load",
       "case": "Notification floods",
-      "status": "gap",
-      "environments": [],
-      "tests": []
+      "status": "ci",
+      "environments": [
+        "ci-node"
+      ],
+      "tests": [
+        "notification-floods.test.ts"
+      ]
     },
     {
       "family": "Compatibility",

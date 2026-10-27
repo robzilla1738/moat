@@ -136,7 +136,7 @@ export class DkFeed {
 
   health() {
     const s = this.db.prepare("SELECT * FROM dk_feed_state WHERE name = 'dk'").get() as Record<string, unknown>;
-    return { ...s, cursor: this.cursor("dk"), intent_cursor: this.cursor("dk-intent"), backlog: (this.db.prepare("SELECT COUNT(*) AS n FROM incident_log WHERE seq > ? AND type IN ('raised','occurrence','reopened')").get(this.cursor("dk")) as { n: number }).n };
+    return { ...s, cursor: this.cursor("dk"), intent_cursor: this.cursor("dk-intent"), backlog: (this.db.prepare("SELECT COUNT(*) AS n FROM incident_log WHERE seq > ? AND type IN ('raised','occurrence','reopened','recurred')").get(this.cursor("dk")) as { n: number }).n };
   }
 
   due(): boolean {
@@ -154,7 +154,7 @@ export class DkFeed {
     const assets = new Set(producerRegistration(this.db).asset_ids);
     const cur = this.cursor("dk");
     const icur = this.cursor("dk-intent");
-    const rows = this.db.prepare("SELECT l.seq, i.* FROM incident_log l JOIN incidents i ON i.id = l.incident_id WHERE l.seq > ? AND l.type IN ('raised','occurrence','reopened') ORDER BY l.seq LIMIT ?").all(cur, limit) as unknown as (IncidentRow & { seq: number })[];
+    const rows = this.db.prepare("SELECT l.seq, i.* FROM incident_log l JOIN incidents i ON i.id = l.incident_id WHERE l.seq > ? AND l.type IN ('raised','occurrence','reopened','recurred') ORDER BY l.seq LIMIT ?").all(cur, limit) as unknown as (IncidentRow & { seq: number })[];
     const srows = this.db.prepare("SELECT rowid AS rid, id, device_id, profile, started_at, intent FROM sessions WHERE rowid > ? AND intent IS NOT NULL ORDER BY rowid LIMIT ?").all(icur, limit) as unknown as SessionRow[];
     const candidates = [...rows.map(toDkEvent), ...srows.map(intentEvent)].filter((e): e is DkEvent => !!e);
     const dropped: string[] = [];
