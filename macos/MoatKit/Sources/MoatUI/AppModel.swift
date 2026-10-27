@@ -3,26 +3,49 @@ import MoatKit
 import SwiftUI
 
 public enum Screen: String, CaseIterable, Identifiable {
-    case overview, activity, policy, coverage, recovery
+    // Sidebar (MASTER_ROADMAP §9.1): Apps is the primary workspace.
+    case apps, activity, tasks, rules, devices, coverage
+    // Reached from those screens.
+    case appDetail, whatChanged
     public var id: String { rawValue }
 
-    var title: String {
-        switch self {
-        case .overview: return "Overview"
-        case .activity: return "Activity"
-        case .policy: return "Policy"
-        case .coverage: return "Coverage"
-        case .recovery: return "Recovery"
+    public static let sidebar: [Screen] = [.apps, .activity, .tasks, .rules, .devices, .coverage]
+
+    /// Launch-argument names, including the pre-W12 ones the screenshot script used.
+    public static func named(_ s: String) -> Screen? {
+        switch s {
+        case "overview": return .apps
+        case "policy": return .rules
+        case "recovery": return .coverage
+        default: return Screen(rawValue: s)
         }
     }
 
+    func title(deviceCount: Int = 1) -> String {
+        switch self {
+        case .apps: return "Apps"
+        case .activity: return "Activity"
+        case .tasks: return "Tasks"
+        case .rules: return "Rules"
+        case .devices: return deviceCount <= 1 ? "This computer" : "Devices"
+        case .coverage: return "Coverage & recovery"
+        case .appDetail: return "App"
+        case .whatChanged: return "What changed?"
+        }
+    }
+
+    var title: String { title() }
+
     var symbol: String {
         switch self {
-        case .overview: return "house"
+        case .apps: return "square.grid.2x2"
         case .activity: return "waveform.path.ecg"
-        case .policy: return "doc.text.magnifyingglass"
-        case .coverage: return "shield.lefthalf.filled"
-        case .recovery: return "lifepreserver"
+        case .tasks: return "terminal"
+        case .rules: return "doc.text.magnifyingglass"
+        case .devices: return "laptopcomputer"
+        case .coverage: return "lifepreserver"
+        case .appDetail: return "app.badge"
+        case .whatChanged: return "arrow.left.arrow.right"
         }
     }
 }
@@ -35,15 +58,66 @@ public final class AppModel: ObservableObject {
     @Published public var lastError: String?
     @Published public var notice: String?
     @Published public var busy = false
-    @Published public var screen: Screen = .overview
+    @Published public var screen: Screen = .apps
+    /// The app shown by `.appDetail` (an `AppSummary.id`).
+    @Published public var selectedAppID: String?
+    /// Devices this Mac knows about. A standalone Mac is one device: the sidebar says "This computer".
+    @Published public var deviceCount = 1
+    /// First-ten-minutes owner actions the app records (evidence for the checklist; never inferred from views).
+    @Published public var choseMode = false
+    @Published public var sawRecoveryCard = false
+    @Published public var trialDenyHost: String?
+    @Published public var trialUndone = false
+    /// The local owner signer (Keychain + user presence). Nil in demo/screenshot runs that must not touch the Keychain.
+    public var ownerSigner: OwnerSigner?
+    @Published public var lastAuthorization: OwnerAuthorization?
     public let client: ControlClient
     public let isDemo: Bool
 
-    public init(client: ControlClient, isDemo: Bool = false, screen: Screen = .overview) {
+    public init(client: ControlClient, isDemo: Bool = false, screen: Screen = .apps, ownerSigner: OwnerSigner? = nil) {
         self.client = client
         self.isDemo = isDemo
         self.screen = screen
+        self.ownerSigner = ownerSigner
     }
+
+    public var apps: [AppSummary] { AppSummary.from(flows) }
+    public var selectedApp: AppSummary? { apps.first { $0.id == selectedAppID } }
+    public var firstTen: FirstTenMinutes {
+        FirstTenMinutes.evaluate(status: status, flows: flows, stale: isStale, choseMode: choseMode, deniedHost: trialDenyHost, undone: trialUndone, sawRecovery: sawRecoveryCard)
+    }
+
+    public func open(app id: String) {
+        selectedAppID = id
+        screen = .appDetail
+    }
+
+    /// Owner-authorize a narrow local rule plan with the Keychain key (OS user presence). The authorization is shown
+    /// and kept for audit; applying it needs a compiled snapshot (see `standaloneApplyUnavailable`).
+    public func authorize(_ plan: LocalRulePlan, now: Date = Date()) async {
+        let problems = plan.problems(now: now)
+        guard problems.isEmpty else {
+            lastError = problems.joined(separator: " ")
+            return
+        }
+        guard let signer = ownerSigner else {
+            lastError = "No local owner key is available in this run."
+            return
+        }
+        do {
+            if signer.keyID == nil { try signer.createKey() }
+            let id = "local-\(Int(now.timeIntervalSince1970))"
+            lastAuthorization = try await signer.authorize(plan.ownerPlan(id: id))
+            notice = "Authorized with your owner key \(signer.keyID ?? ""). \(Self.standaloneApplyUnavailable)"
+            lastError = nil
+        } catch {
+            lastError = "\(error)"
+        }
+    }
+
+    /// Why a locally authorized rule is not yet enforced on its own: compiling a snapshot needs moat-core's compiler
+    /// in the app (moat-ffi has verify/evaluate/parse only). Shown verbatim; never replaced by a pretend success.
+    public static let standaloneApplyUnavailable = "Enforcing it from this Mac alone needs the policy compiler in the app, which is not available yet; apply it through your controller or with moatctl."
 
     /// True when `lastError` came from failing to reach the extension (cleared by the next good refresh).
     /// Errors from an owner action stay visible until dismissed.

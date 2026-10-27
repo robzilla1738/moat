@@ -16,7 +16,7 @@ struct OverviewScreen: View {
             let observed = model.flows.filter { $0.decision.isObservation }.count
             VStack(alignment: .leading, spacing: 20) {
                 if !heroShown {
-                    ScreenHeader(eyebrow: "This Mac", title: OverviewHero.headline(s), dim: s.coverage.claim)
+                    ScreenHeader(eyebrow: "This computer", title: OverviewHero.headline(s), dim: s.coverage.claim)
                 }
                 HStack(spacing: 12) {
                     Stat(label: "Flows seen", value: "\(s.flowsSeen)", sub: "since the filter started")
@@ -35,7 +35,7 @@ struct OverviewScreen: View {
                                     .foregroundStyle(p.muted).font(.callout)
                             }
                             Spacer()
-                            MoatButton(title: "Open Recovery", systemImage: "lifepreserver", kind: .danger) { model.screen = .recovery }
+                            MoatButton(title: "Open Recovery", systemImage: "lifepreserver", kind: .danger) { model.screen = .coverage }
                         }
                     }
                 }

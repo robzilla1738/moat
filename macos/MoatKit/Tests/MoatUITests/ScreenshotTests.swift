@@ -45,13 +45,13 @@ final class ScreenshotTests: XCTestCase {
     }
 
     func testIsolatedStateRenders() throws {
-        try render(ScreenContent(model: model(.overview, isolated: true)).padding(28), .dark, width: 1040, height: 900, name: "overview-isolated-dark")
-        try render(ScreenContent(model: model(.recovery, isolated: true)).padding(28), .light, width: 1040, height: 900, name: "recovery-isolated-light")
+        try render(ScreenContent(model: model(.apps, isolated: true)).padding(28), .dark, width: 1040, height: 900, name: "apps-isolated-dark")
+        try render(ScreenContent(model: model(.coverage, isolated: true)).padding(28), .light, width: 1040, height: 900, name: "coverage-isolated-light")
     }
 
     func testMenuBarPanelRenders() throws {
-        try render(MenuBarContent(model: model(.overview), openMain: {}), .dark, width: 348, height: 520, name: "menubar-dark")
-        try render(MenuBarContent(model: model(.overview, isolated: true), openMain: {}), .light, width: 348, height: 520, name: "menubar-isolated-light")
+        try render(MenuBarContent(model: model(.apps), openMain: {}), .dark, width: 348, height: 520, name: "menubar-dark")
+        try render(MenuBarContent(model: model(.apps, isolated: true), openMain: {}), .light, width: 348, height: 520, name: "menubar-isolated-light")
     }
 
     func testOnboardingStepsRender() throws {
@@ -59,6 +59,36 @@ final class ScreenshotTests: XCTestCase {
         for step in OnboardingStep.allCases {
             try render(OnboardingView(state: state, step: step, finish: {}), .dark, width: 640, height: 600, name: "onboarding-\(step)")
         }
+    }
+
+    func testAppDetailAndWhatChangedRender() throws {
+        let m = model(.appDetail)
+        m.selectedAppID = m.apps.first?.id
+        XCTAssertNotNil(m.selectedApp, "demo flows produce app identities")
+        try render(ScreenContent(model: m).padding(28), .dark, width: 1040, height: 1400, name: "appDetail-selected-dark")
+        m.screen = .whatChanged
+        try render(ScreenContent(model: m).padding(28), .light, width: 1040, height: 900, name: "whatChanged-light")
+    }
+
+    func testSidebarIsAppsFirstAndSaysThisComputer() {
+        XCTAssertEqual(Screen.sidebar, [.apps, .activity, .tasks, .rules, .devices, .coverage])
+        XCTAssertEqual(Screen.devices.title(deviceCount: 1), "This computer")
+        XCTAssertEqual(Screen.devices.title(deviceCount: 3), "Devices")
+        XCTAssertEqual(Screen.coverage.title, "Coverage & recovery")
+        XCTAssertEqual(Screen.named("overview"), .apps)
+        XCTAssertEqual(Screen.named("recovery"), .coverage)
+    }
+
+    func testAuthorizingWithoutAnOwnerKeyIsRefusedNotFaked() async {
+        let m = model(.appDetail)
+        guard let app = m.apps.first(where: { $0.identityKnown }) else { return XCTFail("no known app") }
+        let plan = LocalRulePlan(action: .deny, app: app, host: app.destinations[0].host, port: app.destinations[0].port, expires: Date().addingTimeInterval(600))
+        await m.authorize(plan)
+        XCTAssertNil(m.lastAuthorization)
+        XCTAssertNotNil(m.lastError)
+        let wide = LocalRulePlan(action: .allow, app: app, host: "*", port: 443, expires: Date().addingTimeInterval(600))
+        await m.authorize(wide)
+        XCTAssertTrue(m.lastError?.contains("wildcards") ?? false)
     }
 
     func testHeroHeadlinesAreNarrowClaims() {

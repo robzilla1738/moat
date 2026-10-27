@@ -8,7 +8,7 @@ import SwiftUI
 struct LaunchOptions {
     var demo = false
     var isolated = false
-    var screen: Screen = .overview
+    var screen: Screen = .apps
     /// "menubar" or "onboarding" render that surface in the main window for a screenshot.
     var special: String?
     var onboardingStep: OnboardingStep = .coverage
@@ -27,7 +27,7 @@ struct LaunchOptions {
         o.demo = args.contains("--demo")
         o.isolated = args.contains("--isolated")
         if let s = value("--screen") {
-            if let sc = Screen(rawValue: s) { o.screen = sc } else { o.special = s }
+            if let sc = Screen.named(s) { o.screen = sc } else { o.special = s }
         }
         if let st = value("--onboarding-step"), let step = OnboardingStep.allCases.first(where: { "\($0)" == st }) { o.onboardingStep = step }
         switch value("--appearance") {
@@ -54,7 +54,9 @@ struct MoatApp: App {
         self.launch = launch
         let service = Bundle.main.object(forInfoDictionaryKey: "MoatMachServiceName") as? String ?? ""
         let client: ControlClient = launch.demo ? DemoControlClient(isolated: launch.isolated) : XPCControlClient(machServiceName: service)
-        _model = StateObject(wrappedValue: AppModel(client: client, isDemo: launch.demo, screen: launch.screen))
+        // The local owner key lives in the Keychain behind user presence; demo and screenshot runs never touch it.
+        let signer: OwnerSigner? = launch.demo || launch.screenshotMode ? nil : OwnerSigner(store: KeychainOwnerKeyStore(), presence: LocalAuthenticationPresence())
+        _model = StateObject(wrappedValue: AppModel(client: client, isDemo: launch.demo, screen: launch.screen, ownerSigner: signer))
         if launch.screenshotMode {
             NotificationCenter.default.addObserver(forName: NSApplication.didFinishLaunchingNotification, object: nil, queue: .main) { _ in
                 ScreenshotReporter.report(launch)
