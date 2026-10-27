@@ -45,6 +45,8 @@ integrity() {
   if (cd "$scratch" && sha256sum --strict -c SHA256SUMS >/dev/null 2>&1); then bad "negative control: a tampered $victim passed SHA256SUMS"; else ok "negative control: a tampered $victim fails SHA256SUMS"; fi
 
   local ident="^https://github\\.com/${REPO_SLUG//./\\.}/\\.github/workflows/release\\.yml@refs/(heads/main|tags/v[0-9].*)\$"
+  # CI pins the exact ref it signed from (MOAT_DRILL_EXPECT_REF=github.ref): exact identity, not a pattern.
+  [[ -n "${MOAT_DRILL_EXPECT_REF:-}" ]] && ident="^https://github\\.com/${REPO_SLUG//./\\.}/\\.github/workflows/release\\.yml@${MOAT_DRILL_EXPECT_REF//./\\.}\$"
   if command -v cosign >/dev/null && [[ -f "$dir/SHA256SUMS.sigstore.json" ]]; then
     if cosign verify-blob --bundle "$dir/SHA256SUMS.sigstore.json" --certificate-identity-regexp "$ident" \
          --certificate-oidc-issuer https://token.actions.githubusercontent.com "$dir/SHA256SUMS" >/dev/null 2>&1; then
