@@ -21,12 +21,12 @@ public struct RootView: View {
         } detail: {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    if model.screen == .overview, let s = model.status {
+                    if model.screen == .apps, let s = model.status {
                         OverviewHero(status: s)
                     }
-                    ScreenContent(model: model, heroShown: model.screen == .overview && model.status != nil)
+                    ScreenContent(model: model, heroShown: model.screen == .apps && model.status != nil)
                         .padding(.horizontal, 32)
-                        .padding(.top, model.screen == .overview ? 22 : 8)
+                        .padding(.top, model.screen == .apps ? 22 : 8)
                         .padding(.bottom, 40)
                         .frame(maxWidth: 1040, alignment: .leading)
                 }
@@ -34,7 +34,7 @@ public struct RootView: View {
             }
             .moatScrollEdge()
             .background(Backdrop())
-            .navigationTitle(model.screen.title)
+            .navigationTitle(model.screen.title(deviceCount: model.deviceCount))
             .toolbar { toolbar }
         }
         .environment(\.palette, p)
@@ -62,7 +62,7 @@ public struct RootView: View {
             .help("Ask the filter for its current status")
             if model.status?.isolation.active == true {
                 Button {
-                    model.screen = .recovery
+                    model.screen = .coverage
                 } label: {
                     Label("Isolated", systemImage: "lock.shield.fill")
                 }
@@ -134,11 +134,14 @@ public struct ScreenContent: View {
         VStack(alignment: .leading, spacing: 22) {
             Banner(model: model)
             switch model.screen {
-            case .overview: OverviewScreen(model: model, heroShown: heroShown)
+            case .apps: AppsScreen(model: model, heroShown: heroShown)
             case .activity: ActivityScreen(model: model)
-            case .policy: PolicyScreen(model: model)
-            case .coverage: CoverageScreen(model: model)
-            case .recovery: RecoveryScreen(model: model)
+            case .tasks: TasksScreen(model: model)
+            case .rules: PolicyScreen(model: model)
+            case .devices: ThisComputerScreen(model: model)
+            case .coverage: CoverageRecoveryScreen(model: model)
+            case .appDetail: AppDetailScreen(model: model)
+            case .whatChanged: WhatChangedScreen(model: model)
             }
         }
     }
@@ -149,22 +152,13 @@ struct Sidebar: View {
     @Environment(\.palette) private var p
 
     private var selection: Binding<Screen?> {
-        Binding(get: { model.screen }, set: { if let s = $0 { model.screen = s } })
+        // Detail screens keep their parent highlighted in the sidebar.
+        Binding(get: { model.screen == .appDetail || model.screen == .whatChanged ? .apps : model.screen }, set: { if let s = $0 { model.screen = s } })
     }
 
     var body: some View {
         List(selection: selection) {
-            Section("Monitor") {
-                row(.overview)
-                row(.activity)
-            }
-            Section("Control") {
-                row(.policy)
-                row(.recovery)
-            }
-            Section("Trust") {
-                row(.coverage)
-            }
+            ForEach(Screen.sidebar) { row($0) }
         }
         .listStyle(.sidebar)
         .safeAreaInset(edge: .top, spacing: 0) {
@@ -172,7 +166,7 @@ struct Sidebar: View {
                 AppMark(size: 30)
                 VStack(alignment: .leading, spacing: 0) {
                     Text("Moat").font(.headline)
-                    Text("This Mac").font(.caption).foregroundStyle(p.muted)
+                    Text(model.deviceCount <= 1 ? "This computer" : "\(model.deviceCount) devices").font(.caption).foregroundStyle(p.muted)
                 }
                 Spacer()
             }
@@ -202,9 +196,9 @@ struct Sidebar: View {
     private func row(_ s: Screen) -> some View {
         Label {
             HStack {
-                Text(s.title)
+                Text(s.title(deviceCount: model.deviceCount))
                 Spacer()
-                if s == .recovery, model.status?.isolation.active == true {
+                if s == .coverage, model.status?.isolation.active == true {
                     Circle().fill(p.red).frame(width: 7, height: 7).accessibilityLabel("isolation on")
                 }
                 if s == .activity, let n = model.status?.flowsDenied, n > 0 {

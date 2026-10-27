@@ -47,6 +47,38 @@ final class MoatCoreTests: XCTestCase {
         XCTAssertEqual(f4.kind, "malformed")
     }
 
+    /// Issue #26: a snapshot compiled for named devices only installs on a listed device that says who it is.
+    func testDeviceTargetedSnapshotNeedsThisEndpointsDeviceID() throws {
+        let signed = try fixture("signed-mac-targeted-r9.json")
+        let key = String(decoding: try fixture("targeted-key.pub"), as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+        let mine = CoreVerifier(trust: TrustConfig(keys: [key]), deviceID: "mbp-m1").verify(signed: signed, lastApplied: nil, now: Date())
+        XCTAssertEqual(try mine.get().summary.revision, 9)
+        guard case let .failure(other) = CoreVerifier(trust: TrustConfig(keys: [key]), deviceID: "mbp-air").verify(signed: signed, lastApplied: nil, now: Date()) else {
+            return XCTFail("a snapshot targeted at mbp-m1 installed on mbp-air")
+        }
+        XCTAssertEqual(other.kind, "wrong_device")
+        guard case let .failure(anon) = CoreVerifier(trust: TrustConfig(keys: [key])).verify(signed: signed, lastApplied: nil, now: Date()) else {
+            return XCTFail("a device-targeted snapshot installed on an endpoint that did not say which device it is")
+        }
+        XCTAssertEqual(anon.kind, "wrong_device")
+    }
+
+    /// The rule material a standalone LocalRulePlan adds is valid moat.policy.v1 for the Rust core.
+    func testLocalRulePlanTOMLParsesInTheCore() throws {
+        let home = try String(contentsOf: Self.repoRoot.appendingPathComponent("conformance/policies/home.toml"), encoding: .utf8)
+        let r = FlowRecord(
+            seq: 1,
+            facts: FlowFacts(signingID: "com.example.app", teamID: "T1", remoteHost: "api.example.com", remoteIP: "203.0.113.1", remotePort: 443, transport: .tcp, at: Date()),
+            decision: FlowDecision(verdict: .allow, source: .policy, summary: "allowed", ruleID: nil, policyRevision: 1),
+            measurement: .unknown)
+        let app = AppSummary.from([r])[0]
+        let plan = LocalRulePlan(action: .deny, app: app, host: "api.example.com", port: 443, expires: Date().addingTimeInterval(900))
+        let policy = try MoatCore.parsePolicy(toml: home + "\n" + plan.ruleTOML(id: "local-test-1") + "\n")
+        let obj = try JSONSerialization.jsonObject(with: policy) as? [String: Any]
+        let rule = (obj?["rules"] as? [[String: Any]])?.first { $0["id"] as? String == "local-test-1" }
+        XCTAssertEqual((rule?["provenance"] as? [String: Any])?["kind"] as? String, "owner_action")
+    }
+
     func testRevokedKeyRejected() throws {
         let v = CoreVerifier(trust: TrustConfig(keys: [try pubKey()], revokedKeyIDs: ["8ae0a554c646084c"]))
         guard case let .failure(f) = v.verify(signed: try fixture("signed-r7.json"), lastApplied: nil, now: Date()) else { return XCTFail() }

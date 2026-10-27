@@ -53,9 +53,13 @@ public enum MoatCore {
 /// `SnapshotVerifier` backed by moat-core: signature, platform (macOS), replay, expiry and schema checks.
 public struct CoreVerifier: SnapshotVerifier {
     public var trust: TrustConfig
+    /// This endpoint's device id. moat-core refuses a device-targeted snapshot (compiled for named devices only,
+    /// issue #26) unless the endpoint says which device it is and that device is listed.
+    public var deviceID: String?
 
-    public init(trust: TrustConfig) {
+    public init(trust: TrustConfig, deviceID: String? = nil) {
         self.trust = trust
+        self.deviceID = deviceID
     }
 
     public func verify(signed: Data, lastApplied: UInt64?, now: Date) -> Result<VerifiedSnapshot, VerificationFailure> {
@@ -70,6 +74,7 @@ public struct CoreVerifier: SnapshotVerifier {
             "platform": "macos",
         ]
         if let lastApplied { req["last_applied"] = lastApplied }
+        if let deviceID, !deviceID.isEmpty { req["device_id"] = deviceID }
         let r: [String: Any]
         do {
             r = try MoatCore.call(req) { moat_verify_snapshot($0) }

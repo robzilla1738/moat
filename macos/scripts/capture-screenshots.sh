@@ -12,15 +12,15 @@ mkdir -p "$OUT"
 BIN="$APP/Contents/MacOS/Moat"
 [[ -x "$BIN" ]] || { echo "no executable at $BIN"; exit 1; }
 shots=(
-  "overview dark" "overview light" "activity dark" "activity light" "policy dark" "coverage light"
-  "recovery dark" "overview-isolated light" "menubar dark" "menubar light" "onboarding dark" "onboarding light"
+  "apps dark" "apps light" "activity dark" "activity light" "rules dark" "coverage light"
+  "devices dark" "whatChanged light" "apps-isolated light" "menubar dark" "menubar light" "onboarding dark" "onboarding light"
 )
 captured=0
 for s in "${shots[@]}"; do
   read -r name appearance <<<"$s"
   args=(--demo --appearance "$appearance")
   case "$name" in
-    overview-isolated) args+=(--screen overview --isolated) ;;
+    apps-isolated) args+=(--screen apps --isolated) ;;
     *) args+=(--screen "$name") ;;
   esac
   wid="$OUT/.wid"; rm -f "$wid"
